@@ -166,7 +166,7 @@ fn malformed_provider_reasoning_replays_byte_exact_during_the_tool_exchange() {
 }
 
 #[test]
-fn reasoning_replays_only_for_the_in_flight_exchange() {
+fn reasoning_replays_with_every_assistant_turn_in_full_history() {
     let old_assistant = assistant_message(turn("old turn", "old reasoning"));
     let user = ca::AgentMessage::User {
         content: ca::UserContent::Text("new question".into()),
@@ -177,10 +177,7 @@ fn reasoning_replays_only_for_the_in_flight_exchange() {
     let wire = to_wire_messages("sys", &[old_assistant, user, live_assistant]);
 
     assert_eq!(wire.len(), 4);
-    assert_eq!(
-        wire[1].reasoning, None,
-        "reasoning from before the last user message must not replay"
-    );
+    assert_eq!(wire[1].reasoning.as_deref(), Some("old reasoning"));
     assert_eq!(wire[3].reasoning.as_deref(), Some("live reasoning"));
 }
 
@@ -236,6 +233,17 @@ fn typed_llm_failures_map_to_typed_stream_errors() {
     assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
     assert!(message.contains("data-isolation checks"));
     assert!(!message.contains("reserved_protocol_marker"));
+}
+
+#[test]
+fn tool_protocol_exhaustion_does_not_become_provider_transport_failure() {
+    let (kind, message) = stream_error(LlmError::ToolProtocolExhausted(
+        "model ignored named final_answer".into(),
+    ));
+
+    assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
+    assert!(message.starts_with(crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX));
+    assert!(!message.starts_with("provider_error:"));
 }
 
 #[test]

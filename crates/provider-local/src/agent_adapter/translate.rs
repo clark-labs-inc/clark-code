@@ -26,14 +26,7 @@ pub(crate) fn to_wire_messages(
     if !system_prompt.trim().is_empty() {
         out.push(ChatMessage::system(system_prompt));
     }
-    // Reasoning replays only for the in-flight exchange: assistant messages
-    // AFTER the latest user message (the current turn's tool loop, per the
-    // OpenAI-compatible contract for reasoning-capable models). Older reasoning is
-    // display history — replaying it across turns would balloon every prompt.
-    let last_user = messages
-        .iter()
-        .rposition(|m| matches!(m, ca::AgentMessage::User { .. }));
-    for (index, message) in messages.iter().enumerate() {
+    for message in &messages {
         match message {
             ca::AgentMessage::System { content, .. } => {
                 out.push(ChatMessage::system(content.clone()));
@@ -43,12 +36,7 @@ pub(crate) fn to_wire_messages(
             }
             ca::AgentMessage::Assistant { content, .. } => {
                 let text = content.plain_text();
-                let in_flight = last_user.is_none_or(|user| index > user);
-                let reasoning_details = if in_flight {
-                    content.reasoning_details_values()
-                } else {
-                    Vec::new()
-                };
+                let reasoning_details = content.reasoning_details_values();
                 out.push(ChatMessage {
                     role: "assistant".into(),
                     content: (!text.is_empty()).then(|| ChatContent::text(text)),
@@ -58,7 +46,8 @@ pub(crate) fn to_wire_messages(
                         .map(to_wire_tool_call)
                         .collect(),
                     tool_call_id: None,
-                    reasoning: (in_flight && reasoning_details.is_empty())
+                    reasoning: reasoning_details
+                        .is_empty()
                         .then(|| reasoning_text(content))
                         .flatten(),
                     reasoning_details,
@@ -301,6 +290,17 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
         LlmError::Provider(message) => (
             ca::stream::StreamErrorKind::Fatal,
             format!("provider_error:{message}"),
+        ),
+        // clark-agent 0.4 exposes only a generic fatal stream seam for this
+        // permanent provider-contract failure. Preserve the typed prefix for
+        // the provider-local terminal mapper instead of collapsing it into a
+        // provider or transport error.
+        LlmError::ToolProtocolExhausted(message) => (
+            ca::stream::StreamErrorKind::Fatal,
+            format!(
+                "{}{message}",
+                crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
+            ),
         ),
         LlmError::OutputQuarantined { .. } => (
             ca::stream::StreamErrorKind::Fatal,

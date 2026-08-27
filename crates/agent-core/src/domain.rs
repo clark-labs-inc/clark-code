@@ -517,6 +517,10 @@ pub enum RunFailureKind {
     /// organization, or workspace scope that is not currently bound.
     AccessScopeRequired,
     ProviderError,
+    /// Successful provider responses repeatedly failed Clark Code's required
+    /// structured-tool boundary, including its singleton named-tool repair.
+    /// This is model/provider protocol incompatibility, not slow transport.
+    ToolProtocolExhausted,
     RateLimited,
     TransportError,
     ContextOverflow,
@@ -761,6 +765,14 @@ pub enum AgentEvent {
     Checkpoint {
         run: RunId,
         id: String,
+    },
+    /// The first visible chunk of one provider-bracketed message is about to
+    /// arrive. Later chunks may be interleaved with streamed tool rows; this
+    /// boundary keeps them attached to the same message instead of whichever
+    /// timeline row happens to be last.
+    MessageStreamStarted {
+        run: RunId,
+        role: Role,
     },
     MessageChunk {
         run: RunId,

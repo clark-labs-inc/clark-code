@@ -48,6 +48,10 @@ pub enum TimelineItem {
         blocks: Vec<ContentBlock>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         phase: Option<MessagePhase>,
+        /// This provider supplied an explicit message boundary. Chunks for the
+        /// latest such message remain attached across intervening tool rows.
+        #[serde(default, skip_serializing_if = "is_false")]
+        stream_boundary: bool,
     },
     SpecialistPresentation {
         run: RunId,
@@ -398,8 +402,41 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             view.checkpoint = Some(id.clone());
         }
 
+        AgentEvent::MessageStreamStarted { run, role } => {
+            snapshot.timeline.push(TimelineItem::Message {
+                run: run.clone(),
+                role: *role,
+                blocks: Vec::new(),
+                phase: None,
+                stream_boundary: true,
+            });
+        }
+
         AgentEvent::MessageChunk { run, role, delta } => {
-            // Merge into the trailing message of the same run+role; else push.
+            // A provider-bracketed message remains the chunk target even when
+            // streamed tool arguments inserted a row after it. The next
+            // MessageStreamStarted event creates the next target explicitly.
+            if let Some(TimelineItem::Message { blocks, .. }) = snapshot
+                .timeline
+                .iter_mut()
+                .rev()
+                .find(|item| {
+                    matches!(
+                        item,
+                        TimelineItem::Message {
+                            run: message_run,
+                            role: message_role,
+                            stream_boundary: true,
+                            ..
+                        } if message_run == run && message_role == role
+                    )
+                })
+            {
+                merge_block(blocks, delta);
+                return;
+            }
+            // Compatibility path for providers without message boundaries:
+            // merge only into the trailing row, preserving the old contract.
             if let Some(TimelineItem::Message {
                 run: last_run,
                 role: last_role,
@@ -417,6 +454,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 role: *role,
                 blocks: vec![delta.clone()],
                 phase: None,
+                stream_boundary: false,
             });
         }
 
@@ -731,6 +769,10 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
 
 fn is_zero(value: &usize) -> bool {
     *value == 0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// A terminal run must never leave tool rows looking live. Providers normally

@@ -18,10 +18,12 @@ use crate::config::LocalConfig;
 
 mod accumulator;
 pub(crate) mod output_quarantine;
+mod reasoning_receipt;
 mod recovery;
 mod retry;
 
 use accumulator::{retry_after_from_metadata, Accumulator};
+pub use reasoning_receipt::{ReasoningPayloadReceipt, ReasoningReplayReceipt};
 pub(crate) use retry::StreamObservers;
 
 pub(crate) use recovery::{now_ms, ProviderFailureContext};
@@ -234,8 +236,8 @@ pub struct AssistantTurn {
     /// Hidden reasoning the model streamed in `delta.reasoning` (GLM/OpenRouter)
     /// or `delta.reasoning_content` (some providers) — separate from `text`.
     /// Shown in the UI, kept as a typed `Reasoning` block in history, and
-    /// replayed on the wire for the current tool exchange (reasoning models
-    /// keep their chain across tool calls that way).
+    /// replayed on the wire with its assistant turn so subsequent requests
+    /// retain the provider's complete reasoning state.
     pub reasoning: String,
     /// Complete OpenRouter `reasoning_details[]` values in streamed order.
     /// Unknown future item shapes remain intact for provider replay.
@@ -291,6 +293,12 @@ pub struct ProviderResponseMetadata {
     pub cached_prompt_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<u64>,
+    /// Hash-only receipt for reasoning returned by this provider response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_capture: Option<ReasoningPayloadReceipt>,
+    /// Hash-only receipts for prior assistant reasoning replayed on this request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_replays: Vec<ReasoningReplayReceipt>,
 }
 
 /// Why a model call ended without producing a turn.
@@ -304,6 +312,10 @@ pub enum LlmError {
     PlatformKeyRejected(String),
     /// The configured gateway or upstream provider returned an application-level failure.
     Provider(String),
+    /// The provider returned successful responses but repeatedly declined the
+    /// required structured-tool boundary, including the singleton named-tool
+    /// repair. This is deterministic protocol incompatibility, not transport.
+    ToolProtocolExhausted(String),
     /// Provider output failed the desktop isolation boundary before any of the
     /// response was published, persisted, or offered to a tool.
     OutputQuarantined {
@@ -339,6 +351,7 @@ impl std::fmt::Display for LlmError {
             LlmError::InsufficientCredits => f.write_str("insufficient_credits"),
             LlmError::PlatformKeyRejected(message)
             | LlmError::Provider(message)
+            | LlmError::ToolProtocolExhausted(message)
             | LlmError::ContextOverflow(message) => f.write_str(message),
             LlmError::OutputQuarantined { .. } => {
                 f.write_str("model response failed data-isolation validation")
@@ -633,8 +646,13 @@ impl LlmClient {
             .map(String::as_str)
             .or(self.reasoning_effort.as_deref());
         if let Some(effort) = reasoning_effort {
-            if self.base_url.contains("openrouter.ai") {
+            if self.base_url.contains("openrouter.ai")
+                || self.headers.iter().any(|(name, value)| {
+                    name.eq_ignore_ascii_case("x-clark-client-tool-loop") && value == "1"
+                })
+            {
                 body["reasoning"] = json!({
+                    "enabled": true,
                     "effort": effort,
                     "exclude": false
                 });

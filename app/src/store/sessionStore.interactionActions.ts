@@ -763,7 +763,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   steerQueued: async (id) => {
     const { auth, bridge, session, queued, snapshot } = get();
     const message = queued.find((candidate) => candidate.id === id);
-    if (!bridge?.steer || !session || session.provider !== "local" || !message) return;
+    if (!bridge || !session || session.provider !== "local" || !message) return;
     if (message.uploads.length > 0 || message.skills.length > 0) {
       get().flashNotice("Messages with attachments or skills stay queued until the agent finishes.");
       return;
@@ -772,23 +772,29 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const activeRunId = Object.values(snapshot.runs).find(
       (run) => run.status === "running" || run.status === "queued",
     )?.id;
+    if (!activeRunId) return;
     const stopping = Boolean(activeRunId && isExplicitStopCommand(message.text));
     try {
-      if (activeRunId && stopping) {
-        await bridge.cancel(session.id, activeRunId);
-      } else {
-        await bridge.steer(session.id, [{ type: "text", text: message.text }]);
-      }
+      // Steering is an explicit redirect: stop the current run and leave this
+      // message in the ordinary follow-up queue. The existing idle-snapshot
+      // drain sends it exactly once after cancellation settles. Keeping one
+      // queue avoids the old hidden handoff where the UI removed a message
+      // before the provider had actually consumed it between tool batches.
+      await bridge.cancel(session.id, activeRunId);
       if (!authAccountMatches(auth, get().auth) || get().session?.id !== session.id) return;
-      get().removeQueued(id);
+      if (stopping) {
+        get().removeQueued(id);
+      } else {
+        get().flashNotice("Stopping current work; your message will send next.");
+      }
     } catch (error) {
-      // The run may have settled between the click and the native command. Keep
-      // the message safely queued; the normal drain will send it next.
+      // Keep the message safely queued. If the run settled before cancellation,
+      // the normal idle-snapshot drain will still send it next.
       if (authAccountMatches(auth, get().auth) && get().session?.id === session.id) {
         if (stopping) {
           set({ error: `Stopping the agent failed: ${String(error)}` });
         } else {
-          get().flashNotice("the agent finished before the message could steer; it remains queued.");
+          get().flashNotice("Could not stop the current work; your message remains queued.");
         }
       }
     }

@@ -4,6 +4,7 @@ import { FileText, X } from "lucide-react";
 import type { PendingPaste } from "../lib/attachments";
 import { FADE, accessibleMotion } from "../lib/motion";
 import { useSessionStore } from "../store/sessionStore";
+import { ZoomableImage } from "./ImageLightbox";
 
 /** Compact, single-line attachment rail inspired by the mobile composer. */
 export function AttachmentChips({
@@ -36,9 +37,9 @@ export function AttachmentChips({
               title={attachment.filename}
             >
               {attachment.previewUrl ? (
-                <img
+                <ZoomableImage
                   src={attachment.previewUrl}
-                  alt=""
+                  alt={attachment.filename}
                   className="size-8 rounded-lg object-cover"
                 />
               ) : (

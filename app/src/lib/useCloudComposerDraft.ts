@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/sessionStore";
 import {
+  acknowledgeComposerDraft,
+  adoptComposerDraft,
+  adoptComposerDraftAck,
   loadComposerDraftRecord,
-  markComposerDraftSynced,
-  replaceComposerDraftFromCloud,
-  shouldUseCloudComposerDraft,
+  reconcileComposerDraft,
 } from "./composerDraft";
 import {
   clearSubmittedCloudComposerDraft,
@@ -31,6 +32,7 @@ interface SyncConfig {
 }
 
 const SAVE_DEBOUNCE_MS = 500;
+const RETRY_INTERVAL_MS = 15_000;
 
 export function useCloudComposerDraft({
   owner,
@@ -58,6 +60,9 @@ export function useCloudComposerDraft({
   const onHydrateRef = useRef(onHydrate);
   onHydrateRef.current = onHydrate;
 
+  /** Serialize the next pending text toward the cloud, compare-and-swap on the
+   * last observed server revision. Never hard-loops: a conflict pauses writes
+   * so this scope cannot silently overwrite another device's edit. */
   const syncLatest = useCallback((): Promise<void> => {
     const config = configRef.current;
     if (!config || !readyRef.current || conflictPausedRef.current) {
@@ -83,32 +88,28 @@ export function useCloudComposerDraft({
           if (result.conflict) {
             if (result.draft.text === sending) {
               syncedTextRef.current = sending;
-              markComposerDraftSynced(
-                config.owner,
-                config.conversationId,
-                sending,
-                result.draft.rev,
-              );
+              acknowledgeComposerDraft(config.owner, config.conversationId, {
+                rev: result.draft.rev,
+                text: sending,
+              });
               setStatus("saved");
               continue;
             }
-            syncedTextRef.current = result.draft.text;
             // The current revision changed after our read. Retrying against
             // that newer revision would silently overwrite another device's
             // edit. Keep the local text in its local draft record and pause
             // cloud writes for this mounted scope.
             conflictPausedRef.current = true;
+            syncedTextRef.current = result.draft.text;
             setStatus("conflict");
             return;
           }
           conflictPausedRef.current = false;
           syncedTextRef.current = sending;
-          markComposerDraftSynced(
-            config.owner,
-            config.conversationId,
-            sending,
-            result.draft.rev,
-          );
+          acknowledgeComposerDraft(config.owner, config.conversationId, {
+            rev: result.draft.rev,
+            text: sending,
+          });
           setStatus("saved");
         }
       } catch {
@@ -134,7 +135,7 @@ export function useCloudComposerDraft({
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!creds) {
       configRef.current = null;
-      setStatus(text ? "local" : "local");
+      setStatus("local");
       return;
     }
     const config = { creds, owner, conversationId, generation };
@@ -145,6 +146,9 @@ export function useCloudComposerDraft({
       .then((remote) => {
         if (!active || configRef.current?.generation !== generation) return;
         const local = loadComposerDraftRecord(owner, conversationId);
+        // The base for the next write is always the server's current revision
+        // (or 0 to recreate a row the service no longer has). It is independent
+        // of who wins the text reconciliation.
         revRef.current = cloudComposerDraftBaseRevision(remote);
         syncedTextRef.current = remote?.text ?? "";
         if (discardedGenerationRef.current === generation) {
@@ -154,25 +158,41 @@ export function useCloudComposerDraft({
           if (syncedTextRef.current) void syncLatest();
           return;
         }
-        const remoteUpdatedAt = remote ? Date.parse(remote.updatedAt) || 0 : 0;
-        const cloudWins = Boolean(remote && shouldUseCloudComposerDraft(local, {
-          text: remote.text,
-          updatedAt: remoteUpdatedAt,
-        }));
-        if (cloudWins && remote) {
-          replaceComposerDraftFromCloud(owner, conversationId, {
-            text: remote.text,
-            updatedAt: remoteUpdatedAt,
-            cloudRev: remote.rev,
-          });
-          desiredTextRef.current = remote.text;
-          onHydrate(remote.text);
-        } else {
-          desiredTextRef.current = local.text;
+        const decision = reconcileComposerDraft(
+          local,
+          remote ? { text: remote.text, rev: remote.rev } : null,
+        );
+        switch (decision.outcome) {
+          case "adopt":
+            adoptComposerDraft(owner, conversationId, decision.text, decision.rev);
+            desiredTextRef.current = decision.text;
+            syncedTextRef.current = decision.text;
+            onHydrate(decision.text);
+            break;
+          case "acknowledge":
+            adoptComposerDraftAck(owner, conversationId, {
+              rev: decision.rev,
+              text: decision.text,
+            });
+            syncedTextRef.current = decision.text;
+            break;
+          case "conflict":
+            desiredTextRef.current = local.text;
+            conflictPausedRef.current = true;
+            break;
+          case "local":
+            desiredTextRef.current = local.text;
+            break;
         }
         readyRef.current = true;
-        setStatus(desiredTextRef.current === syncedTextRef.current ? "saved" : "saving");
-        if (desiredTextRef.current !== syncedTextRef.current) void syncLatest();
+        if (conflictPausedRef.current) {
+          setStatus("conflict");
+        } else if (desiredTextRef.current !== syncedTextRef.current) {
+          setStatus("saving");
+          void syncLatest();
+        } else {
+          setStatus("saved");
+        }
       })
       .catch(() => {
         if (!active || configRef.current?.generation !== generation) return;
@@ -228,7 +248,7 @@ export function useCloudComposerDraft({
         void syncLatest();
       }
     };
-    const timer = window.setInterval(retry, 15_000);
+    const timer = window.setInterval(retry, RETRY_INTERVAL_MS);
     window.addEventListener("online", retry);
     window.addEventListener("blur", retry);
     return () => {
@@ -271,22 +291,15 @@ export function useCloudComposerDraft({
       if (result.outcome === "preserved_newer") {
         conflictPausedRef.current = true;
         desiredTextRef.current = result.draft.text;
-        const updatedAt = Date.parse(result.draft.updatedAt) || Date.now();
-        replaceComposerDraftFromCloud(active.owner, targetConversationId, {
-          text: result.draft.text,
-          updatedAt,
-          cloudRev: result.draft.rev,
-        });
+        adoptComposerDraft(active.owner, targetConversationId, result.draft.text, result.draft.rev);
         onHydrateRef.current(result.draft.text);
         setStatus("conflict");
       } else {
         conflictPausedRef.current = false;
-        markComposerDraftSynced(
-          active.owner,
-          targetConversationId,
-          "",
-          result.draft?.rev ?? 0,
-        );
+        acknowledgeComposerDraft(active.owner, targetConversationId, {
+          rev: result.draft?.rev ?? 0,
+          text: result.draft?.text ?? "",
+        });
         setStatus("saved");
       }
     }

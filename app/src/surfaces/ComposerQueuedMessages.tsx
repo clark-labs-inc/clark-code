@@ -43,7 +43,7 @@ export function ComposerQueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) 
                   <button
                     onClick={() => void steerQueued(q.id)}
                     aria-label="Steer active run with queued message"
-                    title="Send now and steer the active run"
+                    title="Stop current work and send this next"
                     className="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
                   >
                     <CornerDownRight className="size-3" />

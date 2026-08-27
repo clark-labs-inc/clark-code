@@ -756,6 +756,16 @@ export interface LiveEntry {
 /** The pool of live sessions, keyed by conversation id. */
 export const liveSessions = new Map<string, LiveEntry>();
 
+/** Restore a follow-up whose prompt admission failed. The id guard makes a
+ * late duplicate rejection harmless while preserving FIFO order. */
+export function restoreQueuedAfterDispatchFailure(
+  entry: LiveEntry,
+  message: QueuedMessage,
+): void {
+  if (entry.queued.some((candidate) => candidate.id === message.id)) return;
+  entry.queued = [message, ...entry.queued];
+}
+
 /** Freeze the model a local conversation was created/reopened with. Without
  * this snapshot, chats with no explicit override keep following the mutable
  * new-chat default, so changing that default makes every such chat appear to

@@ -314,6 +314,37 @@ pub(crate) fn interrupt_live_runs(
         })
         .map(|(run, _)| run.clone())
         .collect::<Vec<_>>();
+    interrupt_runs(snapshot, &interrupted_runs, stop_reason, error)
+}
+
+/// Turn one still-active run into a terminal interruption without disturbing
+/// another overlapping run in the same session.
+pub(crate) fn interrupt_run(
+    snapshot: &mut Snapshot,
+    run: &agent_core::RunId,
+    stop_reason: &str,
+    error: &str,
+) -> Vec<AgentEvent> {
+    let interrupted_runs = snapshot
+        .runs
+        .get(run)
+        .filter(|run| {
+            matches!(
+                run.status,
+                RunStatus::Queued | RunStatus::Running | RunStatus::AwaitingInput
+            )
+        })
+        .map(|_| vec![run.clone()])
+        .unwrap_or_default();
+    interrupt_runs(snapshot, &interrupted_runs, stop_reason, error)
+}
+
+fn interrupt_runs(
+    snapshot: &mut Snapshot,
+    interrupted_runs: &[agent_core::RunId],
+    stop_reason: &str,
+    error: &str,
+) -> Vec<AgentEvent> {
     let mut events = interrupted_runs
         .iter()
         .cloned()
@@ -333,6 +364,9 @@ pub(crate) fn interrupt_live_runs(
         let agent_core::TimelineItem::ProviderIncident { run, id } = item else {
             continue;
         };
+        if !interrupted_runs.contains(&run) {
+            continue;
+        }
         let Some(incident) = snapshot.provider_incidents.get(&id) else {
             continue;
         };

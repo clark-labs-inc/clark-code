@@ -58,10 +58,15 @@ test("the development bundle is Clark Code without release authority", () => {
 
 test("the default product module is locally usable", () => {
   const source = readFileSync(resolve(root, "app/src/product/productModule.ts"), "utf8");
+  const catalogYaml = readFileSync(resolve(root, "app/src/product/models.yaml"), "utf8");
   assert.match(source, /id: "clark_code"/);
   assert.match(source, /name: "Clark Code"/);
   assert.match(source, /authRequired: false/);
-  assert.match(source, /defaultModel: "local-model"/);
+  // The neutral model catalog ships only local OpenAI-compatible models, loaded
+  // from models.yaml — never a hosted/DynamoDB-backed tier.
+  assert.match(source, /from "\.\/modelCatalog"/);
+  assert.match(catalogYaml, /default: local-model/);
+  assert.doesNotMatch(source, /clark_max|dynamodb/i);
 });
 
 test("downstream product entries share the renderer React runtime", () => {

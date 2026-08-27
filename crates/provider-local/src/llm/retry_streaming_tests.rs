@@ -128,6 +128,70 @@ async fn forwards_openrouter_tool_arguments_as_provider_deltas() {
 }
 
 #[tokio::test]
+async fn publishes_held_open_word_before_tool_fragments_cross() {
+    let chunks = vec![
+        (
+            Duration::ZERO,
+            frame(r#"{"choices":[{"delta":{"content":"Let me "}}]}"#),
+        ),
+        (
+            Duration::from_millis(20),
+            frame(r#"{"choices":[{"delta":{"content":"go."}}]}"#),
+        ),
+        (
+            Duration::from_millis(20),
+            frame(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"final_answer","arguments":"{\"content\":\"done\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            ),
+        ),
+        (Duration::ZERO, b"data: [DONE]\n\n".to_vec()),
+    ];
+    let base_url = progressive_endpoint(chunks).await;
+    let client = LlmClient::from_parts(&base_url, "fake-model", None, Vec::new(), None).unwrap();
+    let cancel = CancellationToken::new();
+    let events = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let text_events = events.clone();
+    let reasoning_events = events.clone();
+    let tool_events = events.clone();
+    let turn = client
+        .stream_chat_observed_with_tool_choice(
+            &[ChatMessage::user("hello")],
+            &[],
+            StreamChatOptions {
+                cancel: &cancel,
+                force_tool_call: true,
+                forced_tool_name: None,
+            },
+            StreamObservers::new(
+                move |delta: &str| text_events.borrow_mut().push(format!("text:{delta}")),
+                move |delta: &str| {
+                    reasoning_events
+                        .borrow_mut()
+                        .push(format!("reasoning:{delta}"))
+                },
+                move |_| tool_events.borrow_mut().push("tool".to_string()),
+                |_| {},
+            ),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(turn.tool_calls[0].function.name, "final_answer");
+    // The final narration word must cross before the tool fragment so the
+    // projected tail stays attached to its sentence instead of landing below
+    // the eagerly announced tool row.
+    let recorded = events.borrow().clone();
+    assert_eq!(
+        recorded,
+        vec![
+            "text:Let me ".to_string(),
+            "text:go.".to_string(),
+            "tool".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
 async fn never_publishes_single_token_identity_residue() {
     let chunks = vec![
         (

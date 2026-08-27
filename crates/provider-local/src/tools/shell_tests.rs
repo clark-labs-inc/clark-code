@@ -274,6 +274,34 @@ async fn cancelled_command_reports_error() {
 }
 
 #[tokio::test]
+async fn foreground_command_rejects_long_wait_before_execution() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("should-not-exist.txt");
+    let out = Bash
+        .invoke(
+            json!({
+                "command": platform_command(
+                    "touch should-not-exist.txt",
+                    "New-Item -ItemType File should-not-exist.txt"
+                ),
+                "timeout_ms": 120_001
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+
+    assert!(out.is_error);
+    assert!(out.content.contains("foreground_timeout_limit"));
+    assert!(out.content.contains("run_in_background"));
+    assert_eq!(out.details["kind"], json!("foreground_timeout_limit"));
+    assert_eq!(out.details["recovery"]["wait_tool"], json!("bash_wait"));
+    assert!(
+        !marker.exists(),
+        "oversized foreground command was executed"
+    );
+}
+
+#[tokio::test]
 async fn run_in_background_returns_immediately_and_bash_output_polls_it() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());

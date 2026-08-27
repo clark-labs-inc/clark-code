@@ -214,6 +214,20 @@ fn cancellation_registry_targets_the_requested_run() {
 }
 
 #[tokio::test]
+async fn cancel_reports_an_inactive_run_with_a_typed_error() {
+    let mut provider = LocalAgentProvider::new();
+    let error = provider
+        .cancel(&SessionId::new("session-1"), &RunId::new("run-finished"))
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        Error::RunNotActive(run) if run == RunId::new("run-finished")
+    ));
+}
+
+#[tokio::test]
 async fn a_new_prompt_supersedes_a_run_parked_on_a_permission_request() {
     use agent_core::ids::PermissionRequestId;
     use tokio::sync::oneshot::error::TryRecvError;

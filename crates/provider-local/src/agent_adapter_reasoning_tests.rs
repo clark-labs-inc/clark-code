@@ -56,6 +56,10 @@ async fn desktop_sink_retains_readable_reasoning_details_for_resume_and_compacti
     ));
     assert!(matches!(
         receive.recv().await.unwrap(),
+        desktop::AgentEvent::MessageStreamStarted { .. }
+    ));
+    assert!(matches!(
+        receive.recv().await.unwrap(),
         desktop::AgentEvent::MessageChunk {
             delta: desktop::ContentBlock::Thinking { text },
             ..

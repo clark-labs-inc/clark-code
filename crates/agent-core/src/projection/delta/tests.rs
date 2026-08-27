@@ -295,6 +295,7 @@ fn a_change_far_behind_unchanged_trailing_items_is_still_found() {
         role: Role::Agent,
         blocks: vec![ContentBlock::text("history rewritten")],
         phase: None,
+        stream_boundary: false,
     };
 
     let delta = diff_after_apply(&previous, &rewritten, &[], 2, 1)

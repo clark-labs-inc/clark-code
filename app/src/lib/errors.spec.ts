@@ -34,6 +34,15 @@ describe("humanizeRunFailure", () => {
       expect(isQuietRetryableRunFailure({ failure_kind })).toBe(true);
     }
     expect(isQuietRetryableRunFailure({ failure_kind: "tool_fatal" })).toBe(false);
+    expect(isQuietRetryableRunFailure({ failure_kind: "tool_protocol_exhausted" })).toBe(false);
+  });
+
+  it("does not mislabel structured-tool incompatibility as a slow request", () => {
+    const msg = humanizeRunFailure({ failure_kind: "tool_protocol_exhausted" });
+
+    expect(msg).toMatch(/required action format/i);
+    expect(msg).toMatch(/three attempts/i);
+    expect(msg).not.toMatch(/taking longer|rate.limit|transport/i);
   });
 
   it("does not infer auth from an untyped legacy error", () => {

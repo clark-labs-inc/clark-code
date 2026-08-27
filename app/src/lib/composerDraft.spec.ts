@@ -1,18 +1,24 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  acknowledgeComposerDraft,
+  adoptComposerDraft,
+  adoptComposerDraftAck,
   clearComposerDraftIfUnchanged,
   composerDraftOwner,
   loadComposerDraft,
   loadComposerDraftRecord,
-  markComposerDraftSynced,
   moveComposerDraft,
+  reconcileComposerDraft,
   removeComposerDraft,
   saveComposerDraft,
-  shouldUseCloudComposerDraft,
   specialistStartComposerDraftId,
 } from "./composerDraft";
 
 const owner = "account-one";
+
+function ack(rev: number, text: string) {
+  return { rev, text };
+}
 
 describe("composer drafts", () => {
   beforeEach(() => localStorage.clear());
@@ -117,63 +123,169 @@ describe("composer drafts", () => {
     expect(loadComposerDraft(owner, "chat-one")).toBe("new follow-up typed in flight");
   });
 
-  it("migrates legacy plain text into a revision-aware local envelope", () => {
+  it("migrates legacy plain text into a revision-aware envelope", () => {
     localStorage.setItem(
       "agent-desktop.composer-draft.v1.account-one.chat-one",
       "legacy draft",
     );
     expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
       text: "legacy draft",
-      updatedAt: 0,
-      cloudRev: 0,
-    });
-
-    saveComposerDraft(owner, "chat-one", "edited locally");
-    expect(loadComposerDraftRecord(owner, "chat-one")).toMatchObject({
-      text: "edited locally",
-      cloudRev: 0,
+      lastAcked: null,
     });
   });
 
-  it("advances a cloud revision without clobbering a newer local edit", () => {
+  it("migrates a v2 envelope, keeping its acknowledged revision but dropping its clock", () => {
+    localStorage.setItem(
+      "agent-desktop.composer-draft.v1.account-one.chat-one",
+      JSON.stringify({
+        version: 2,
+        text: "synced long ago",
+        updatedAt: 1_600_000_000_000,
+        cloudRev: 5,
+      }),
+    );
+    // A fully local legacy draft (never synced) has no anchor.
+    expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
+      text: "synced long ago",
+      lastAcked: ack(5, "synced long ago"),
+    });
+
+    localStorage.setItem(
+      "agent-desktop.composer-draft.v1.account-one.chat-two",
+      JSON.stringify({
+        version: 2,
+        text: "never synced",
+        updatedAt: 1_600_000_000_001,
+        cloudRev: 0,
+      }),
+    );
+    expect(loadComposerDraftRecord(owner, "chat-two")).toEqual({
+      text: "never synced",
+      lastAcked: null,
+    });
+  });
+
+  it("keeps the last acknowledgement across typing so it stays an anchor for reconciliation", () => {
     saveComposerDraft(owner, "chat-one", "sent to cloud");
-    expect(markComposerDraftSynced(owner, "chat-one", "sent to cloud", 3)).toBe(true);
+    expect(acknowledgeComposerDraft(owner, "chat-one", ack(3, "sent to cloud"))).toBe(true);
+
     saveComposerDraft(owner, "chat-one", "new local edit");
-    expect(markComposerDraftSynced(owner, "chat-one", "sent to cloud", 4)).toBe(false);
-    expect(loadComposerDraftRecord(owner, "chat-one")).toMatchObject({
+    expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
       text: "new local edit",
-      cloudRev: 3,
+      lastAcked: ack(3, "sent to cloud"),
     });
   });
 
-  it("hydrates only when the cloud version is actually newer", () => {
-    const local = { text: "local", updatedAt: 200, cloudRev: 2 };
-    expect(shouldUseCloudComposerDraft(local, { text: "cloud", updatedAt: 201 })).toBe(true);
-    expect(shouldUseCloudComposerDraft(local, { text: "cloud", updatedAt: 199 })).toBe(false);
-    expect(shouldUseCloudComposerDraft(local, { text: "local", updatedAt: 300 })).toBe(false);
+  it("advances an acknowledgement without clobbering a newer local edit", () => {
+    saveComposerDraft(owner, "chat-one", "sent to cloud");
+    expect(acknowledgeComposerDraft(owner, "chat-one", ack(3, "sent to cloud"))).toBe(true);
+
+    saveComposerDraft(owner, "chat-one", "new local edit");
+    expect(acknowledgeComposerDraft(owner, "chat-one", ack(4, "sent to cloud"))).toBe(false);
+    expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
+      text: "new local edit",
+      lastAcked: ack(3, "sent to cloud"),
+    });
   });
 
-  it("keeps a recent updatedAt after clearing so a stale cloud draft cannot resurrect a just-sent message", () => {
-    saveComposerDraft(owner, "chat-one", "message I just sent");
-    const beforeClear = Date.now();
-    expect(clearComposerDraftIfUnchanged(owner, "chat-one", "message I just sent")).toBe(true);
+  it("adopts a cloud value as both visible text and acknowledgement", () => {
+    saveComposerDraft(owner, "chat-one", "old");
+    adoptComposerDraft(owner, "chat-one", "from cloud", 9);
+    expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
+      text: "from cloud",
+      lastAcked: ack(9, "from cloud"),
+    });
+  });
 
-    const cleared = loadComposerDraftRecord(owner, "chat-one");
-    expect(cleared.text).toBe("");
-    // The clear must be recorded as a recent local edit, not a missing key
-    // (`updatedAt: 0`), otherwise a stale cloud draft wins on timestamp.
-    expect(cleared.updatedAt).toBeGreaterThanOrEqual(beforeClear);
+  it("adopts only an acknowledgement without disturbing local text", () => {
+    saveComposerDraft(owner, "chat-one", "local text");
+    adoptComposerDraftAck(owner, "chat-one", ack(4, "local text"));
+    expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({
+      text: "local text",
+      lastAcked: ack(4, "local text"),
+    });
+  });
 
-    // The cloud still holds the just-sent text because the discard PUT hasn't
-    // landed; its timestamp predates the local clear, so it must lose.
-    expect(shouldUseCloudComposerDraft(cleared, {
-      text: "message I just sent",
-      updatedAt: beforeClear - 1000,
-    })).toBe(false);
-    // A genuinely newer cross-device edit still hydrates.
-    expect(shouldUseCloudComposerDraft(cleared, {
-      text: "edit from another device",
-      updatedAt: cleared.updatedAt + 1000,
-    })).toBe(true);
+  it("resets the acknowledgement when a draft moves to a different cloud key", () => {
+    saveComposerDraft(owner, null, "first prompt");
+    acknowledgeComposerDraft(owner, null, ack(3, "first prompt"));
+    moveComposerDraft(owner, null, "created-chat", "first prompt");
+
+    expect(loadComposerDraftRecord(owner, "created-chat")).toEqual({
+      text: "first prompt",
+      lastAcked: null,
+    });
+  });
+
+  describe("reconcileComposerDraft", () => {
+    it("keeps local when there is no cloud row", () => {
+      expect(reconcileComposerDraft(
+        { text: "typed", lastAcked: null },
+        null,
+      )).toEqual({ outcome: "local" });
+    });
+
+    it("keeps local when the cloud revision is not newer than the last acknowledgement", () => {
+      const local = { text: "edited", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(local, { text: "other", rev: 5 })).toEqual({
+        outcome: "local",
+      });
+      expect(reconcileComposerDraft(local, { text: "other", rev: 4 })).toEqual({
+        outcome: "local",
+      });
+    });
+
+    it("adopts a newer cloud text when local has no unacked edit", () => {
+      const local = { text: "old", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(local, { text: "new", rev: 6 })).toEqual({
+        outcome: "adopt",
+        text: "new",
+        rev: 6,
+      });
+    });
+
+    it("acknowledges without changing text when the two sides already agree", () => {
+      const local = { text: "same", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(local, { text: "same", rev: 6 })).toEqual({
+        outcome: "acknowledge",
+        text: "same",
+        rev: 6,
+      });
+    });
+
+    it("flags a conflict when both sides have divergent unacked edits", () => {
+      const local = { text: "my follow-up", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(local, { text: "their follow-up", rev: 6 })).toEqual({
+        outcome: "conflict",
+        text: "their follow-up",
+        rev: 6,
+      });
+    });
+
+    it("treats a never-synced local draft as an unacked edit", () => {
+      const local = { text: "typed before first sync", lastAcked: null };
+      expect(reconcileComposerDraft(local, { text: "from another device", rev: 1 })).toEqual({
+        outcome: "conflict",
+        text: "from another device",
+        rev: 1,
+      });
+    });
+
+    it("never trusts a clock: only revisions and acknowledged text decide the winner", () => {
+      // The API carries no timestamps at all, so device-vs-server clock skew
+      // (the previous bug) cannot influence the outcome. Two otherwise
+      // identical inputs differ only by revision.
+      const synced = { text: "old", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(synced, { text: "new", rev: 6 })).toEqual({
+        outcome: "adopt",
+        text: "new",
+        rev: 6,
+      });
+
+      const edited = { text: "old", lastAcked: ack(5, "old") };
+      expect(reconcileComposerDraft(edited, { text: "new", rev: 5 })).toEqual({
+        outcome: "local",
+      });
+    });
   });
 });

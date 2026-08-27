@@ -11,8 +11,10 @@ use serde_json::{json, Value};
 
 use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
 
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
-const MAX_TIMEOUT_MS: u64 = 600_000;
+const DEFAULT_FOREGROUND_TIMEOUT_MS: u64 = 120_000;
+const MAX_FOREGROUND_TIMEOUT_MS: u64 = 120_000;
+const DEFAULT_WAIT_TIMEOUT_MS: u64 = 120_000;
+const MAX_WAIT_TIMEOUT_MS: u64 = 600_000;
 const DEFAULT_WAIT_POLL_MS: u64 = 250;
 const MIN_WAIT_POLL_MS: u64 = 50;
 const MAX_WAIT_POLL_MS: u64 = 2_000;
@@ -25,7 +27,7 @@ impl ToolExecutor for Bash {
         "bash"
     }
     fn description(&self) -> &str {
-        "Run a shell command in the project root and return its complete output and exit code. Use it for builds, tests, git, and other tooling. On Windows, commands use PowerShell without user profiles (with CMD only as a fallback), so use PowerShell syntax and spell native utilities explicitly, for example `where.exe`. Avoid using it to search or read files: prefer grep over `grep`/`rg`, glob over `find`/`ls`, read_file over `cat`/`head`/`tail`, and edit_file/write_file over `sed`/`echo >`. The shell does not persist state (cwd, env) between calls; each command starts fresh in the project root."
+        "Run a shell command in the project root and return its complete output and exit code. Foreground commands are bounded to two minutes; start longer work with run_in_background and wait with bash_wait so the durable task survives the model turn. Use it for builds, tests, git, and other tooling. On Windows, commands use PowerShell without user profiles (with CMD only as a fallback), so use PowerShell syntax and spell native utilities explicitly, for example `where.exe`. Avoid using it to search or read files: prefer grep over `grep`/`rg`, glob over `find`/`ls`, read_file over `cat`/`head`/`tail`, and edit_file/write_file over `sed`/`echo >`. The shell does not persist state (cwd, env) between calls; each command starts fresh in the project root."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -45,8 +47,8 @@ impl ToolExecutor for Bash {
                     "description": "Declare the durable or externally visible effect of this command. Use none for inspection. For a mutation across the host/network boundary, choose its generic action so Clark Code requires canonical read-back before completion."
                 },
                 "effect_target": {"type": "string", "description": "Optional user-facing target hint for the declared effect, such as a resource URL, deployment, branch, or message recipient. Do not include secrets."},
-                "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."},
-                "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000). Ignored when run_in_background is true."}
+                "run_in_background": {"type": "boolean", "description": "Start long work without blocking; returns a durable task id immediately. Wait without another model turn using bash_wait, poll with bash_output, send input with bash_input, and stop with bash_kill."},
+                "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 120000, "description": "Foreground timeout in milliseconds (default and max 120000). For longer work, set run_in_background=true and then call bash_wait. Ignored when run_in_background is true."}
             },
             "required": ["command"]
         })
@@ -126,8 +128,21 @@ impl ToolExecutor for Bash {
         let timeout_ms = args
             .get("timeout_ms")
             .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_TIMEOUT_MS)
-            .min(MAX_TIMEOUT_MS);
+            .unwrap_or(DEFAULT_FOREGROUND_TIMEOUT_MS);
+        if timeout_ms > MAX_FOREGROUND_TIMEOUT_MS {
+            return ToolOutcome::error(format!(
+                "foreground_timeout_limit: foreground shell commands are limited to {MAX_FOREGROUND_TIMEOUT_MS}ms; start this command with run_in_background=true, then wait with bash_wait"
+            ))
+            .with_details(json!({
+                "kind": "foreground_timeout_limit",
+                "maximum_timeout_ms": MAX_FOREGROUND_TIMEOUT_MS,
+                "recovery": {
+                    "start_tool": "bash",
+                    "start_argument": "run_in_background",
+                    "wait_tool": "bash_wait"
+                }
+            }));
+        }
 
         // Agent-authored commands are non-interactive. Keep them on the
         // pipe-backed streaming path so GUI-hosted Windows runs cannot create a
@@ -279,7 +294,7 @@ impl ToolExecutor for BashWait {
             "properties": {
                 "task_id": {"type": "string", "description": "The id returned by bash(run_in_background: true)."},
                 "output_contains": {"type": "string", "description": "Optional exact text marker that means the task is ready. Without it, wait for process exit."},
-                "timeout_ms": {"type": "integer", "description": "Maximum host wait in milliseconds (default 120000, max 600000). The process keeps running after a timeout."},
+                "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Maximum host wait in milliseconds (default 120000, max 600000). The process keeps running after a timeout."},
                 "poll_interval_ms": {"type": "integer", "description": "Host polling interval in milliseconds (default 250, range 50-2000)."}
             },
             "required": ["task_id"]
@@ -301,8 +316,8 @@ impl ToolExecutor for BashWait {
         let timeout_ms = args
             .get("timeout_ms")
             .and_then(Value::as_u64)
-            .unwrap_or(DEFAULT_TIMEOUT_MS)
-            .min(MAX_TIMEOUT_MS);
+            .unwrap_or(DEFAULT_WAIT_TIMEOUT_MS)
+            .min(MAX_WAIT_TIMEOUT_MS);
         let poll_ms = args
             .get("poll_interval_ms")
             .and_then(Value::as_u64)

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { ProductAccessProjection } from "../lib/productAccess";
+import { modelCatalog } from "./modelCatalog";
 
 export interface ProductBranding {
   id: string;
@@ -188,19 +189,9 @@ export const neutralProduct: ProductModule = Object.freeze({
   authRequired: false,
   slots: {},
   localAgent: {
-    defaultModel: "local-model",
-    defaultReasoningEffort: "high" as const,
-    models: [{
-      id: "local-model",
-      label: "Local model",
-      hint: "OpenAI-compatible local coding model",
-      defaultReasoningEffort: "high" as const,
-    }, {
-      id: "local-model-large",
-      label: "Large local model",
-      hint: "Higher-capacity OpenAI-compatible local model",
-      defaultReasoningEffort: "max" as const,
-    }],
+    defaultModel: modelCatalog.defaultModel,
+    defaultReasoningEffort: modelCatalog.defaultReasoningEffort,
+    models: modelCatalog.models,
   },
   artifacts: {
     isCloudUri: () => false,

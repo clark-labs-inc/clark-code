@@ -45,6 +45,10 @@ pub(crate) struct DesktopEventSink {
     final_answer_streams: std::sync::Mutex<FinalAnswerStreams>,
     document_streams: std::sync::Mutex<DocumentStreams>,
     streaming_tool_calls: std::sync::Mutex<StreamingToolCalls>,
+    /// Whether the current upstream assistant message has emitted its durable
+    /// Clark message boundary. The boundary is delayed until the first public
+    /// or resumable chunk so tool-only messages do not leave empty rows.
+    message_stream_announced: std::sync::Mutex<bool>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -66,6 +70,7 @@ impl DesktopEventSink {
             final_answer_streams: std::sync::Mutex::new(FinalAnswerStreams::default()),
             document_streams: std::sync::Mutex::new(DocumentStreams::default()),
             streaming_tool_calls: std::sync::Mutex::new(StreamingToolCalls::default()),
+            message_stream_announced: std::sync::Mutex::new(false),
             docs_dir,
         }
     }
@@ -77,6 +82,38 @@ impl DesktopEventSink {
 
     pub fn completed_transcript(&self) -> CompletedRunTranscript {
         self.completed_transcript.clone()
+    }
+
+    async fn emit_agent_message_chunk(&self, delta: desktop::ContentBlock) {
+        let announce = {
+            let mut announced = self
+                .message_stream_announced
+                .lock()
+                .expect("message stream boundary lock");
+            if *announced {
+                false
+            } else {
+                *announced = true;
+                true
+            }
+        };
+        if announce {
+            let _ = self
+                .events
+                .send(desktop::AgentEvent::MessageStreamStarted {
+                    run: self.run.clone(),
+                    role: desktop::Role::Agent,
+                })
+                .await;
+        }
+        let _ = self
+            .events
+            .send(desktop::AgentEvent::MessageChunk {
+                run: self.run.clone(),
+                role: desktop::Role::Agent,
+                delta,
+            })
+            .await;
     }
 
     fn mark_new_compaction_checkpoint(&self, after: &[ca::AgentMessage]) -> bool {
@@ -214,6 +251,10 @@ impl ca::EventSink for DesktopEventSink {
             ca::AgentEvent::MessageStart {
                 message: ca::AgentMessage::Assistant { .. },
             } => {
+                *self
+                    .message_stream_announced
+                    .lock()
+                    .expect("message stream boundary lock") = false;
                 self.final_answer_streams
                     .lock()
                     .expect("final answer stream lock")
@@ -282,13 +323,7 @@ impl ca::EventSink for DesktopEventSink {
                 chunk: ca::AssistantStreamChunk::Text { delta },
                 ..
             } => {
-                let _ = self
-                    .events
-                    .send(desktop::AgentEvent::MessageChunk {
-                        run: self.run.clone(),
-                        role: desktop::Role::Agent,
-                        delta: desktop::ContentBlock::text(delta),
-                    })
+                self.emit_agent_message_chunk(desktop::ContentBlock::text(delta))
                     .await;
             }
             ca::AgentEvent::MessageUpdate {
@@ -309,13 +344,7 @@ impl ca::EventSink for DesktopEventSink {
                     .expect("final answer stream lock")
                     .observe_delta(index, name_delta.as_deref(), arguments_delta.as_deref());
                 if let Some(delta) = delta {
-                    let _ = self
-                        .events
-                        .send(desktop::AgentEvent::MessageChunk {
-                            run: self.run.clone(),
-                            role: desktop::Role::Agent,
-                            delta: desktop::ContentBlock::text(delta),
-                        })
+                    self.emit_agent_message_chunk(desktop::ContentBlock::text(delta))
                         .await;
                 }
                 let document_delta = self
@@ -384,20 +413,16 @@ impl ca::EventSink for DesktopEventSink {
                 // renders it as the collapsible Thinking row (the same UI the
                 // inline `<thinking>` tag path uses), and projection coalesces
                 // adjacent blocks so streaming deltas merge into one.
-                let _ = self
-                    .events
-                    .send(desktop::AgentEvent::MessageChunk {
-                        run: self.run.clone(),
-                        role: desktop::Role::Agent,
-                        delta: desktop::ContentBlock::thinking(delta),
-                    })
+                self.emit_agent_message_chunk(desktop::ContentBlock::thinking(delta))
                     .await;
             }
             ca::AgentEvent::MessageUpdate {
                 chunk: ca::AssistantStreamChunk::ReasoningDetails { delta },
                 ..
             } => {
-                reasoning_stream::emit_details(&self.events, &self.run, delta).await;
+                for detail in reasoning_stream::readable_details(delta) {
+                    self.emit_agent_message_chunk(detail).await;
+                }
             }
             ca::AgentEvent::ToolExecutionStart {
                 tool_call_id,
@@ -493,13 +518,7 @@ impl ca::EventSink for DesktopEventSink {
                                 .expect("final answer stream lock")
                                 .finish(&tool_call_id, answer);
                             if !suffix.is_empty() {
-                                let _ = self
-                                    .events
-                                    .send(desktop::AgentEvent::MessageChunk {
-                                        run: self.run.clone(),
-                                        role: desktop::Role::Agent,
-                                        delta: desktop::ContentBlock::text(suffix),
-                                    })
+                                self.emit_agent_message_chunk(desktop::ContentBlock::text(suffix))
                                     .await;
                             }
                         }

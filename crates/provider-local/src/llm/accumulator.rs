@@ -226,6 +226,16 @@ impl Accumulator {
     }
 
     pub(super) fn finish(self) -> AssistantTurn {
+        let reasoning_capture = super::reasoning_receipt::summarize_payload(
+            (!self.reasoning.is_empty()).then_some(self.reasoning.as_str()),
+            &self.reasoning_details,
+        );
+        let mut response_metadata = self.response_metadata;
+        if let Some(reasoning_capture) = reasoning_capture {
+            response_metadata
+                .get_or_insert_with(Default::default)
+                .reasoning_capture = Some(reasoning_capture);
+        }
         let tool_calls = self
             .tool_calls
             .into_iter()
@@ -247,7 +257,7 @@ impl Accumulator {
             usage: self.usage,
             reasoning: self.reasoning,
             reasoning_details: self.reasoning_details,
-            response_metadata: self.response_metadata,
+            response_metadata,
         }
     }
 

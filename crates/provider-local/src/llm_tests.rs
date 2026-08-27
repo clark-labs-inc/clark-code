@@ -253,11 +253,31 @@ fn openrouter_uses_unified_reasoning_and_strict_response_contracts() {
     let body = client.body(&[], &[]);
     assert_eq!(
         body["reasoning"],
-        json!({"effort": "max", "exclude": false})
+        json!({"enabled": true, "effort": "max", "exclude": false})
     );
     assert!(body.get("reasoning_effort").is_none());
     assert_eq!(body["response_format"], response_format);
     assert_eq!(body["provider"], provider);
+}
+
+#[test]
+fn clark_client_tool_loop_uses_explicit_openrouter_reasoning_capture() {
+    let mut client = LlmClient::from_parts(
+        "https://api.clarkslabs.com/v1",
+        "openrouter:ox_alpha",
+        None,
+        vec![("x-clark-client-tool-loop".into(), "1".into())],
+        None,
+    )
+    .unwrap();
+    client.reasoning_effort = Some("max".to_string());
+
+    let body = client.body(&[], &[]);
+    assert_eq!(
+        body["reasoning"],
+        json!({"enabled": true, "effort": "max", "exclude": false})
+    );
+    assert!(body.get("reasoning_effort").is_none());
 }
 
 #[test]

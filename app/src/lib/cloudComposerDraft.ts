@@ -34,8 +34,10 @@ export function cloudComposerDraftKey(conversationId: string | null): string {
   return conversationId ?? NEW_CONVERSATION_DRAFT_KEY;
 }
 
-/** A successful 204 read is authoritative absence. A cached local cloudRev
- * belongs to a row the service no longer has and must not prevent recreation. */
+/** A successful 204 read is authoritative absence. A cached last-acknowledged
+ * revision belongs to a row the service no longer has and must not prevent
+ * recreation, so the base for a fresh write is the server's current revision
+ * (or zero when the row is absent). */
 export function cloudComposerDraftBaseRevision(remote: CloudComposerDraft | null): number {
   return remote?.rev ?? 0;
 }

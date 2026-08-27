@@ -57,6 +57,93 @@ fn request_with_event(run_id: &str, event: AgentEvent) -> AppendRequest {
     }
 }
 
+fn retrying_incident(id: &str) -> ProviderIncident {
+    ProviderIncident {
+        id: id.into(),
+        status: ProviderIncidentStatus::Retrying,
+        scope: ProviderIncidentScope::ModelRequest,
+        failure_class: ProviderFailureClass::TransientTransport,
+        category: ProviderIncidentCategory::Timeout,
+        message: "Model connection timed out.".into(),
+        detail: "gateway timeout".into(),
+        model: "test-model".into(),
+        provider_route: "gateway.test/v1".into(),
+        provider_status: Some(504),
+        provider_error_type: Some("upstream_timeout".into()),
+        request: ProviderRequestDiagnostics {
+            idempotency_key: format!("request-{id}"),
+            provider_request_id: Some(format!("provider-{id}")),
+            attempts: 1,
+            max_attempts: 4,
+            retries: ProviderRetryCounts {
+                transient: 1,
+                ..Default::default()
+            },
+            output_started: false,
+            started_at_ms: 5,
+        },
+        execution_recovery: None,
+        observed_at_ms: 8,
+        updated_at_ms: 8,
+        completed_at_ms: None,
+    }
+}
+
+#[test]
+fn targeted_interruption_settles_only_the_lost_run_and_its_incident() {
+    let first = RunId::new("run-1");
+    let second = RunId::new("run-2");
+    let mut snapshot = Snapshot::new();
+    for run in [&first, &second] {
+        apply(&mut snapshot, &AgentEvent::RunStarted { run: run.clone() });
+    }
+    let first_incident = retrying_incident("incident-1");
+    let second_incident = retrying_incident("incident-2");
+    apply(
+        &mut snapshot,
+        &AgentEvent::ProviderIncidentUpdated {
+            run: first.clone(),
+            incident: first_incident.clone(),
+        },
+    );
+    apply(
+        &mut snapshot,
+        &AgentEvent::ProviderIncidentUpdated {
+            run: second.clone(),
+            incident: second_incident.clone(),
+        },
+    );
+
+    let events = interrupt_run(
+        &mut snapshot,
+        &first,
+        "provider_stream_closed",
+        "provider stream ended before RunFinished",
+    );
+
+    assert_eq!(snapshot.runs[&first].status, RunStatus::Failed);
+    assert_eq!(snapshot.runs[&second].status, RunStatus::Running);
+    assert_eq!(
+        snapshot.provider_incidents[&first_incident.id].status,
+        ProviderIncidentStatus::Interrupted
+    );
+    assert_eq!(
+        snapshot.provider_incidents[&second_incident.id].status,
+        ProviderIncidentStatus::Retrying
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::RunFinished { run, outcome }
+            if run == &first
+                && outcome.failure_kind == Some(RunFailureKind::RuntimeInterrupted)
+    )));
+    assert!(events.iter().all(|event| match event {
+        AgentEvent::RunFinished { run, .. } | AgentEvent::ProviderIncidentUpdated { run, .. } =>
+            run == &first,
+        _ => true,
+    }));
+}
+
 #[tokio::test]
 async fn legacy_compaction_folds_acknowledged_events_before_reclaiming_disk() {
     let dir = tempfile::tempdir().unwrap();
@@ -283,6 +370,44 @@ async fn checkpoint_discards_only_acknowledged_covered_batches() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(remaining, vec![second.local_seq]);
+}
+
+#[tokio::test]
+async fn coalesced_cloud_delivery_acknowledges_every_durable_batch_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "session");
+    outbox
+        .initialize(&config(), &Snapshot::new(), 0)
+        .await
+        .unwrap();
+    let first = outbox.enqueue(&request("first")).await.unwrap();
+    let second = outbox.enqueue(&request("second")).await.unwrap();
+    let third = outbox.enqueue(&request("third")).await.unwrap();
+
+    outbox
+        .acknowledge_many(&[first.batch_id.clone(), second.batch_id.clone()])
+        .await
+        .unwrap();
+
+    let pending = outbox.pending().await.unwrap();
+    assert_eq!(
+        pending
+            .iter()
+            .map(|batch| batch.batch_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![third.batch_id.as_str()]
+    );
+    let conn = open(&path).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT COUNT(*) FROM trajectory_outbox WHERE acknowledged = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap(),
+        2
+    );
 }
 
 #[tokio::test]

@@ -461,6 +461,11 @@ pub trait Provider: Send + Sync {
         ))
     }
 
+    /// Request cancellation for one exact run.
+    ///
+    /// Return [`crate::Error::RunNotActive`] when the run has already left the
+    /// provider's live execution set. Hosts treat that result as idempotent
+    /// success while the terminal event finishes projecting.
     async fn cancel(&mut self, session: &SessionId, run: &RunId) -> Result<()>;
 
     /// Release session-owned resources before the host drops the provider.

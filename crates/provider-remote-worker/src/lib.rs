@@ -365,7 +365,7 @@ impl Provider for RemoteWorkerProvider {
             .await
             .get(run)
             .cloned()
-            .ok_or_else(|| Error::Protocol(format!("remote run is not active: {run}")))?;
+            .ok_or_else(|| Error::RunNotActive(run.clone()))?;
         let response = self
             .worker
             .request(Request {
@@ -477,6 +477,7 @@ fn remap_event(event: &mut AgentEvent, run: &RunId, session: &SessionId) {
     match event {
         AgentEvent::RunStarted { run: value }
         | AgentEvent::Checkpoint { run: value, .. }
+        | AgentEvent::MessageStreamStarted { run: value, .. }
         | AgentEvent::MessageChunk { run: value, .. }
         | AgentEvent::MessagePhase { run: value, .. }
         | AgentEvent::SpecialistPresentation { run: value, .. }
@@ -840,6 +841,25 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, Error::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn adapter_reports_an_inactive_cancel_target_with_the_shared_error() {
+        let worker = Arc::new(FakeWorker::new(Vec::new()));
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker,
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        let error = provider
+            .cancel(&SessionId::new("session-1"), &RunId::new("run-finished"))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::RunNotActive(run) if run == RunId::new("run-finished")
+        ));
     }
 
     #[tokio::test]

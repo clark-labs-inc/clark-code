@@ -479,8 +479,29 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
         event,
         AgentEvent::RunFinished { outcome, .. }
             if outcome.status == RunStatus::Failed
-                && outcome.failure_kind == Some(RunFailureKind::ProviderError)
+                && outcome.failure_kind == Some(RunFailureKind::ToolProtocolExhausted)
     )));
+    let final_repair = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::Trace {
+                source, payload, ..
+            } if source == "model_tool_protocol_recovery"
+                && payload["repair_attempt"] == json!(2) =>
+            {
+                Some(payload)
+            }
+            _ => None,
+        })
+        .expect("final repair trace");
+    assert_eq!(
+        final_repair["tool_choice"],
+        json!({
+            "type": "function",
+            "function": { "name": "final_answer" },
+        })
+    );
+    assert_eq!(final_repair["advertised_tools"], json!(["final_answer"]));
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), 3);
     assert!(
@@ -503,6 +524,15 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
             "function": { "name": "final_answer" },
         }),
         "final recovery request did not pin the typed delivery tool"
+    );
+    assert_eq!(
+        final_body["tools"].as_array().map(Vec::len),
+        Some(1),
+        "final recovery advertised unrelated tools"
+    );
+    assert_eq!(
+        final_body["tools"][0]["function"]["name"],
+        json!("final_answer")
     );
 }
 

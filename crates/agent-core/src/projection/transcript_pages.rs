@@ -212,6 +212,7 @@ mod tests {
                     text: format!("message-{index}"),
                 }],
                 phase: None,
+                stream_boundary: false,
             })
             .collect();
         snapshot.model_context_checkpoint = Some(ModelContextCheckpoint {
@@ -260,6 +261,7 @@ mod tests {
                     text: format!("message-{index}"),
                 }],
                 phase: None,
+                stream_boundary: false,
             })
             .collect();
         assert!(snapshot.seal_transcript_pages().is_empty());
@@ -294,6 +296,7 @@ mod tests {
                     text: "x".repeat(1024 * 1024),
                 }],
                 phase: None,
+                stream_boundary: false,
             })
             .collect();
         snapshot.model_context_checkpoint = Some(ModelContextCheckpoint {

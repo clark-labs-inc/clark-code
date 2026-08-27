@@ -821,7 +821,7 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="px-2 pb-2">
+      <div className="flex flex-col gap-1 px-2 pb-2">
         <button
           type="button"
           onClick={() => newConversation()}
@@ -854,7 +854,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={onOpenArtifacts}
-            className="mt-1 flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+            className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
           >
             <Library className="size-4" />
             <span>Artifacts</span>
@@ -970,7 +970,7 @@ export function Sidebar({
                         onOpenMenu={(button) => openProjectMenu(g, button)}
                         onNewSession={() => startProjectSession(g)}
                       />
-                      <div className="flex flex-col">
+                      <div className="flex flex-col gap-1">
                         <AnimatePresence initial={false} mode="popLayout">
                           {g.convos.map((c) => {
                             const mutation = mutatingIds.has(c.id)
@@ -1039,7 +1039,7 @@ export function Sidebar({
               {...(reduceMotion ? EXPAND_REDUCED : EXPAND)}
               className="overflow-hidden"
             >
-              <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
+              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto px-2 pb-2">
                 <AnimatePresence initial={false} mode="popLayout">
                   {archivedConvos.map((c) => {
                     const mutation = mutatingIds.has(c.id)

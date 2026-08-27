@@ -12,6 +12,7 @@ fn map_llm_error(error: crate::llm::LlmError) -> Error {
             Error::Other(format!("platform key rejected: {message}"))
         }
         crate::llm::LlmError::Provider(message) => Error::Other(message),
+        crate::llm::LlmError::ToolProtocolExhausted(message) => Error::Other(message),
         crate::llm::LlmError::OutputQuarantined { .. } => {
             Error::Other("model response failed data-isolation validation".into())
         }

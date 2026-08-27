@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -386,13 +387,15 @@ impl LlmClient {
             on_tool_call,
         } = attempt;
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = self.http.post(&url).json(&self.body_for_model(
+        let reasoning_replays = super::reasoning_receipt::summarize_replays(messages);
+        let request_body = self.body_for_model(
             request_model,
             messages,
             tools,
             force_tool_call,
             forced_tool_name,
-        ));
+        );
+        let mut request = self.http.post(&url).json(&request_body);
         if let Some(session_id) = &self.session_id {
             request = request.header("x-session-id", session_id);
         }
@@ -516,13 +519,17 @@ impl LlmClient {
         let mut accumulator = Accumulator::default();
         // Publish completed words as their SSE deltas arrive. The open word is
         // retained so reserved provider-control markers remain quarantined
-        // even when their bytes are fragmented across network frames. Tool
+        // even when their bytes are fragmented across network frames.
         // Structured reasoning remains staged in `accumulator` until the
         // complete turn passes validation below. Tool deltas also stay
         // assembled there while a typed observer may project terminal-answer
         // arguments incrementally.
-        let mut text_guard = output_quarantine::StreamingGuard::new(on_text);
-        let mut reasoning_guard = output_quarantine::StreamingGuard::new(on_reasoning);
+        //
+        // The guards sit in cells because the tool-fragment path below must be
+        // able to flush them, and the three drain callbacks are disjoint
+        // borrows of the same stream loop.
+        let text_guard = RefCell::new(output_quarantine::StreamingGuard::new(on_text));
+        let reasoning_guard = RefCell::new(output_quarantine::StreamingGuard::new(on_reasoning));
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
@@ -546,8 +553,8 @@ impl LlmClient {
                         // too. Replaying after any such delta would append a
                         // duplicate partial `final_answer` (or corrupt another
                         // observer's tool-call projection) to the same message.
-                        retry_safe: !text_guard.published()
-                            && !reasoning_guard.published()
+                        retry_safe: !text_guard.borrow().published()
+                            && !reasoning_guard.borrow().published()
                             && !accumulator.emitted_tool_call(),
                         provider_status: None,
                         provider_error_type: Some("stream_transport".to_string()),
@@ -560,9 +567,25 @@ impl LlmClient {
                     if drain_lines(
                         &mut buffer,
                         &mut accumulator,
-                        &mut |delta| text_guard.push(delta),
-                        &mut |delta| reasoning_guard.push(delta),
-                        on_tool_call,
+                        &mut |delta| text_guard.borrow_mut().push(delta),
+                        &mut |delta| reasoning_guard.borrow_mut().push(delta),
+                        &mut |delta| {
+                            // Text and reasoning words publish only once
+                            // completed; the open word stays held so reserved
+                            // markers cannot slip through fragmented frames.
+                            // Tool fragments forward live and announce their
+                            // timeline row as soon as arguments parse, so a
+                            // tail held until end-of-stream would land below
+                            // that row — splitting the sentence mid-word and
+                            // orphaning its final word into the next message
+                            // block. Release each held word before the
+                            // fragment crosses; the whole-turn quarantine
+                            // below still inspects the complete accumulated
+                            // text.
+                            reasoning_guard.borrow_mut().flush();
+                            text_guard.borrow_mut().flush();
+                            on_tool_call(delta);
+                        },
                     ) {
                         break;
                     }
@@ -575,8 +598,8 @@ impl LlmClient {
                 category: ProviderIncidentCategory::ConnectionLost,
                 message: "model stream ended with native_finish_reason=network_error".to_string(),
                 retry_after: None,
-                retry_safe: !text_guard.published()
-                    && !reasoning_guard.published()
+                retry_safe: !text_guard.borrow().published()
+                    && !reasoning_guard.borrow().published()
                     && !accumulator.emitted_tool_call(),
                 provider_status: Some(status.as_u16()),
                 provider_error_type: Some("native_network_error".to_string()),
@@ -635,6 +658,7 @@ impl LlmClient {
         metadata.cache_status = cache_status;
         metadata.cache_age_seconds = cache_age_seconds;
         metadata.cache_ttl_seconds = cache_ttl_seconds;
+        metadata.reasoning_replays = reasoning_replays;
         if let Some(violation) = output_quarantine::inspect(&turn, messages) {
             let metadata = Box::new(turn.response_metadata.take().unwrap_or_default());
             tracing::error!(
@@ -650,8 +674,8 @@ impl LlmClient {
             }
             .into());
         }
-        reasoning_guard.flush();
-        text_guard.flush();
+        reasoning_guard.borrow_mut().flush();
+        text_guard.borrow_mut().flush();
         Ok(turn)
     }
 }

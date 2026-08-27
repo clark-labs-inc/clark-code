@@ -16,6 +16,7 @@ import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
 import { MarkdownContent, MARKDOWN_CLASSES } from "./MarkdownContent";
 import { StreamingReplyFrame } from "./StreamingReply";
+import { ZoomableImage } from "./ImageLightbox";
 import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
@@ -77,7 +78,7 @@ function UserAttachments({ blocks }: { blocks: ContentBlock[] }) {
       {blocks.map((block, i) => {
         if (block.type === "image") {
           return (
-            <img
+            <ZoomableImage
               key={i}
               src={`data:${block.mime_type};base64,${block.data}`}
               alt="Attachment"

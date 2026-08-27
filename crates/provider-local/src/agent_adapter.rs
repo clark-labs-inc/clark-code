@@ -10,10 +10,9 @@ mod required_tool_text;
 mod stream_progress;
 mod streaming_tool_call;
 mod tool_call_stream;
+mod tool_protocol_recovery;
 mod tool_title;
 mod translate;
-
-pub(crate) const TOOL_PROTOCOL_RECOVERY_EXHAUSTED: &str = "tool_protocol_recovery_exhausted:";
 
 use std::sync::Arc;
 
@@ -46,6 +45,7 @@ use tool_title::tool_title;
 use translate::*;
 
 pub(crate) use event_sink::DesktopEventSink;
+pub(crate) use tool_protocol_recovery::TOOL_PROTOCOL_EXHAUSTED_PREFIX;
 pub(crate) use translate::to_wire_messages;
 /// Running token/cost totals across a run's model calls, shared between the
 /// stream adapter (writer) and the engine (reads them into the run outcome).
@@ -170,15 +170,15 @@ impl ca::StreamFn for AgentLoopStream {
                 let tool_call_gate = Arc::new(std::sync::Mutex::new(ToolCallStreamGate::new(
                     stream_terminal_tool,
                 )));
+                let recovery_request = tool_protocol_recovery::request(&tools, repair_attempts);
                 let response = llm
                     .stream_chat_observed_with_tool_choice(
                         &messages,
-                        &tools,
+                        &recovery_request.tools,
                         crate::llm::StreamChatOptions {
                             cancel: &signal,
                             force_tool_call,
-                            forced_tool_name: (repair_attempts >= 2)
-                                .then_some(crate::tools::final_answer::FINAL_ANSWER_TOOL),
+                            forced_tool_name: recovery_request.forced_tool_name,
                         },
                         crate::llm::StreamObservers::new(
                             {
@@ -246,7 +246,8 @@ impl ca::StreamFn for AgentLoopStream {
                         source: "model_tool_protocol_recovery".to_string(),
                         payload: json!({
                             "contract": "structured_tool_protocol",
-                            "tool_choice": "auto",
+                            "tool_choice": recovery_request.tool_choice,
+                            "advertised_tools": recovery_request.advertised_tool_names(),
                             "repair_attempt": repair_attempts,
                             "response": payload,
                         }),
@@ -270,10 +271,10 @@ impl ca::StreamFn for AgentLoopStream {
                     ));
                     continue;
                 }
-                break Err(crate::llm::LlmError::Provider(format!(
-                    "{} model returned no structured tool call after broad auto guidance and a named final_answer repair attempt",
-                    TOOL_PROTOCOL_RECOVERY_EXHAUSTED
-                )));
+                break Err(crate::llm::LlmError::ToolProtocolExhausted(
+                    "model returned no structured tool call after broad auto guidance and a singleton named final_answer repair attempt"
+                        .to_string(),
+                ));
             };
 
             for usage in discarded_usage {

@@ -36,9 +36,7 @@ pub(super) fn map_loop_error_with_completion_state(
     let completion_delivery_failed = matches!(
         &error,
         agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(message))
-            if message
-                .strip_prefix("provider_error:")
-                .is_some_and(|message| message.starts_with(crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED))
+            if tool_protocol_exhausted_message(message).is_some()
     );
     let mapped = map_loop_error(error);
 
@@ -90,14 +88,25 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
                 message,
             )
         }
+        agent_loop::StreamError::Fatal(message)
+            if tool_protocol_exhausted_message(&message).is_some() =>
+        {
+            let message = tool_protocol_exhausted_message(&message)
+                .unwrap_or(&message)
+                .to_string();
+            MappedLoopError::failed(
+                RunFailureKind::ToolProtocolExhausted,
+                "tool_protocol_exhausted",
+                message,
+            )
+        }
         agent_loop::StreamError::Fatal(message) if message.starts_with("provider_error:") => {
             let message = message.strip_prefix("provider_error:").unwrap_or(&message);
-            let message = message
-                .strip_prefix(crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED)
-                .unwrap_or(message)
-                .trim()
-                .to_string();
-            MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
+            MappedLoopError::failed(
+                RunFailureKind::ProviderError,
+                "provider_error",
+                message.trim().to_string(),
+            )
         }
         agent_loop::StreamError::ProviderRateLimited(message) => {
             MappedLoopError::failed(RunFailureKind::RateLimited, "rate_limited", message)
@@ -127,6 +136,12 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
             "model returned an empty response".to_string(),
         ),
     }
+}
+
+fn tool_protocol_exhausted_message(message: &str) -> Option<&str> {
+    message
+        .strip_prefix(crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX)
+        .map(str::trim)
 }
 
 impl MappedLoopError {
@@ -190,6 +205,13 @@ mod tests {
             (
                 agent_loop::StreamError::Fatal("provider_error:upstream failed".into()),
                 RunFailureKind::ProviderError,
+            ),
+            (
+                agent_loop::StreamError::Fatal(format!(
+                    "{}model ignored named final_answer",
+                    crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
+                )),
+                RunFailureKind::ToolProtocolExhausted,
             ),
             (
                 agent_loop::StreamError::ContextOverflow("too large".into()),
@@ -286,8 +308,8 @@ mod tests {
     fn completed_goal_stays_done_when_tool_protocol_repair_is_exhausted() {
         let mapped = map_loop_error_with_completion_state(
             agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(format!(
-                "provider_error:{} model returned no structured tool call",
-                crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED
+                "{}model returned no structured tool call",
+                crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
             ))),
             false,
             true,

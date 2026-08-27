@@ -140,6 +140,94 @@ fn streaming_text_chunks_merge_into_one_message() {
 }
 
 #[test]
+fn message_boundaries_keep_late_chunks_before_their_tool_rows() {
+    let tool = |id: &str| AgentEvent::ToolCall {
+        run: run(),
+        call: ToolCall {
+            id: ToolCallId::new(id),
+            tool_name: Some("shell".into()),
+            title: "Run tests".into(),
+            kind: ToolKind::Execute,
+            status: ToolStatus::Pending,
+            locations: vec![],
+            content: vec![],
+            raw_input: None,
+            streamed_input: String::new(),
+            progress: None,
+        },
+    };
+    let events = vec![
+        AgentEvent::MessageStreamStarted {
+            run: run(),
+            role: Role::Agent,
+        },
+        AgentEvent::MessageChunk {
+            run: run(),
+            role: Role::Agent,
+            delta: ContentBlock::text("Everything else "),
+        },
+        tool("tool-1"),
+        AgentEvent::MessageChunk {
+            run: run(),
+            role: Role::Agent,
+            delta: ContentBlock::text("passes."),
+        },
+        AgentEvent::MessagePhase {
+            run: run(),
+            phase: MessagePhase::Commentary,
+        },
+        AgentEvent::MessageStreamStarted {
+            run: run(),
+            role: Role::Agent,
+        },
+        AgentEvent::MessageChunk {
+            run: run(),
+            role: Role::Agent,
+            delta: ContentBlock::text("Everything is "),
+        },
+        tool("tool-2"),
+        AgentEvent::MessageChunk {
+            run: run(),
+            role: Role::Agent,
+            delta: ContentBlock::text("green."),
+        },
+        AgentEvent::MessagePhase {
+            run: run(),
+            phase: MessagePhase::Commentary,
+        },
+    ];
+
+    let snapshot = reduce_all(&events);
+    assert_eq!(snapshot.timeline.len(), 4);
+    assert!(matches!(
+        &snapshot.timeline[0],
+        TimelineItem::Message {
+            blocks,
+            phase: Some(MessagePhase::Commentary),
+            stream_boundary: true,
+            ..
+        } if blocks == &vec![ContentBlock::text("Everything else passes.")]
+    ));
+    assert!(matches!(
+        &snapshot.timeline[1],
+        TimelineItem::ToolCall { id, .. } if id == &ToolCallId::new("tool-1")
+    ));
+    assert!(matches!(
+        &snapshot.timeline[2],
+        TimelineItem::Message {
+            blocks,
+            phase: Some(MessagePhase::Commentary),
+            stream_boundary: true,
+            ..
+        } if blocks == &vec![ContentBlock::text("Everything is green.")]
+    ));
+    assert!(matches!(
+        &snapshot.timeline[3],
+        TimelineItem::ToolCall { id, .. } if id == &ToolCallId::new("tool-2")
+    ));
+}
+
+#[test]
 fn thinking_chunks_coalesce_and_keep_order_with_text() {
     let events = vec![
         AgentEvent::RunStarted { run: run() },

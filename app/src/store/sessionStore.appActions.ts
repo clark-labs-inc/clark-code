@@ -63,6 +63,7 @@ import {
   refreshAuthSession,
   refreshStagedUpdate,
   resetCloudHistory,
+  restoreQueuedAfterDispatchFailure,
   relaunchApp,
   saveBrowserEnabled,
   saveLocalSettings,
@@ -764,6 +765,8 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             .catch((e) => {
               set({ error: String(e) });
               entry.dispatching = false;
+              restoreQueuedAfterDispatchFailure(entry, next);
+              if (get().session?.id === id) set({ queued: entry.queued });
             });
         }
       });

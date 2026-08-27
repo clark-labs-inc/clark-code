@@ -11,6 +11,7 @@ mod product;
 mod project;
 mod prompt_admission;
 mod provider_launch;
+mod provider_stream;
 mod remote_worker;
 mod session_close;
 mod skills;
@@ -24,11 +25,14 @@ pub use product::*;
 pub(crate) use project::project_executor;
 use prompt_admission::admit_and_append_prompt;
 pub(crate) use provider_launch::ProviderLaunchRequest;
+use provider_stream::{
+    cancel_after_host_interruption, seal_current_provider_run_while_account_held,
+    spawn_provider_stream,
+};
 pub use remote_worker::*;
 pub use session_close::*;
 pub use skills::*;
 
-use agent_core::provider::EventStream;
 use agent_core::{
     apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
     ProviderConfig, RunId, Session, SessionId, Snapshot,
@@ -40,67 +44,17 @@ use provider_local::LocalAgentProvider;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
 use crate::runtime_registry::{AccountKey, SessionKey};
 use crate::ssh;
-use crate::state::{ActiveRunGuard, HostSession};
+use crate::state::HostSession;
 use crate::trajectory::{CloudTrajectoryClient, CloudTrajectoryConfig};
 use crate::{builtin_providers, AppState, ProviderInfo};
 
 /// Synthetic run id used to attribute the user's own message in the timeline.
 const USER_RUN: &str = "user";
-
-fn batch_contains_terminal_run(events: &[AgentEvent]) -> bool {
-    events
-        .iter()
-        .any(|event| matches!(event, AgentEvent::RunFinished { .. }))
-}
-
-fn record_conversation_diagnostics(conversation_id: &str, events: &[AgentEvent]) {
-    for event in events {
-        match event {
-            AgentEvent::RunFinished { run, outcome } => {
-                let failure_kind = outcome
-                    .failure_kind
-                    .as_ref()
-                    .map(|kind| format!("{kind:?}"));
-                if outcome.status == agent_core::RunStatus::Failed {
-                    tracing::error!(
-                        event = "conversation_run_finished",
-                        conversation_id,
-                        run_id = %run,
-                        status = ?outcome.status,
-                        failure_kind = failure_kind.as_deref().unwrap_or("none"),
-                        stop_reason = outcome.stop_reason.as_deref().unwrap_or(""),
-                        has_error = outcome.error.is_some(),
-                        "conversation run failed"
-                    );
-                } else {
-                    tracing::info!(
-                        event = "conversation_run_finished",
-                        conversation_id,
-                        run_id = %run,
-                        status = ?outcome.status,
-                        stop_reason = outcome.stop_reason.as_deref().unwrap_or(""),
-                        "conversation run finished"
-                    );
-                }
-            }
-            AgentEvent::Error { code, run, .. } => {
-                tracing::error!(
-                    event = "conversation_provider_error",
-                    conversation_id,
-                    run_id = run.as_ref().map(RunId::as_str).unwrap_or(""),
-                    error_code = code,
-                    "provider emitted a conversation error"
-                );
-            }
-            _ => {}
-        }
-    }
-}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,114 +158,6 @@ pub(crate) async fn hydrate_mcp_servers(
         server.credential_ref = None;
     }
     Ok(())
-}
-
-/// Persist and project the remainder of one provider-owned run stream. Prompt
-/// and explicit compaction share this boundary so both get identical
-/// write-ahead durability, stale-session rejection, and snapshot emission.
-fn spawn_provider_stream(
-    app: AppHandle,
-    state: AppState,
-    entry: Arc<Mutex<HostSession>>,
-    session_key: SessionKey,
-    stream: EventStream,
-    run_guard: ActiveRunGuard,
-) {
-    tokio::spawn(async move {
-        let _run_guard = run_guard;
-        let mut stream = stream;
-        while let Some(events) = stream_batch::next_event_batch(&mut stream).await {
-            let _account_lifecycle = state.account_lifecycle.read().await;
-            record_conversation_diagnostics(session_key.as_str(), &events);
-            let specialist_projections = events
-                .iter()
-                .filter_map(|event| match event {
-                    AgentEvent::Trace {
-                        source, payload, ..
-                    } if source == "product_projection" => Some(payload.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            // A forced close owns the same gate, so a late cancellation event
-            // cannot reopen the snapshot after its terminal transition.
-            let projection_gate = entry.lock().await.projection_gate.clone();
-            let _projection = projection_gate.lock().await;
-            // Stop if this session was closed or superseded by a reopen: the
-            // captured provider must never clobber a newer session with the
-            // same public conversation id.
-            let still_current = state
-                .runtime_registry
-                .current_session_entry(&session_key)
-                .await
-                .is_some_and(|live| Arc::ptr_eq(&live, &entry));
-            if !still_current {
-                break;
-            }
-            let (trajectory, closing) = {
-                let session = entry.lock().await;
-                (session.trajectory.clone(), session.closing)
-            };
-            if closing {
-                break;
-            }
-            let Some(trajectory) = trajectory else {
-                break;
-            };
-            let checkpoint = match trajectory.append(&events).await {
-                Ok(checkpoint) => checkpoint,
-                Err(error) => {
-                    tracing::error!(%error, "local trajectory outbox append failed; interrupting projection");
-                    let _ = app.emit(
-                        "cloud-sync-warning",
-                        "Clark Code could not safely save the next part of this run, so it stopped at the last saved point.",
-                    );
-                    break;
-                }
-            };
-            let snapshot = {
-                let mut session = entry.lock().await;
-                for event in &events {
-                    apply(&mut session.snapshot, event);
-                }
-                session.snapshot.history_checkpoint = Some(checkpoint);
-                session.snapshot.clone()
-            };
-            crate::snapshot_emit::emit_snapshot(&app, &snapshot);
-            for payload in specialist_projections {
-                match state
-                    .product
-                    .publish_projection(
-                        &payload,
-                        crate::product::ProductRequestContext {
-                            app: &app,
-                            state: &state,
-                        },
-                    )
-                    .await
-                {
-                    Ok(Some(receipt)) => {
-                        let _ = app.emit("specialist-projection-published", receipt);
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        tracing::warn!(%error, "specialist overview publication failed");
-                        let _ = app.emit(
-                            "cloud-sync-warning",
-                            format!(
-                                "The specialist run is retained locally, but its overview could not be published: {error}"
-                            ),
-                        );
-                    }
-                }
-            }
-            // RunFinished is the provider contract's terminal boundary. Do not
-            // keep the native update guard alive waiting for a provider stream
-            // that failed to close after it already told the UI the run settled.
-            if batch_contains_terminal_run(&events) {
-                break;
-            }
-        }
-    });
 }
 
 #[tauri::command]
@@ -873,14 +719,25 @@ pub async fn prompt(
     // Submission is not complete until the provider has allocated the run.
     // Persist and project that first lifecycle fact before returning its ID so
     // mobile command receipts and the trajectory can share one identity.
-    let first = stream
-        .next()
-        .await
-        .ok_or("local agent prompt ended before it allocated a run")?;
-    let run_id = match &first {
-        AgentEvent::RunStarted { run } => run.as_str().to_string(),
-        _ => return Err("local agent prompt did not begin with a run identity".into()),
+    let first = match stream.next().await {
+        Some(first) => first,
+        None => {
+            let mut session = entry.lock().await;
+            session.snapshot.starting = false;
+            crate::snapshot_emit::emit_snapshot(&app, &session.snapshot);
+            return Err("local agent prompt ended before it allocated a run".into());
+        }
     };
+    let run = match &first {
+        AgentEvent::RunStarted { run } => run.clone(),
+        _ => {
+            let mut session = entry.lock().await;
+            session.snapshot.starting = false;
+            crate::snapshot_emit::emit_snapshot(&app, &session.snapshot);
+            return Err("local agent prompt did not begin with a run identity".into());
+        }
+    };
+    let run_id = run.as_str().to_string();
     tracing::info!(
         event = "conversation_run_allocated",
         conversation_id = %sid,
@@ -899,7 +756,24 @@ pub async fn prompt(
         session.snapshot.clone()
     };
     crate::snapshot_emit::emit_snapshot(&app, &allocated_snapshot);
-    let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
+    let checkpoint = match trajectory.append(std::slice::from_ref(&first)).await {
+        Ok(checkpoint) => checkpoint,
+        Err(append_error) => {
+            cancel_after_host_interruption(&entry, &sid, &run, "run_started_append_failed").await;
+            seal_current_provider_run_while_account_held(
+                &app,
+                state.inner(),
+                &entry,
+                &session_key,
+                &run,
+                "run_started_append_failed",
+                "Clark Code could not persist the allocated run identity and stopped this run at the last saved point.",
+                "Clark Code could not safely save the start of this run, so it stopped before continuing.",
+            )
+            .await;
+            return Err(format!("save allocated run identity: {append_error}"));
+        }
+    };
     let snapshot = {
         let mut session = entry.lock().await;
         session.snapshot.history_checkpoint = Some(checkpoint);
@@ -914,6 +788,7 @@ pub async fn prompt(
         state.inner().clone(),
         entry,
         session_key,
+        run,
         stream,
         run_guard,
     );
@@ -960,7 +835,18 @@ pub async fn compact(
         .next()
         .await
         .ok_or("context compaction ended before it started")?;
-    let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
+    let run = match &first {
+        AgentEvent::RunStarted { run } => run.clone(),
+        _ => return Err("context compaction did not begin with a run identity".into()),
+    };
+    let checkpoint = match trajectory.append(std::slice::from_ref(&first)).await {
+        Ok(checkpoint) => checkpoint,
+        Err(append_error) => {
+            cancel_after_host_interruption(&entry, &sid, &run, "compaction_started_append_failed")
+                .await;
+            return Err(format!("save context compaction start: {append_error}"));
+        }
+    };
     let snapshot = {
         let mut session = entry.lock().await;
         apply(&mut session.snapshot, &first);
@@ -974,6 +860,7 @@ pub async fn compact(
         state.inner().clone(),
         entry,
         session_key,
+        run,
         stream,
         run_guard,
     );
@@ -995,10 +882,20 @@ pub async fn cancel(
         .await
         .ok_or("no such session")?;
     let mut s = entry.lock().await;
-    s.provider
-        .cancel(&sid, &RunId::new(run_id))
-        .await
-        .map_err(|e| e.to_string())
+    match s.provider.cancel(&sid, &RunId::new(&run_id)).await {
+        Ok(()) => Ok(()),
+        // The shared provider contract makes an already-settled cancellation
+        // idempotent while its terminal batch finishes projecting.
+        Err(agent_core::Error::RunNotActive(_)) => {
+            tracing::info!(
+                conversation_id = %sid,
+                %run_id,
+                "cancel arrived after the provider run left the live execution set"
+            );
+            Ok(())
+        }
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -1150,30 +1047,3 @@ pub async fn clear_goal(
 mod real_backend_tests;
 
 pub(crate) mod session_open;
-
-#[cfg(test)]
-mod tests {
-    use super::batch_contains_terminal_run;
-    use agent_core::{AgentEvent, RunId, RunOutcome, RunStatus};
-
-    #[test]
-    fn terminal_run_event_ends_the_native_drain_boundary() {
-        let started = [AgentEvent::RunStarted {
-            run: RunId::new("run-1"),
-        }];
-        assert!(!batch_contains_terminal_run(&started));
-
-        let finished = [AgentEvent::RunFinished {
-            run: RunId::new("run-1"),
-            outcome: RunOutcome {
-                status: RunStatus::Done,
-                stop_reason: None,
-                error: None,
-                failure_kind: None,
-                usage: None,
-                execution: None,
-            },
-        }];
-        assert!(batch_contains_terminal_run(&finished));
-    }
-}

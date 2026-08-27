@@ -1,0 +1,27 @@
+# Renderer model catalog for the local coding agent.
+#
+# This is the single source of truth for the model choices the composer picker
+# exposes. Each entry:
+#   id                    - model id sent to the provider (provider-specific slug,
+#                            e.g. an OpenRouter model path).
+#   label                 - short display name in the picker.
+#   hint                  - one-line description shown under the label.
+#   defaultReasoningEffort - the model's maximum supported reasoning level; the
+#                            picker pins every session to it (effort overrides
+#                            are retired).
+#
+# The neutral open-source build ships only local OpenAI-compatible models. A
+# branded composition reads the same shape from its own catalog (see
+# modelCatalog.ts) so a hosted/DynamoDB-backed catalog can feed the picker
+# identically.
+default: local-model
+defaultReasoningEffort: high
+models:
+  - id: local-model
+    label: Local model
+    hint: OpenAI-compatible local coding model
+    defaultReasoningEffort: high
+  - id: local-model-large
+    label: Large local model
+    hint: Higher-capacity OpenAI-compatible local model
+    defaultReasoningEffort: max

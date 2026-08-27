@@ -56,7 +56,7 @@ export function ProjectHeader({
   return (
     <div
       title={group.title}
-      className="group mb-0.5 mt-2 flex h-7 items-center gap-2 rounded-lg px-2 text-base font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
+      className="group mb-1 mt-3 flex h-7 items-center gap-2 rounded-lg px-2 text-base font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
     >
       {reorderable && (
         <span

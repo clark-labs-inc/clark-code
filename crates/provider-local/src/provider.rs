@@ -1147,10 +1147,7 @@ impl Provider for LocalAgentProvider {
 
     async fn cancel(&mut self, _session: &SessionId, run: &RunId) -> Result<()> {
         if !self.run_cancellations.cancel(run) {
-            return Err(Error::Other(format!(
-                "no active local run named {}",
-                run.as_str()
-            )));
+            return Err(Error::RunNotActive(run.clone()));
         }
         self.control.lock().await.clear();
         Ok(())

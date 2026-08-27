@@ -22,6 +22,12 @@ pub enum Error {
     #[error("session not found: {0}")]
     SessionNotFound(String),
 
+    /// The addressed run has already left the provider's live execution set.
+    /// Hosts may treat cancellation of this state as idempotent while waiting
+    /// for the provider's terminal lifecycle event to finish projecting.
+    #[error("run is not active: {0}")]
+    RunNotActive(crate::RunId),
+
     #[error("io error: {0}")]
     Io(String),
 

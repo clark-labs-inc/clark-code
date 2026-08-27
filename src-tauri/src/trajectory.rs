@@ -10,13 +10,20 @@ use tokio::sync::Mutex;
 
 use crate::state::AppState;
 
+// Clark's cloud trajectory endpoint accepts at most 1,000 events per append.
+// Keep a conservative JSON ceiling below the host's request-body limit too:
+// individual durable batches remain intact, but the network no longer pays
+// one request/transaction for every tiny streaming projection batch.
+const MAX_CLOUD_APPEND_EVENTS: usize = 1_000;
+const MAX_CLOUD_APPEND_JSON_BYTES: usize = 1_000_000;
+
 mod cloud_boundary;
 mod cloud_compaction;
 mod outbox;
 use cloud_boundary::{ProductTrajectoryCloudBoundary, TrajectoryCloudBoundary};
 pub(crate) use outbox::{
     acknowledge_snapshot_publication, commit_pending_snapshot, delete_conversation,
-    interrupt_live_runs, mark_staged_artifact_uploaded, merge_local_summaries,
+    interrupt_live_runs, interrupt_run, mark_staged_artifact_uploaded, merge_local_summaries,
     migrate_legacy_database, quarantine_snapshot_branch, recover_snapshot, set_archived,
     stage_artifact, staged_artifact, wait_for_acknowledged_prefix,
 };
@@ -83,7 +90,7 @@ pub struct CloudTrajectoryClient {
     flush_retry_attempt: Arc<AtomicUsize>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Conversation {
     title: String,
@@ -108,6 +115,12 @@ pub(super) struct EventRecord {
 pub(super) struct AppendRequest {
     conversation: Conversation,
     events: Vec<EventRecord>,
+}
+
+struct PendingDelivery {
+    request: AppendRequest,
+    batch_ids: Vec<String>,
+    approximate_json_bytes: usize,
 }
 
 impl CloudTrajectoryClient {
@@ -283,9 +296,10 @@ impl CloudTrajectoryClient {
     }
 
     async fn flush_pending(&self) -> Result<(), String> {
-        for batch in self.outbox.pending().await? {
-            self.deliver(&batch.request).await?;
-            self.outbox.acknowledge(&batch.batch_id).await?;
+        let deliveries = coalesce_pending_batches(self.outbox.pending().await?)?;
+        for delivery in deliveries {
+            self.deliver(&delivery.request).await?;
+            self.outbox.acknowledge_many(&delivery.batch_ids).await?;
         }
         Ok(())
     }
@@ -355,6 +369,63 @@ impl CloudTrajectoryClient {
     }
 }
 
+fn coalesce_pending_batches(
+    batches: Vec<outbox::PendingBatch>,
+) -> Result<Vec<PendingDelivery>, String> {
+    let mut deliveries = Vec::new();
+    let mut current: Option<PendingDelivery> = None;
+
+    for batch in batches {
+        if batch.request.events.is_empty() {
+            return Err(format!(
+                "trajectory outbox batch {} contains no events",
+                batch.batch_id
+            ));
+        }
+        if batch.request.events.len() > MAX_CLOUD_APPEND_EVENTS {
+            return Err(format!(
+                "trajectory outbox batch {} contains {} events; maximum is {MAX_CLOUD_APPEND_EVENTS}",
+                batch.batch_id,
+                batch.request.events.len()
+            ));
+        }
+        let batch_bytes = serde_json::to_vec(&batch.request)
+            .map_err(|error| format!("serialize pending trajectory batch: {error}"))?
+            .len();
+        let should_flush = current.as_ref().is_some_and(|delivery| {
+            delivery.request.conversation != batch.request.conversation
+                || delivery.request.events.len() + batch.request.events.len()
+                    > MAX_CLOUD_APPEND_EVENTS
+                || delivery.approximate_json_bytes.saturating_add(batch_bytes)
+                    > MAX_CLOUD_APPEND_JSON_BYTES
+        });
+        if should_flush {
+            deliveries.push(current.take().expect("checked current delivery"));
+        }
+
+        match &mut current {
+            Some(delivery) => {
+                delivery.request.events.extend(batch.request.events);
+                delivery.batch_ids.push(batch.batch_id);
+                delivery.approximate_json_bytes =
+                    delivery.approximate_json_bytes.saturating_add(batch_bytes);
+            }
+            None => {
+                current = Some(PendingDelivery {
+                    request: batch.request,
+                    batch_ids: vec![batch.batch_id],
+                    approximate_json_bytes: batch_bytes,
+                });
+            }
+        }
+    }
+
+    if let Some(delivery) = current {
+        deliveries.push(delivery);
+    }
+    Ok(deliveries)
+}
+
 static LAST_EVENT_TIMESTAMP_MS: AtomicI64 = AtomicI64::new(0);
 
 fn reserve_timestamps(count: usize) -> i64 {
@@ -405,10 +476,40 @@ mod auth_refresh_e2e;
 #[cfg(test)]
 mod tests {
     use super::{
-        build_git_dirty, build_git_sha, event_kind, normalize_snapshot_value,
-        should_emit_cloud_sync_warning,
+        build_git_dirty, build_git_sha, coalesce_pending_batches, event_kind,
+        normalize_snapshot_value, should_emit_cloud_sync_warning, AppendRequest, Conversation,
+        EventRecord,
     };
+    use crate::trajectory::outbox::PendingBatch;
     use serde_json::json;
+
+    fn pending_batch(id: usize, event_count: usize, payload_bytes: usize) -> PendingBatch {
+        let conversation = Conversation {
+            title: "Coalescing fixture".into(),
+            provider: "local".into(),
+            project: None,
+            repository_fingerprint: None,
+            remote_host: None,
+            mode: None,
+        };
+        let events = (0..event_count)
+            .map(|offset| EventRecord {
+                event_id: uuid::Uuid::new_v4(),
+                run_id: Some("run-coalesce".into()),
+                event_kind: "message_chunk".into(),
+                recorded_at_unix_ms: i64::try_from(id * 1_000 + offset).unwrap(),
+                payload: json!({"padding": "x".repeat(payload_bytes)}),
+            })
+            .collect();
+        PendingBatch {
+            local_seq: i64::try_from(id).unwrap(),
+            batch_id: format!("batch-{id}"),
+            request: AppendRequest {
+                conversation,
+                events,
+            },
+        }
+    }
 
     #[test]
     fn trace_kind_preserves_provider_event_type() {
@@ -487,5 +588,39 @@ mod tests {
 
         assert_eq!(normalized["timeline"][0]["checklist"]["steps"], json!([]));
         assert!(serde_json::from_value::<agent_core::Snapshot>(normalized).is_ok());
+    }
+
+    #[test]
+    fn tiny_durable_batches_share_one_bounded_cloud_append() {
+        let batches = (0..250).map(|id| pending_batch(id, 4, 8)).collect();
+        let deliveries = coalesce_pending_batches(batches).unwrap();
+
+        assert_eq!(deliveries.len(), 1);
+        assert_eq!(deliveries[0].request.events.len(), 1_000);
+        assert_eq!(deliveries[0].batch_ids.len(), 250);
+    }
+
+    #[test]
+    fn cloud_appends_split_at_event_and_body_contracts() {
+        let event_bounded = coalesce_pending_batches(vec![
+            pending_batch(1, 600, 1),
+            pending_batch(2, 400, 1),
+            pending_batch(3, 1, 1),
+        ])
+        .unwrap();
+        assert_eq!(
+            event_bounded
+                .iter()
+                .map(|delivery| delivery.request.events.len())
+                .collect::<Vec<_>>(),
+            vec![1_000, 1]
+        );
+
+        let byte_bounded = coalesce_pending_batches(vec![
+            pending_batch(4, 1, 600_000),
+            pending_batch(5, 1, 600_000),
+        ])
+        .unwrap();
+        assert_eq!(byte_bounded.len(), 2);
     }
 }

@@ -198,6 +198,72 @@ async fn desktop_sink_marks_text_with_tool_calls_as_commentary() {
 }
 
 #[tokio::test]
+async fn desktop_sink_preserves_each_upstream_assistant_message_boundary() {
+    let (send, receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None)),
+        None,
+    );
+
+    for chunks in [
+        ["Everything else ", "passes."].as_slice(),
+        ["All ", "green."].as_slice(),
+    ] {
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::MessageStart {
+                message: empty_assistant(ca::StopReason::EndTurn, None),
+            },
+        )
+        .await;
+        for delta in chunks {
+            ca::EventSink::emit(
+                &sink,
+                ca::AgentEvent::MessageUpdate {
+                    partial: empty_assistant(ca::StopReason::EndTurn, None),
+                    chunk: ca::AssistantStreamChunk::Text {
+                        delta: (*delta).into(),
+                    },
+                },
+            )
+            .await;
+        }
+    }
+
+    let events = std::iter::from_fn(|| receive.try_recv().ok())
+        .filter(|event| !matches!(event, desktop::AgentEvent::Trace { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, desktop::AgentEvent::MessageStreamStarted { .. }))
+            .count(),
+        2,
+        "each upstream MessageStart must survive normalization: {events:?}",
+    );
+    let snapshot = agent_core::reduce_all(&events);
+    let messages = snapshot
+        .timeline
+        .iter()
+        .filter_map(|item| match item {
+            agent_core::TimelineItem::Message { blocks, .. } => Some(blocks),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages[0],
+        &vec![desktop::ContentBlock::text("Everything else passes.")]
+    );
+    assert_eq!(
+        messages[1],
+        &vec![desktop::ContentBlock::text("All green.")]
+    );
+}
+
+#[tokio::test]
 async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
     let (send, receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(

@@ -42,6 +42,7 @@
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "three": "^0.185.1",
+    "yaml": "^2.9.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

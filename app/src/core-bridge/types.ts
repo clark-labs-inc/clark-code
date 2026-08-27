@@ -266,6 +266,7 @@ export type RunFailureKind =
   | "platform_key_rejected"
   | "access_scope_required"
   | "provider_error"
+  | "tool_protocol_exhausted"
   | "rate_limited"
   | "transport_error"
   | "context_overflow"
@@ -412,7 +413,14 @@ export interface GoalState {
 }
 
 export type TimelineItem =
-  | { item: "message"; run: string; role: Role; blocks: ContentBlock[]; phase?: MessagePhase }
+  | {
+      item: "message";
+      run: string;
+      role: Role;
+      blocks: ContentBlock[];
+      phase?: MessagePhase;
+      stream_boundary?: boolean;
+    }
   | { item: "specialist_presentation"; run: string; presentation: SpecialistPresentationPayload }
   | { item: "tool_call"; id: string; run?: string }
   | { item: "artifact"; id: string }

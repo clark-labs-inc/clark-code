@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session, type Snapshot } from "../core-bridge/types";
-import { liveSessions, newLiveEntry } from "./sessionStore.runtime";
+import {
+  liveSessions,
+  newLiveEntry,
+  restoreQueuedAfterDispatchFailure,
+} from "./sessionStore.runtime";
 
-// Messages sent during any active run queue by default. A queued, text-only
-// local message can still steer the live run when the user explicitly asks.
+// Messages sent during any active run queue by default. Explicit steering
+// cancels the current run and keeps the message queued for the normal drain.
 
 const localSession = { id: "sess-1", provider: "local" } as unknown as Session;
 const cloudSession = { id: "conv-1", provider: "local" } as unknown as Session;
@@ -285,7 +289,7 @@ describe("queued follow-ups and explicit steering", () => {
     expect(useSessionStore.getState().error).toContain("cancel transport unavailable");
   });
 
-  it("steers only when explicitly requested, then removes the queued message", async () => {
+  it("stops current work and keeps the steering message queued for the next run", async () => {
     const bridge = stubBridge();
     useSessionStore.setState({
       bridge,
@@ -297,10 +301,9 @@ describe("queued follow-ups and explicit steering", () => {
     const [queued] = useSessionStore.getState().queued;
     await useSessionStore.getState().steerQueued(queued.id);
 
-    expect(bridge.steer).toHaveBeenCalledWith("sess-1", [
-      { type: "text", text: "follow-up" },
-    ]);
-    expect(useSessionStore.getState().queued).toEqual([]);
+    expect(bridge.cancel).toHaveBeenCalledWith("sess-1", "run-1");
+    expect(bridge.steer).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().queued.map((q) => q.text)).toEqual(["follow-up"]);
     expect(bridge.prompt).not.toHaveBeenCalled();
   });
 
@@ -357,10 +360,10 @@ describe("queued follow-ups and explicit steering", () => {
     expect(useSessionStore.getState().error).toContain("native cancel failed");
   });
 
-  it("keeps the message queued when explicit steering loses the active-run race", async () => {
+  it("keeps the message queued when steering cannot stop the active run", async () => {
     const bridge = stubBridge({
-      steer: vi.fn(async () => {
-        throw new Error("no active run to steer");
+      cancel: vi.fn(async () => {
+        throw new Error("no active run to stop");
       }),
     });
     useSessionStore.setState({
@@ -374,6 +377,25 @@ describe("queued follow-ups and explicit steering", () => {
     await useSessionStore.getState().steerQueued(queued.id);
 
     expect(useSessionStore.getState().queued.map((q) => q.text)).toEqual(["follow-up"]);
+  });
+
+  it("restores a steered follow-up if its next-run prompt is rejected", () => {
+    const entry = newLiveEntry(localSession, {
+      historyPrefix: null,
+      remote: null,
+      remoteHost: null,
+      projectRoot: "/tmp/project",
+    });
+    const steered = { id: "steer-1", text: "use vLLM", uploads: [], skills: [] };
+    entry.queued = [{ id: "later-1", text: "then verify it", uploads: [], skills: [] }];
+
+    restoreQueuedAfterDispatchFailure(entry, steered);
+    restoreQueuedAfterDispatchFailure(entry, steered);
+
+    expect(entry.queued.map((message) => message.text)).toEqual([
+      "use vLLM",
+      "then verify it",
+    ]);
   });
 
   it("cloud sessions keep the queue behavior", async () => {

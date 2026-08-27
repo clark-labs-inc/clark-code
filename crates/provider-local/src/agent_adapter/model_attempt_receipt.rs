@@ -47,6 +47,10 @@ pub(super) fn emit_model_attempt_receipt(
             "provider_route": provider_route,
             "request_attempts": attempt,
             "rate_limit_retries": metadata.and_then(|value| value.rate_limit_retries),
+            "reasoning_capture": metadata.and_then(|value| value.reasoning_capture.as_ref()),
+            "reasoning_replays": metadata
+                .map(|value| value.reasoning_replays.as_slice())
+                .unwrap_or_default(),
             "outcome": outcome,
             "attempt": attempt,
         }),

@@ -18,7 +18,7 @@ mod recovery;
 mod schema;
 mod storage;
 pub(crate) use barrier::wait_for_acknowledged_prefix;
-pub(crate) use recovery::interrupt_live_runs;
+pub(crate) use recovery::{interrupt_live_runs, interrupt_run};
 pub(crate) use storage::migrate_legacy_database;
 use storage::{open, owner_key, reclaim_free_pages, sql_error};
 
@@ -96,9 +96,14 @@ impl TrajectoryOutbox {
     }
 
     pub async fn acknowledge(&self, batch_id: &str) -> Result<(), String> {
-        let this = self.clone();
         let batch_id = batch_id.to_string();
-        blocking(move || this.acknowledge_sync(&batch_id)).await
+        self.acknowledge_many(std::slice::from_ref(&batch_id)).await
+    }
+
+    pub async fn acknowledge_many(&self, batch_ids: &[String]) -> Result<(), String> {
+        let this = self.clone();
+        let batch_ids = batch_ids.to_vec();
+        blocking(move || this.acknowledge_many_sync(&batch_ids)).await
     }
 
     fn initialize_sync(
@@ -222,24 +227,26 @@ impl TrajectoryOutbox {
         Ok(batches)
     }
 
-    fn acknowledge_sync(&self, batch_id: &str) -> Result<(), String> {
+    fn acknowledge_many_sync(&self, batch_ids: &[String]) -> Result<(), String> {
         let mut conn = open(&self.path)?;
         let tx = conn.transaction().map_err(sql_error)?;
-        tx.execute(
-            r#"UPDATE trajectory_outbox SET acknowledged = 1
-               WHERE batch_id = ?1 AND owner_key = ?2 AND conversation_id = ?3"#,
-            params![batch_id, self.owner_key, self.conversation_id],
-        )
-        .map_err(sql_error)?;
-        tx.execute(
-            r#"DELETE FROM trajectory_outbox
-               WHERE batch_id = ?1 AND acknowledged = 1 AND local_seq <= (
-                   SELECT checkpoint_seq FROM journal_conversation
-                   WHERE owner_key = ?2 AND conversation_id = ?3
-               )"#,
-            params![batch_id, self.owner_key, self.conversation_id],
-        )
-        .map_err(sql_error)?;
+        for batch_id in batch_ids {
+            tx.execute(
+                r#"UPDATE trajectory_outbox SET acknowledged = 1
+                   WHERE batch_id = ?1 AND owner_key = ?2 AND conversation_id = ?3"#,
+                params![batch_id, self.owner_key, self.conversation_id],
+            )
+            .map_err(sql_error)?;
+            tx.execute(
+                r#"DELETE FROM trajectory_outbox
+                   WHERE batch_id = ?1 AND acknowledged = 1 AND local_seq <= (
+                       SELECT checkpoint_seq FROM journal_conversation
+                       WHERE owner_key = ?2 AND conversation_id = ?3
+                   )"#,
+                params![batch_id, self.owner_key, self.conversation_id],
+            )
+            .map_err(sql_error)?;
+        }
         tx.commit().map_err(sql_error)?;
         Ok(())
     }
