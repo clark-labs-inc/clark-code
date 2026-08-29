@@ -451,6 +451,14 @@ export function specialistAccessAfterLoadFailure(
   return entitlementVerified ? "ready" : "offline";
 }
 
+/** Included specialists are authorized by the signed product catalog. They do
+ * not have a subscription entitlement or organization dashboard to verify. */
+export function specialistNeedsEntitlementVerification(
+  entitlement: SpecialistDefinition["entitlement"],
+): boolean {
+  return entitlement === "subscription";
+}
+
 export function specialistAccessCopy(
   state: SpecialistAccessState,
   kind: SpecialistKind,

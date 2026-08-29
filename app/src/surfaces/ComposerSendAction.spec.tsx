@@ -18,7 +18,7 @@ const baseProps = {
 describe("ComposerSendAction", () => {
   it("shows a non-repeatable sending state while admission is pending", () => {
     const html = renderToStaticMarkup(
-      <ComposerSendAction {...baseProps} submitting busy />,
+      <ComposerSendAction {...baseProps} submitting hasContent={false} />,
     );
 
     expect(html).toContain('aria-label="Sending message"');
@@ -26,6 +26,16 @@ describe("ComposerSendAction", () => {
     expect(html).toContain("disabled");
     expect(html).not.toContain('aria-label="Queue message"');
     expect(html).not.toContain('aria-label="Stop"');
+  });
+
+  it("offers Stop as soon as admission projects a cancellable active run", () => {
+    const html = renderToStaticMarkup(
+      <ComposerSendAction {...baseProps} submitting busy hasContent={false} />,
+    );
+
+    expect(html).toContain('aria-label="Stop"');
+    expect(html).not.toContain('aria-label="Sending message"');
+    expect(html).not.toContain('aria-busy="true"');
   });
 
   it("offers Stop only after admission completes and the next draft is empty", () => {

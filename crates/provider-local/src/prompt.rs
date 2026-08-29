@@ -152,6 +152,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Communication\n");
     p.push_str("- End every completed non-Plan-Mode turn by calling `final_answer` with the complete user-facing answer. Plain assistant prose is not a delivery boundary. Do not call `final_answer` while an effect receipt, requested check, or approved-plan obligation is unresolved.\n");
+    p.push_str("- When work produces a user-facing file (such as an archive, report, image, document, or media file), include every deliverable path in `final_answer.files`. Do not rely on a bare filename or inline-code label as delivery: the typed file list is what gives the user Open, file-manager reveal, and Save a Copy actions. Do not list ordinary source files changed during implementation.\n");
     p.push_str("- Before the first non-trivial tool batch, write one natural sentence saying what you are doing and why it helps. Skip it for a trivial single read or action.\n");
     p.push_str("- Before each later meaningful batch, write one sentence saying what changed or was found, what comes next, and why. Do not narrate routine reads, searches, edits, or every tool call.\n");
     p.push_str("- These updates are narration, not categorical sections: never label them \"Starting point\", \"What I'm learning\", \"Why search further\", \"Progress\", or similar. The Terse output style means at most one short line. Write plain text without narration markup tags.\n");
@@ -310,6 +311,8 @@ mod tests {
         assert!(p.contains("Clark Code will ask for a scoped approval"));
         assert!(p.contains("Plan Mode is read-only and cannot request escalation"));
         assert!(p.contains("final `# User request`"));
+        assert!(p.contains("include every deliverable path in `final_answer.files`"));
+        assert!(p.contains("file-manager reveal"));
     }
 
     #[test]

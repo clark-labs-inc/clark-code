@@ -65,6 +65,7 @@ import { ComposerQueuedMessages } from "./ComposerQueuedMessages";
 import { ComposerGatedWorkflowGate } from "./ComposerGatedWorkflowGate";
 import { ModelPill, QuickChatModelLabel } from "./ComposerControls";
 import { ComposerSendAction } from "./ComposerSendAction";
+import { ComposerDraftConflict } from "./ComposerDraftConflict";
 import {
   SandboxSetupCard,
   sandboxBlocksSubmission,
@@ -592,7 +593,7 @@ function ScopedComposer() {
       try {
         const result = await draft.cloud.acceptSubmitted(draftConversationId, value);
         if (result?.outcome === "preserved_newer") {
-          flashNotice("A newer cloud draft was preserved in the previous composer.");
+          flashNotice("Another saved draft remains in the previous composer.");
         }
       } catch {
         flashNotice("The specialist request moved, but its previous cloud draft still needs to sync.");
@@ -776,8 +777,8 @@ function ScopedComposer() {
     const settleAcceptedDraft = async (): Promise<"preserved_newer" | "failed" | null> => {
       // Clear locally again after provider acceptance, settle any serialized
       // writer, and remove only this submitted text from cloud persistence. A
-      // newer cross-device edit is preserved; a repeatedly rejected current
-      // revision is visible to the user instead of spinning in a 409 loop.
+      // different saved value is left for explicit review; a repeatedly
+      // rejected current revision is visible instead of spinning in a 409 loop.
       saveComposerDraft(draftOwner, draftConversationId, "");
       try {
         const result = await draft.cloud.acceptSubmitted(
@@ -791,7 +792,7 @@ function ScopedComposer() {
     };
     const notifyDraftSettle = (result: Awaited<ReturnType<typeof settleAcceptedDraft>>) => {
       if (result === "preserved_newer") {
-        flashNotice("Message sent. A newer cloud draft from another device was preserved.");
+        flashNotice("Message sent. Another saved draft is available to review.");
       } else if (result === "failed") {
         flashNotice("Message sent, but its cloud draft could not be cleared. Your local draft state is preserved.");
       }
@@ -1150,12 +1151,10 @@ function ScopedComposer() {
         </p>
       )}
       {draft.cloud.status === "conflict" && (
-        <p
-          role="status"
-          className="conversation-column-width mx-auto mt-2 w-full px-1 text-xs text-warning"
-        >
-                Draft cloud sync is paused. Your text is safe on this device.
-        </p>
+        <ComposerDraftConflict
+          onKeepCurrent={draft.cloud.keepCurrentDraft}
+          onUseSynced={draft.cloud.useSyncedDraft}
+        />
       )}
       <SkillsPanel
         open={skillsOpen}

@@ -22,6 +22,7 @@ import {
   projectedSpecialistAccess,
   specialistAccessAfterLoadFailure,
   specialistAccessBadge,
+  specialistNeedsEntitlementVerification,
   type ScoutTab,
   type SecurityTab,
   type ScientistTab,
@@ -164,13 +165,15 @@ export function SpecialistWorkspace({
   const context = boundContext?.kind === active ? boundContext : contexts[active] ?? { kind: active };
   const preview = previewAccess();
   const projected = preview
-    ? preview === "paid" ? "ready" : "free"
+    ? specialistNeedsEntitlementVerification(definition.entitlement)
+      ? preview === "paid" ? "ready" : "free"
+      : "ready"
     : projectedSpecialistAccess(Boolean(auth), productAccess.access, active);
   const accessCapability = capabilityAccess(productAccess.access, active);
   const access = projected === "ready"
     ? serverAccess === "unknown" ? "loading" : serverAccess
     : projected;
-  const credentials = cloudCreds(auth) ?? (preview === "paid" ? previewCredentials() : null);
+  const credentials = cloudCreds(auth) ?? (preview ? previewCredentials() : null);
 
   const clearSensitiveData = useCallback(() => {
     setData(EMPTY_DATA);
@@ -187,6 +190,13 @@ export function SpecialistWorkspace({
     if (projected !== "ready" || !credentials) {
       clearSensitiveData();
       setServerAccess(projected === "action_needed" ? "action_needed" : "free");
+      return;
+    }
+    if (!specialistNeedsEntitlementVerification(definition.entitlement)) {
+      clearSensitiveData();
+      setError(null);
+      setProjectionWarning(null);
+      setServerAccess("ready");
       return;
     }
     setLoading(true);
@@ -379,6 +389,7 @@ export function SpecialistWorkspace({
     context.workspaceId,
     credentials?.accountScope,
     cwd,
+    definition.entitlement,
     projected,
     setContext,
   ]);

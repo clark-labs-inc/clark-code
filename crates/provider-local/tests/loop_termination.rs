@@ -4,7 +4,9 @@
 //! provider composition root rather than only the underlying `agent-loop`
 //! loop, so production builder defaults and completion plugins are in scope.
 
-use agent_core::domain::{AgentEvent, ContentBlock, GoalStatus, RunFailureKind, RunStatus};
+use agent_core::domain::{
+    AgentEvent, ArtifactKind, ContentBlock, GoalStatus, RunFailureKind, RunStatus,
+};
 use agent_core::provider::{PromptInput, Provider, ProviderConfig, SessionOptions};
 use futures::StreamExt;
 use serde_json::{json, Value};
@@ -286,6 +288,58 @@ async fn structured_final_answer_is_terminal_after_one_model_response() {
         1,
         "the typed final-answer tool is the natural completion boundary"
     );
+}
+
+#[tokio::test]
+async fn structured_final_answer_delivers_an_existing_file_as_an_artifact() {
+    let root = tempfile::tempdir().expect("temporary project");
+    let archive = root.path().join("parrot-emoji-pack.zip");
+    std::fs::write(&archive, b"PK fake archive").expect("write deliverable");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind model endpoint");
+    let address = listener.local_addr().expect("model endpoint address");
+    let server = tokio::spawn(serve(
+        listener,
+        vec![tool_call_body(
+            "final-answer",
+            "final_answer",
+            json!({
+                "content": "The parrot emoji pack is ready.",
+                "files": ["parrot-emoji-pack.zip"]
+            }),
+        )],
+    ));
+    let mut provider = connect(address, root.path(), json!({})).await;
+    let session = new_session(&mut provider, root.path()).await;
+    let mut events = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Create and deliver the requested archive."),
+        )
+        .await
+        .expect("start prompt");
+
+    let mut delivered = None;
+    let outcome = loop {
+        match events.next().await.expect("run reaches terminal event") {
+            AgentEvent::Artifact { artifact, .. } => delivered = Some(artifact),
+            AgentEvent::RunFinished { outcome, .. } => break outcome,
+            _ => {}
+        }
+    };
+
+    assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
+    let artifact = delivered.expect("final answer emitted a typed artifact");
+    assert_eq!(artifact.id, "deliverable:parrot-emoji-pack.zip");
+    assert_eq!(artifact.title, "parrot-emoji-pack.zip");
+    assert_eq!(artifact.kind, ArtifactKind::File);
+    assert_eq!(artifact.mime_type.as_deref(), Some("application/zip"));
+    assert_eq!(
+        artifact.uri.as_deref(),
+        Some(archive.canonicalize().unwrap().to_string_lossy().as_ref())
+    );
+    assert_eq!(server.await.expect("model server task").len(), 1);
 }
 
 #[tokio::test]

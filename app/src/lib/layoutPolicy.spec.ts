@@ -72,15 +72,31 @@ describe("responsive GUI layout policy", () => {
     expect(desiredWrite).toBeGreaterThan(guard);
   });
 
-  it("surfaces a paused cloud draft instead of hiding repeated conflicts", () => {
+  it("surfaces only a genuine cloud draft conflict as an actionable choice", () => {
     const composer = sourceModules["../surfaces/Composer.tsx"];
+    const conflict = sourceModules["../surfaces/ComposerDraftConflict.tsx"];
     const cloudDraft = librarySourceModules["./useCloudComposerDraft.ts"];
 
     expect(composer).toContain('draft.cloud.status === "conflict"');
-    expect(composer).toContain("Draft cloud sync is paused.");
+    expect(composer).toContain("<ComposerDraftConflict");
+    expect(conflict).toContain("Another saved draft is available.");
+    expect(conflict).toContain("Keep current draft");
+    expect(conflict).toContain("Use saved draft");
+    expect(conflict).not.toContain("cloud sync");
+    expect(conflict).not.toContain("paused");
     expect(cloudDraft).toContain("conflictPausedRef.current = true");
     expect(cloudDraft).toContain("!conflictPausedRef.current");
+    expect(cloudDraft).toContain("const keepCurrentDraft = useCallback");
+    expect(cloudDraft).toContain("const useSyncedDraft = useCallback");
     expect(cloudDraft).not.toContain("conflictRetries");
+
+    const preservedNewer = cloudDraft.indexOf('result.outcome === "preserved_newer"');
+    const preservedNewerEnd = cloudDraft.indexOf("} else {", preservedNewer);
+    const resolvedBranch = cloudDraft.slice(preservedNewer, preservedNewerEnd);
+    expect(resolvedBranch).toContain("conflictPausedRef.current = true");
+    expect(resolvedBranch).toContain('desiredTextRef.current = ""');
+    expect(resolvedBranch).toContain('setStatus("conflict")');
+    expect(resolvedBranch).not.toContain("onHydrateRef.current(result.draft.text)");
   });
 
   it("uses the compact specialist composition when window height is scarce", () => {

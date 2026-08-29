@@ -49,6 +49,7 @@ describe("currentActivity", () => {
       id: "t", title: "Edit notes.txt", kind: "edit", status: "in_progress",
       locations: [{ path: "/w/notes.txt" }], content: [],
     };
+    s.timeline.push({ item: "tool_call", id: "t", run: "r1" });
     const a = currentActivity(s);
     expect(a.busy).toBe(true);
     expect(a.label).toBe("Edit notes.txt");
@@ -61,6 +62,11 @@ describe("currentActivity", () => {
       { title: "Step A", status: "completed" },
       { title: "Step B", status: "in_progress" },
     ] };
+    s.timeline.push({
+      item: "execution_checklist",
+      run: "r1",
+      checklist: s.execution_checklist,
+    });
     const a = currentActivity(s);
     expect(a.label).toBe("Step B");
     expect(a.steps).toEqual({ done: 1, total: 2 });
@@ -198,7 +204,51 @@ describe("currentActivity", () => {
       locations: [],
       content: [],
     };
+    snapshot.timeline.push({ item: "tool_call", id: "tool", run: "r1" });
     expect(shouldShowPending(snapshot)).toBe(false);
+  });
+
+  it("does not reuse stale pre-compaction work as the current run label", () => {
+    const snapshot = emptySnapshot();
+    snapshot.runs.previous = { id: "previous", status: "done" };
+    snapshot.runs.current = { id: "current", status: "running" };
+    snapshot.tool_calls.oldTool = {
+      id: "oldTool",
+      title: "Provision GPU box",
+      kind: "execute",
+      status: "in_progress",
+      locations: [],
+      content: [],
+    };
+    snapshot.execution_checklist = {
+      revision: 1,
+      steps: [{ title: "Provision GPU box: build toolchain", status: "in_progress" }],
+    };
+    snapshot.timeline.push(
+      { item: "tool_call", id: "oldTool", run: "previous" },
+      {
+        item: "execution_checklist",
+        run: "previous",
+        checklist: snapshot.execution_checklist,
+      },
+      {
+        item: "message",
+        run: "current",
+        role: "user",
+        blocks: [{ type: "text", text: "What does sealed mean?" }],
+      },
+    );
+    snapshot.model_context_checkpoint = {
+      transcript: { items: [], truncated: true },
+      timeline_index: 2,
+    };
+
+    expect(currentActivity(snapshot)).toMatchObject({
+      busy: true,
+      label: "Thinking…",
+    });
+    expect(currentActivity(snapshot).steps).toBeUndefined();
+    expect(shouldShowPending(snapshot)).toBe(true);
   });
 
   it("keeps ordinary pending progress visible while recovery stays quiet", () => {

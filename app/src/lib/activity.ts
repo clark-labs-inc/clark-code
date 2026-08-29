@@ -62,8 +62,40 @@ export interface Activity {
   failed?: boolean;
 }
 
+function activeRunIds(snapshot: Snapshot): Set<string> {
+  return new Set(
+    Object.values(snapshot.runs)
+      .filter((run) => run.status === "running" || run.status === "queued")
+      .map((run) => run.id),
+  );
+}
+
+/** Tool calls and checklists are durable transcript receipts. Their status can
+ * be stale in restored/compacted history, so only an item explicitly owned by
+ * the current run may describe what is happening now. */
+function activeToolCall(snapshot: Snapshot, activeRuns: ReadonlySet<string>): ToolCall | undefined {
+  for (let index = snapshot.timeline.length - 1; index >= 0; index -= 1) {
+    const item = snapshot.timeline[index];
+    if (item.item !== "tool_call" || !item.run || !activeRuns.has(item.run)) continue;
+    const tool = snapshot.tool_calls[item.id];
+    if (tool?.status === "in_progress") return tool;
+  }
+  return undefined;
+}
+
+function activeChecklist(snapshot: Snapshot, activeRuns: ReadonlySet<string>) {
+  for (let index = snapshot.timeline.length - 1; index >= 0; index -= 1) {
+    const item = snapshot.timeline[index];
+    if (item.item === "execution_checklist" && item.run && activeRuns.has(item.run)) {
+      return item.checklist;
+    }
+  }
+  return undefined;
+}
+
 export function currentActivity(snapshot: Snapshot): Activity {
   const runs = Object.values(snapshot.runs);
+  const activeRuns = activeRunIds(snapshot);
   // A prompt is in flight but the provider hasn't allocated a run yet
   // (attachment upload / connect handshake). That is still active work — keep
   // the working animation visible instead of a static gap after submission.
@@ -82,9 +114,10 @@ export function currentActivity(snapshot: Snapshot): Activity {
 
   let progress: number | undefined;
   let steps: { done: number; total: number } | undefined;
-  if (snapshot.execution_checklist && snapshot.execution_checklist.steps.length > 0) {
-    const total = snapshot.execution_checklist.steps.length;
-    const done = snapshot.execution_checklist.steps.filter((step) => step.status === "completed").length;
+  const checklist = busy ? activeChecklist(snapshot, activeRuns) : snapshot.execution_checklist;
+  if (checklist && checklist.steps.length > 0) {
+    const total = checklist.steps.length;
+    const done = checklist.steps.filter((step) => step.status === "completed").length;
     steps = { done, total };
     progress = done / total;
   }
@@ -98,7 +131,7 @@ export function currentActivity(snapshot: Snapshot): Activity {
     return { busy: false, label: "Ready", progress, steps };
   }
 
-  const tool = Object.values(snapshot.tool_calls).find((t) => t.status === "in_progress");
+  const tool = activeToolCall(snapshot, activeRuns);
   if (tool) {
     return {
       busy: true,
@@ -110,7 +143,7 @@ export function currentActivity(snapshot: Snapshot): Activity {
       steps,
     };
   }
-  const step = snapshot.execution_checklist?.steps.find((candidate) => candidate.status === "in_progress");
+  const step = checklist?.steps.find((candidate) => candidate.status === "in_progress");
   if (step) return { busy: true, label: step.title, progress, steps };
 
   const last = snapshot.timeline[snapshot.timeline.length - 1];
@@ -125,7 +158,7 @@ export function currentActivity(snapshot: Snapshot): Activity {
 export function shouldShowPending(snapshot: Snapshot): boolean {
   const activity = currentActivity(snapshot);
   if (!activity.busy) return false;
-  if (Object.values(snapshot.tool_calls).some((tool) => tool.status === "in_progress")) {
+  if (activeToolCall(snapshot, activeRunIds(snapshot))) {
     return false;
   }
 

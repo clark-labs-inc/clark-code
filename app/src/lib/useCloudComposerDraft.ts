@@ -222,12 +222,19 @@ export function useCloudComposerDraft({
     }
     desiredTextRef.current = text;
     if (!readyRef.current || !configRef.current) return;
-    if (conflictPausedRef.current) {
-      setStatus("conflict");
+    if (text === syncedTextRef.current) {
+      if (conflictPausedRef.current) {
+        conflictPausedRef.current = false;
+        adoptComposerDraftAck(owner, conversationId, {
+          rev: revRef.current,
+          text,
+        });
+      }
+      setStatus("saved");
       return;
     }
-    if (text === syncedTextRef.current) {
-      setStatus("saved");
+    if (conflictPausedRef.current) {
+      setStatus("conflict");
       return;
     }
     setStatus("saving");
@@ -236,7 +243,7 @@ export function useCloudComposerDraft({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [syncLatest, text]);
+  }, [conversationId, owner, syncLatest, text]);
 
   useEffect(() => {
     const retry = () => {
@@ -289,10 +296,15 @@ export function useCloudComposerDraft({
       revRef.current = result.draft?.rev ?? 0;
       syncedTextRef.current = result.draft?.text ?? "";
       if (result.outcome === "preserved_newer") {
+        // Submission consumed the visible local text. A different cloud value
+        // may be a real edit from another device or stale residue from an older
+        // send; the draft API cannot distinguish those cases. Never inject it
+        // into the now-empty composer. Pause with the submitted local state as
+        // the visible winner until the user explicitly chooses which copy to
+        // keep.
+        discardedGenerationRef.current = null;
         conflictPausedRef.current = true;
-        desiredTextRef.current = result.draft.text;
-        adoptComposerDraft(active.owner, targetConversationId, result.draft.text, result.draft.rev);
-        onHydrateRef.current(result.draft.text);
+        desiredTextRef.current = "";
         setStatus("conflict");
       } else {
         conflictPausedRef.current = false;
@@ -306,5 +318,34 @@ export function useCloudComposerDraft({
     return result;
   }, [syncLatest]);
 
-  return { status, acceptSubmitted };
+  /** The visible local draft is the explicit winner. Its next CAS uses the
+   * server revision captured by the conflict, so a still-newer edit pauses
+   * again instead of being overwritten silently. */
+  const keepCurrentDraft = useCallback(() => {
+    if (!configRef.current || !conflictPausedRef.current) return;
+    discardedGenerationRef.current = null;
+    conflictPausedRef.current = false;
+    if (desiredTextRef.current === syncedTextRef.current) {
+      setStatus("saved");
+      return;
+    }
+    setStatus("saving");
+    void syncLatest();
+  }, [syncLatest]);
+
+  /** The last server value captured by the conflict is the explicit winner.
+   * It becomes both the visible local value and its acknowledged cloud base. */
+  const useSyncedDraft = useCallback(() => {
+    const config = configRef.current;
+    if (!config || !conflictPausedRef.current) return;
+    const syncedText = syncedTextRef.current;
+    discardedGenerationRef.current = null;
+    conflictPausedRef.current = false;
+    desiredTextRef.current = syncedText;
+    adoptComposerDraft(config.owner, config.conversationId, syncedText, revRef.current);
+    onHydrateRef.current(syncedText);
+    setStatus("saved");
+  }, []);
+
+  return { status, acceptSubmitted, keepCurrentDraft, useSyncedDraft };
 }

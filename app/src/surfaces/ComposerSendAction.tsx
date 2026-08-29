@@ -24,20 +24,9 @@ export function ComposerSendAction({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
-  if (submitting) {
-    return (
-      <button
-        type="button"
-        disabled
-        aria-label="Sending message"
-        aria-busy="true"
-        className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft"
-      >
-        <Loader2 aria-hidden="true" className="size-4 animate-spin" />
-      </button>
-    );
-  }
-
+  // Once the host has projected a real active run, cancellation is available
+  // even if the prompt command is still finishing its durable admission work.
+  // Prefer that actionable state over the transient submission spinner.
   if (busy && (editing || !hasContent)) {
     const label = editing ? "Stop Clark to continue editing" : "Stop";
     return (
@@ -49,6 +38,20 @@ export function ComposerSendAction({
         className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-base ease-agent hover:bg-danger/20"
       >
         <Square aria-hidden="true" className="size-3 fill-current" />
+      </button>
+    );
+  }
+
+  if (submitting) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-label="Sending message"
+        aria-busy="true"
+        className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft"
+      >
+        <Loader2 aria-hidden="true" className="size-4 animate-spin" />
       </button>
     );
   }

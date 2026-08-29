@@ -16,6 +16,7 @@ mod remote_worker;
 mod session_close;
 mod skills;
 mod stream_batch;
+mod user_message;
 pub use cloud::*;
 pub use cloud_conversations::*;
 pub use computer_use::*;
@@ -32,12 +33,13 @@ use provider_stream::{
 pub use remote_worker::*;
 pub use session_close::*;
 pub use skills::*;
+use user_message::user_message_events;
 
+use agent_core::AgentEvent;
 use agent_core::{
     apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
     ProviderConfig, RunId, Session, SessionId, Snapshot,
 };
-use agent_core::{AgentEvent, Role};
 use futures::StreamExt;
 use provider_acp::AcpProvider;
 use provider_local::LocalAgentProvider;
@@ -52,9 +54,6 @@ use crate::ssh;
 use crate::state::HostSession;
 use crate::trajectory::{CloudTrajectoryClient, CloudTrajectoryConfig};
 use crate::{builtin_providers, AppState, ProviderInfo};
-
-/// Synthetic run id used to attribute the user's own message in the timeline.
-const USER_RUN: &str = "user";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -528,15 +527,7 @@ pub async fn steer(
         .trajectory
         .clone()
         .ok_or("product cloud trajectory is not configured for this session")?;
-    let durable = blocks
-        .iter()
-        .cloned()
-        .map(|delta| AgentEvent::MessageChunk {
-            run: RunId::new(USER_RUN),
-            role: Role::User,
-            delta,
-        })
-        .collect::<Vec<_>>();
+    let durable = user_message_events(&blocks);
     // Ask the provider first so a rejected steer is not journaled as accepted;
     // once accepted, commit it locally before rendering it.
     {
@@ -552,15 +543,8 @@ pub async fn steer(
             .await
             .map_err(|e| e.to_string())?;
         let checkpoint = trajectory.append(&durable).await?;
-        for block in &blocks {
-            apply(
-                &mut s.snapshot,
-                &AgentEvent::MessageChunk {
-                    run: RunId::new(USER_RUN),
-                    role: Role::User,
-                    delta: block.clone(),
-                },
-            );
+        for event in &durable {
+            apply(&mut s.snapshot, event);
         }
         s.snapshot.history_checkpoint = Some(checkpoint);
         crate::snapshot_emit::emit_snapshot(&app, &s.snapshot);
@@ -637,16 +621,8 @@ pub async fn prompt(
             "attachments": attachments.clone(),
         }),
     }];
-    durable_prompt.extend(
-        echo_blocks
-            .iter()
-            .cloned()
-            .map(|delta| AgentEvent::MessageChunk {
-                run: RunId::new(USER_RUN),
-                role: Role::User,
-                delta,
-            }),
-    );
+    let echo_events = user_message_events(&echo_blocks);
+    durable_prompt.extend(echo_events.iter().cloned());
     let prompt_input = PromptInput {
         blocks: blocks.clone(),
         attachments: attachments.clone(),
@@ -669,15 +645,8 @@ pub async fn prompt(
     // then lock the session to obtain the run's event stream and release.
     let provider_prompt = {
         let mut s = entry.lock().await;
-        for block in &echo_blocks {
-            apply(
-                &mut s.snapshot,
-                &AgentEvent::MessageChunk {
-                    run: RunId::new(USER_RUN),
-                    role: Role::User,
-                    delta: block.clone(),
-                },
-            );
+        for event in &echo_events {
+            apply(&mut s.snapshot, event);
         }
         // Submission is in flight but the provider has not allocated a run yet.
         // Attachment upload / connect handshake can take seconds, so flag a
