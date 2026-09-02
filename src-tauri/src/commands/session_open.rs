@@ -1,7 +1,7 @@
 use agent_core::{Provider, ProviderConfig, SessionId, SessionOptions};
 use code_host::{CodingSessionExtensionRecipe, CodingSessionRecipe, ScoutCartographyRecipe};
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use super::{make_provider, prepare_provider_config, register_session, ProviderLaunchRequest};
 use crate::product::{ProductRemoteSessionRequest, ProductRequestContext};
@@ -125,19 +125,27 @@ async fn open_provider(
     app: &AppHandle,
     state: &AppState,
     mut config: ProviderConfig,
-) -> Result<(Box<dyn Provider>, Option<AccountKey>), String> {
+) -> Result<
+    (
+        Box<dyn Provider>,
+        Option<AccountKey>,
+        Option<std::sync::Arc<desktop_integrations::ReadToolPack>>,
+    ),
+    String,
+> {
     let remote_binding = config
         .extra
         .as_object_mut()
         .and_then(|extra| extra.remove("remote_worker"));
     let Some(remote_binding) = remote_binding else {
         let (config, account) = prepare_provider_config(provider_id, app, config, state).await?;
-        let mut provider = make_provider(provider_id, &config, app, state).await?;
+        let (mut provider, integration_pack) =
+            make_provider(provider_id, &config, app, state).await?;
         provider
             .connect(config)
             .await
             .map_err(|error| error.to_string())?;
-        return Ok((provider, account));
+        return Ok((provider, account, integration_pack));
     };
 
     if provider_id != "local" {
@@ -197,7 +205,7 @@ async fn open_provider(
         .connect(ProviderConfig::default())
         .await
         .map_err(|error| error.to_string())?;
-    Ok((Box::new(provider), Some(account)))
+    Ok((Box::new(provider), Some(account), None))
 }
 
 /// The complete provider/session binding requested by one WebView invocation.
@@ -252,7 +260,8 @@ pub async fn session_open(
     // a mutable WebView preference. Their hard constraints remain enforced by
     // the provider before any permission mode is consulted.
     let protected_full_access = specialist_requires_full_access(&config);
-    let (mut provider, account) = open_provider(&provider_id, &app, state.inner(), config).await?;
+    let (mut provider, account, integration_pack) =
+        open_provider(&provider_id, &app, state.inner(), config).await?;
     let account = match account {
         Some(account) => Some(account),
         None => state
@@ -307,9 +316,27 @@ pub async fn session_open(
             let _ = provider.close_session(&session.id).await;
             return Err("Clark Code account changed while opening the remote session".into());
         }
-        return register_session(&app, &state, provider, session, account).await;
     }
-    register_session(&app, &state, provider, session, None).await
+    let session_key = SessionKey::from_session(&session.id)?;
+    let result = register_session(&app, &state, provider, session, account.clone()).await?;
+    if let Some(pack) = integration_pack {
+        let entry = state
+            .runtime_registry
+            .current_session_entry(&session_key)
+            .await
+            .ok_or("Local task disappeared while binding native integration tools")?;
+        let integration_state = app.state::<crate::integrations::IntegrationState>();
+        pack.bind(desktop_integrations::Scope {
+            owner: account
+                .as_ref()
+                .map(|owner| owner.as_str().to_owned())
+                .unwrap_or_else(|| "local".into()),
+            task: session_key.as_str().into(),
+            generation: state.runtime_registry.cloud_account_generation(),
+            instance: integration_state.instance(&entry)?,
+        })?;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

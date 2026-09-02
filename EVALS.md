@@ -20,6 +20,7 @@ paid provider runs are opt-in and require explicit authorization.
 
 | Surface | Entrypoint | Evidence class | Claim boundary |
 | --- | --- | --- | --- |
+| Native integrations / read-only iMessage tool | `cargo nextest run -p desktop-integrations -p exec-sandbox`; provider-local `native_data_stays_private_even_with_full_access_file_tools_and_symlinks`; host `renderer_cannot_add_write_or_widen_read_arguments`; frontend `integrations.spec.ts` | deterministic registry, ToolPack schema, synthetic read-only SQLite, real macOS sandbox process, and IPC contracts | Compiled in debug and release profiles. Proves exact-selection and task-scope contracts plus sandboxed file boundaries. It does not prove full host isolation, actual privacy grant/revocation, a live Messages read, or a packaged release. See the retained conclusion below and `crates/desktop-integrations/README.md`. |
 | Open-source boundary | `node --test harness/product-boundary.spec.mjs` | deterministic repository-wide text, dependency, and metadata contract | Rejects hardcoded hosted-service policy, commercial access rules, release credentials, and deployment-specific transports |
 | Core domain and providers | `cargo nextest run -p agent-core -p provider-acp -p provider-local` with cargo-nextest `0.9.143` | deterministic Rust contracts | Proves provider-neutral projection, ACP translation, and local loop/tool behavior |
 | Full deterministic Rust workspace CI | `cargo nextest run --workspace -E 'not test(attachment_benchmark_local)' --no-fail-fast` with cargo-nextest `0.9.143` | deterministic Rust unit, integration, native-host, sandbox, Scout, worker, orchestration, and computer-use contracts | Required on every push and pull request; the host-load-sensitive attachment benchmark remains in the benchmark lane rather than making integration CI timing-dependent |
@@ -56,3 +57,63 @@ paid provider runs are opt-in and require explicit authorization.
 
 Changing a foundation eval contract or authoritative result requires updating
 this file.
+
+## Native integrations / iMessage — 2026-09-01
+
+The foundation has a compiled native integration registry in Settings →
+Integrations and one eager local-provider tool named
+`read_imessage_selection`. The tool has no arguments and can return only the
+1–20 exact message IDs a user enabled for the bound task after native approval
+and conversation selection. Every call rechecks account, task, account
+generation, live session instance, 15-minute expiry, sleep/lock epoch, current
+OS access, and exact text equality. Tool output labels Messages text as
+untrusted quoted data.
+
+No draft, send, Apple Events, Automation permission, send ledger, background
+polling, inbound task trigger, or model-selectable conversation/query surface
+exists. The adapter is compiled in release builds. No Messages content was
+read, no privacy permission was granted, and no hosted model call was made
+during implementation checks.
+
+Retained deterministic conclusions:
+
+- Full workspace nextest `10471735-ada7-4131-a8b3-85a05c5812d4`:
+  **1,478 passed, 11 skipped**. The focused integration/sandbox run
+  `5a36b2a1-0071-4977-a9c6-89a9cc9d863e` passed **27/27**, including the
+  fixed argument-free ToolPack schema, no send tool, explicit enablement,
+  task/account/generation/session isolation, changed-text and OS-revocation
+  failures, read-only synthetic SQLite, and real macOS sandbox read/write
+  denial through direct and symlink paths.
+- Native IPC `acd332e0-8db2-4565-a5e2-d58889701006` passed **1/1**, rejecting
+  send, draft, Automation, owner override, and widened read arguments.
+- Frontend passed **815 tests with 5 skipped** across 173 passing and 2 skipped
+  files; typecheck and production build passed. Browser previews still refuse
+  native integration access instead of simulating Messages.
+- Scoped Clippy passed with warnings denied for agent-core, provider-acp,
+  provider-local, devbridge, desktop-integrations, and exec-sandbox. The full
+  native-host Clippy command remains blocked by 12 warnings in unrelated files;
+  they were not modified. Repository formatting, core WASM, product boundary
+  **14/14**, native debug compilation, and optimized release compilation all
+  passed. Release compilation retained the existing unused
+  `TrajectoryOutbox::acknowledge` warning outside this change.
+- Local validation uses this checkout's existing `.cargo/config.toml` path
+  override for the sibling `clark-agent`. This is not exact pinned-dependency
+  CI or a packaged/released product receipt.
+- The unsigned `./script/build_and_run.sh` launcher built and started the
+  current `target/debug/clark-code`. Startup did not connect iMessage, request
+  Full Disk Access, read Messages, use a signing identity, or touch Keychain.
+
+**Isolation limitation:** Full Disk Access belongs to the whole Clark Code app,
+not a task or conversation. Sandboxed commands and file tools deny Messages
+paths after symlink resolution, but Full Access/elevated execution, MCP,
+external agents, terminals, computer use, another same-user process, and a
+compromised renderer are not comprehensively contained by this grant. The
+read tool itself is task-scoped; the macOS app permission is not. A separately
+identified authenticated broker is still required for strong app-level
+isolation.
+
+Actual-app permission owner attribution, grant/deny/revoke, a live selected
+conversation read through the tool, real sleep/lock/restart, and alternate-tool
+isolation remain **not run**. User-assisted acceptance steps and schema limits
+are in [`crates/desktop-integrations/README.md`](crates/desktop-integrations/README.md).
+Do not promote deterministic receipts into a live iMessage claim.

@@ -71,8 +71,8 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
       {
         id: "integrations",
         label: "Integrations",
-        description: "MCP servers and remote hosts",
-        keywords: ["mcp", "ssh", "server", "remote", "tools"],
+        description: "Native apps, MCP servers, and remote hosts",
+        keywords: ["imessage", "messages", "native", "permissions", "mcp", "ssh", "server", "remote", "tools"],
         icon: Blocks,
       },
     ],

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { productName } from "../product/productModule";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
   Blocks, Info, Sun, Moon, AlertTriangle, LogOut,
-  Trash2, Plus, Minus, Server, Brain, FolderOpen,
+  Trash2, Plus, Minus, Brain, FolderOpen,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
@@ -15,8 +14,6 @@ import { useModalFocus } from "../lib/modalFocus";
 import { APPROVAL_POLICIES } from "../lib/permissions";
 import { OUTPUT_STYLES } from "../lib/outputStyle";
 import { loadRecentProjects, projectName } from "../lib/localAgent";
-import { loadMcpServers } from "../lib/mcpServers";
-import { loadSshHosts } from "../lib/sshHosts";
 import {
   loadAllowlist, loadDenylist, allowCommand, denyCommand, removeAllowed, removeDenied,
 } from "../lib/commandPolicy";
@@ -35,6 +32,7 @@ import {
 import { AboutSection } from "./settings/AboutSection";
 import { ComputerUseSection } from "./settings/ComputerUseSection";
 import { InterfaceContrastControl } from "./settings/InterfaceContrastControl";
+import { IntegrationsSection } from "./settings/IntegrationsSection";
 
 const input =
   "w-full rounded-lg bg-bg-secondary px-2.5 py-1.5 text-sm text-ink outline-none transition placeholder:text-ink-muted focus:ring-2 focus:ring-accent/20";
@@ -323,66 +321,6 @@ function ProjectSection() {
       <p className="flex items-center gap-1.5 text-xs text-ink-faint">
         <Info className="size-3.5" /> Changes apply to new sessions.
       </p>
-    </div>
-  );
-}
-
-// --- Integrations ----------------------------------------------------------
-
-function IntegrationsSection() {
-  const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
-  const setMcpOpen = useSessionStore((s) => s.setMcpOpen);
-  const setSshOpen = useSessionStore((s) => s.setSshOpen);
-  const auth = useSessionStore((s) => s.auth);
-  const accountScope = codeKeyAccountBinding(auth);
-  const servers = useMemo(() => loadMcpServers(accountScope), [accountScope]);
-  const hosts = useMemo(() => loadSshHosts(accountScope), [accountScope]);
-  const mcpEnabled = servers.filter((s) => s.enabled && s.command.trim()).length;
-
-  const manage = (open: () => void) => {
-    setSettingsOpen(false);
-    open();
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <GroupLabel>Extend {productName()}</GroupLabel>
-        <Card>
-          <Row
-            icon={<Blocks className="size-4" />}
-            name="MCP servers"
-            sub={
-              servers.length
-                ? `${mcpEnabled} enabled · ${servers.length} configured`
-                : "Add external tools via Model Context Protocol"
-            }
-          >
-            <button
-              onClick={() => manage(() => setMcpOpen(true))}
-              className="shrink-0 rounded-lg bg-bg-tertiary px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover"
-            >
-              Manage
-            </button>
-          </Row>
-          <Row
-            icon={<Server className="size-4" />}
-            name="Remote hosts"
-            sub={
-              hosts.length
-                ? `${hosts.length} host${hosts.length === 1 ? "" : "s"} saved`
-                : "Run the agent on a machine over SSH"
-            }
-          >
-            <button
-              onClick={() => manage(() => setSshOpen(true))}
-              className="shrink-0 rounded-lg bg-bg-tertiary px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover"
-            >
-              Manage
-            </button>
-          </Row>
-        </Card>
-      </div>
     </div>
   );
 }

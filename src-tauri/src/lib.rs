@@ -15,6 +15,7 @@ mod commands;
 mod diagnostics;
 mod document_preview;
 mod file_actions;
+mod integrations;
 mod markdown_export;
 pub mod product;
 mod project_context;
@@ -320,7 +321,9 @@ pub fn run_with_product_and_context(
         .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::with_product(product))
         .manage(terminal::Terminals::default())
+        .manage(integrations::IntegrationState::default())
         .invoke_handler(tauri::generate_handler![
+            integrations::integration_request,
             commands::provider_list,
             commands::product_request,
             commands::provider_reconfigure,

@@ -39,6 +39,7 @@ impl Sandbox {
     }
 
     pub(super) fn ensure_read_contained(&self, path: &Path) -> Result<(), String> {
+        ensure_not_native_private(path)?;
         if self.host_trusted {
             return Ok(());
         }
@@ -46,6 +47,7 @@ impl Sandbox {
     }
 
     pub(super) fn ensure_write_contained(&self, path: &Path) -> Result<(), String> {
+        ensure_not_native_private(path)?;
         if self.host_trusted {
             return Ok(());
         }
@@ -54,6 +56,31 @@ impl Sandbox {
 
     pub(super) fn ensure_write_contained_lexical(&self, path: &Path) -> Result<(), String> {
         self.ensure_write_contained(path)
+    }
+}
+
+// File tools run in the native process, so child-process Seatbelt rules do not
+// protect them. Apply the same restriction after canonicalization, including
+// when a user selected Library as the project or added it as a read root.
+fn ensure_not_native_private(path: &Path) -> Result<(), String> {
+    let parts = path
+        .components()
+        .filter_map(|part| part.as_os_str().to_str())
+        .collect::<Vec<_>>();
+    let messages = parts.windows(2).any(|p| p == ["Library", "Messages"])
+        || parts.windows(3).any(|p| {
+            p == ["Library", "Containers", "com.apple.iChat"]
+                || p == ["Library", "Containers", "com.apple.MobileSMS"]
+                || p == ["Library", "Group Containers", "group.com.apple.messages"]
+                || p == ["Library", "Group Containers", "group.com.apple.MobileSMS"]
+        });
+    if messages {
+        Err(
+            "Native application data is available only through an explicit integration grant"
+                .into(),
+        )
+    } else {
+        Ok(())
     }
 }
 
@@ -66,5 +93,31 @@ fn ensure(allowed: bool, kind: &str, path: &Path, project: &Path) -> Result<(), 
             path.display(),
             project.display()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_data_stays_private_even_with_full_access_file_tools_and_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let private = root.path().join("Library/Messages");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join("chat.db"), "private fixture").unwrap();
+        let sandbox = Sandbox::new(root.path()).unwrap().with_host_trust();
+        assert!(sandbox
+            .resolve_existing("Library/Messages/chat.db")
+            .is_err());
+        assert!(sandbox
+            .resolve_for_write("Library/Messages/changed.db")
+            .is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&private, root.path().join("alias")).unwrap();
+            assert!(sandbox.resolve_existing("alias/chat.db").is_err());
+            assert!(sandbox.resolve_for_write("alias/changed.db").is_err());
+        }
     }
 }

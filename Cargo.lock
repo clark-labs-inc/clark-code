@@ -1268,6 +1268,7 @@ dependencies = [
  "computer-use",
  "desktop-http",
  "desktop-install-context",
+ "desktop-integrations",
  "ed25519-dalek",
  "exec-core",
  "exec-private-fs",
@@ -1323,6 +1324,20 @@ dependencies = [
 name = "desktop-install-context"
 version = "0.1.134"
 dependencies = [
+ "tempfile",
+]
+
+[[package]]
+name = "desktop-integrations"
+version = "0.1.134"
+dependencies = [
+ "agent-core",
+ "async-trait",
+ "cc",
+ "provider-local",
+ "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

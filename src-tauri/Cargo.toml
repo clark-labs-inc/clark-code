@@ -61,6 +61,7 @@ provider-remote-worker = { path = "../crates/provider-remote-worker" }
 computer-use = { path = "../crates/computer-use" }
 desktop-install-context = { path = "../crates/install-context" }
 desktop-http = { path = "../crates/desktop-http" }
+desktop-integrations = { path = "../crates/desktop-integrations" }
 diagnostic-capture = { package = "clark-capture", path = "../vendor/clark-capture", features = ["tracing"], optional = true }
 libreoffice-pure = "0.5.5"
 

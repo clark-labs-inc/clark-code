@@ -59,6 +59,15 @@ pub(crate) fn compile_profile(policy: &SandboxPolicy) -> Result<String, String> 
             seatbelt_string(root)
         ));
     }
+    // Protect Messages even when a broad project/write root overlaps the
+    // user's Library. Full Access deliberately bypasses this compiler and
+    // remains outside this protection.
+    sections.push("(deny file-read* file-write* (regex #\"/Library/Messages(/|$)\"))".to_string());
+    sections.push(
+        "(deny file-read* file-write* (regex #\"/Library/Containers/com\\.apple\\.(iChat|MobileSMS)(/|$)\"))"
+            .to_string(),
+    );
+    sections.push("(deny file-read* file-write* (regex #\"/Library/Group Containers/group\\.com\\.apple\\.(messages|MobileSMS)(/|$)\"))".to_string());
     if policy.network == NetworkPolicy::Restricted {
         sections.push("(deny network*)".to_string());
     }

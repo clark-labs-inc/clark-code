@@ -46,7 +46,7 @@ use provider_local::LocalAgentProvider;
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::runtime_registry::{AccountKey, SessionKey};
@@ -67,7 +67,13 @@ async fn make_provider(
     config: &ProviderConfig,
     app: &AppHandle,
     state: &AppState,
-) -> Result<Box<dyn Provider>, String> {
+) -> Result<
+    (
+        Box<dyn Provider>,
+        Option<Arc<desktop_integrations::ReadToolPack>>,
+    ),
+    String,
+> {
     if let Some(provider) = state
         .product
         .make_provider(
@@ -77,14 +83,25 @@ async fn make_provider(
         )
         .await?
     {
-        return Ok(provider);
+        return Ok((provider, None));
     }
     match id {
-        "acp" => Ok(Box::new(AcpProvider::new())),
-        "local" => Ok(Box::new(
-            LocalAgentProvider::new()
-                .with_skill_catalog_service(state.runtime_registry.current_skill_catalogs().await),
-        )),
+        "acp" => Ok((Box::new(AcpProvider::new()), None)),
+        "local" => {
+            let pack = app
+                .state::<crate::integrations::IntegrationState>()
+                .read_tool_pack();
+            Ok((
+                Box::new(
+                    LocalAgentProvider::new()
+                        .with_skill_catalog_service(
+                            state.runtime_registry.current_skill_catalogs().await,
+                        )
+                        .with_tool_pack(pack.clone()),
+                ),
+                Some(pack),
+            ))
+        }
         other => Err(format!("unknown provider: {other}")),
     }
 }

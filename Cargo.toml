@@ -5,6 +5,7 @@ members = [
     "crates/agent-orchestration",
     "crates/computer-use",
     "crates/desktop-http",
+    "crates/desktop-integrations",
     "crates/install-context",
     "crates/provider-acp",
     "crates/provider-local",
