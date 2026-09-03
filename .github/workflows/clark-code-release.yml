@@ -25,6 +25,46 @@ on:
         required: false
         default: false
         type: boolean
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
+      release_repository:
+        description: Repository whose product CI and release records authorize this run
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Exact Clark Code semver declared by the product composition
+        required: true
+        type: string
+      source_revision:
+        description: Frozen 40-character product source commit to release
+        required: true
+        type: string
+      release_platform:
+        description: Platform channel to build and advance
+        required: false
+        default: all
+        type: string
+      run_paid_benchmark:
+        description: Run the separately authorized bounded Qwen 3.7 Flash benchmark
+        required: false
+        default: false
+        type: boolean
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
+      release_repository:
+        description: Repository whose product CI and release records authorize this run
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: read
@@ -38,7 +78,8 @@ concurrency:
 
 env:
   AWS_REGION: us-west-2
-  PRODUCT_REPOSITORY: clark-labs-inc/clark
+  PRODUCT_REPOSITORY: ${{ inputs.product_repository || 'clark-labs-inc/clark' }}
+  RELEASE_REPOSITORY: ${{ inputs.release_repository || github.repository }}
   PRODUCT_DIR: crates/clark-desktop-product
   # Keep each archived compiler cache below GitHub's repository-wide 10 GiB
   # budget. Small crates are cheaper to rebuild than to archive and transfer.
@@ -108,7 +149,7 @@ jobs:
           for attempt in {1..100}; do
             runs="$(gh api \
               -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/clark-code-product-ci.yml/runs?event=workflow_dispatch&per_page=100")"
+              "/repos/$RELEASE_REPOSITORY/actions/workflows/clark-code-product-ci.yml/runs?event=workflow_dispatch&per_page=100")"
             state="$(jq -r --arg title "$expected_title" '
               [.workflow_runs[] | select(.display_title == $title)][0]
               | if . == null then "missing\t"
@@ -1037,7 +1078,7 @@ jobs:
             --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
             --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
             --platforms "${{ needs.preflight.outputs.release_platforms }}" \
-            --repository "$GITHUB_REPOSITORY" \
+            --repository "$RELEASE_REPOSITORY" \
             --published-at "$published_at"
       - name: Install the public website verifier before promotion
         working-directory: crates/clark-desktop-product/harness
@@ -1066,7 +1107,7 @@ jobs:
               --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
               --site-url https://www.clarkchat.com/clark-code \
               --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
-              --repository "$GITHUB_REPOSITORY" \
+              --repository "$RELEASE_REPOSITORY" \
               --platforms "$(<target/release-channel/platforms.csv)" \
               --assets target/release-channel/assets.json \
               --out "target/release-channel/journey-$confirmation" || {
@@ -1089,7 +1130,7 @@ jobs:
             --arg version "${CLARK_RELEASE_TAG#v}" \
             --arg source_revision "$CLARK_RELEASE_SOURCE_REVISION" \
             --arg run_id "$GITHUB_RUN_ID" \
-            --arg repository "$GITHUB_REPOSITORY" \
+            --arg repository "$RELEASE_REPOSITORY" \
             '{status:"ready",tag:$tag,version:$version,source_revision:$source_revision,run_id:$run_id,repository:$repository}' \
             > target/release-channel/release-finalization-handoff.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

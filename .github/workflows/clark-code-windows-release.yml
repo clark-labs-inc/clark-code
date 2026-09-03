@@ -24,6 +24,46 @@ on:
         required: false
         default: ""
         type: string
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
+      release_repository:
+        description: Repository whose product CI and release records authorize this run
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Exact SemVer declared in windows-version.txt
+        required: true
+        type: string
+      source_revision:
+        description: Frozen 40-character product source commit to release
+        required: true
+        type: string
+      release_mode:
+        description: Authenticode publication policy
+        required: false
+        default: signed
+        type: string
+      artifact_run_id:
+        description: Existing source-bound Windows run to publish without rebuilding
+        required: false
+        default: ""
+        type: string
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
+      release_repository:
+        description: Repository whose product CI and release records authorize this run
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: read
@@ -37,7 +77,8 @@ concurrency:
 
 env:
   AWS_REGION: us-west-2
-  PRODUCT_REPOSITORY: clark-labs-inc/clark
+  PRODUCT_REPOSITORY: ${{ inputs.product_repository || 'clark-labs-inc/clark' }}
+  RELEASE_REPOSITORY: ${{ inputs.release_repository || github.repository }}
   PRODUCT_DIR: crates/clark-desktop-product
   SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
   CLARK_RELEASE_TAG: ${{ format('v{0}', inputs.version) }}
@@ -115,7 +156,7 @@ jobs:
           for attempt in {1..100}; do
             runs="$(gh api \
               -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/clark-code-product-ci.yml/runs?event=workflow_dispatch&per_page=100")"
+              "/repos/$RELEASE_REPOSITORY/actions/workflows/clark-code-product-ci.yml/runs?event=workflow_dispatch&per_page=100")"
             state="$(jq -r --arg title "$expected_title" '
               [.workflow_runs[] | select(.display_title == $title)][0]
               | if . == null then "missing\t"
@@ -238,12 +279,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${{ inputs.artifact_run_id }}" =~ ^[0-9]+$ ]]
-          source_run="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}")"
+          source_run="$(gh api "/repos/$RELEASE_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}")"
           test "$(jq -r .head_sha <<< "$source_run")" = "$CLARK_RELEASE_SOURCE_REVISION"
           test "$(jq -r .path <<< "$source_run")" = ".github/workflows/clark-code-windows-release.yml"
-          jobs="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/jobs?per_page=100")"
+          jobs="$(gh api "/repos/$RELEASE_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/jobs?per_page=100")"
           test "$(jq -r '[.jobs[] | select(.name == "Build, sign, and package Windows")][0].conclusion' <<< "$jobs")" = success
-          artifacts="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/artifacts?per_page=100")"
+          artifacts="$(gh api "/repos/$RELEASE_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/artifacts?per_page=100")"
           test "$(jq -r '[.artifacts[] | select(.name == "windows-release-records" and .expired == false)] | length' <<< "$artifacts")" = 1
 
   remote_worker:
@@ -624,7 +665,7 @@ jobs:
             --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/windows" \
             --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
             --platforms windows \
-            --repository "$GITHUB_REPOSITORY" \
+            --repository "$RELEASE_REPOSITORY" \
             --published-at "$published_at"
       - name: Install public Windows release verifier
         working-directory: crates/clark-desktop-product/harness
@@ -656,7 +697,7 @@ jobs:
               --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/windows" \
               --site-url https://www.clarkchat.com/clark-code \
               --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
-              --repository "$GITHUB_REPOSITORY" \
+              --repository "$RELEASE_REPOSITORY" \
               --platforms windows \
               --assets target/release-channel/assets.json \
               --out "target/release-channel/journey-$confirmation" || {
@@ -694,7 +735,7 @@ jobs:
             --arg source_revision "$CLARK_RELEASE_SOURCE_REVISION" \
             --arg run_id "$GITHUB_RUN_ID" \
             --arg artifact_run_id "${{ inputs.artifact_run_id || github.run_id }}" \
-            --arg repository "$GITHUB_REPOSITORY" \
+            --arg repository "$RELEASE_REPOSITORY" \
             --arg channel "desktop/windows/latest" \
             '{status:"ready",tag:$tag,version:$version,source_revision:$source_revision,run_id:$run_id,artifact_run_id:$artifact_run_id,repository:$repository,channel:$channel}' \
             > target/release-channel/windows-release-finalization-handoff.json

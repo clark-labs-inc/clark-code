@@ -8,6 +8,22 @@ on:
         description: Exact 40-character private product commit to qualify
         required: true
         type: string
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
+  workflow_call:
+    inputs:
+      product_revision:
+        description: Exact 40-character private product commit to qualify
+        required: true
+        type: string
+      product_repository:
+        description: Private product repository owning the desktop composition
+        required: false
+        default: clark-labs-inc/clark
+        type: string
 
 permissions:
   contents: read
@@ -18,7 +34,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PRODUCT_REPOSITORY: clark-labs-inc/clark
+  PRODUCT_REPOSITORY: ${{ inputs.product_repository || 'clark-labs-inc/clark' }}
   CLARK_PRODUCT_SOURCE_REVISION: ${{ inputs.product_revision }}
   PRODUCT_DIR: crates/clark-desktop-product
   CARGO_INCREMENTAL: 0
