@@ -50,6 +50,105 @@ export interface SpecialistConversationPresentation {
 }
 
 const PRESENTATIONS: Readonly<Record<SpecialistKind, SpecialistConversationPresentation>> = {
+  spec: {
+    id: "demo-spec-checkout-requirements",
+    kind: "spec",
+    prompt: "Turn a checkout recovery idea into a complete, implementation-ready specification.",
+    title: "The recovery path needs one explicit decision",
+    summary:
+      "The draft now separates the user problem, required behavior, and constraints. One unresolved choice about degraded checkout behavior still affects the acceptance criteria.",
+    takeaway:
+      "Resolve the degraded-mode decision, then seal the acceptance checklist before implementation begins.",
+    diagramTitle: "Specification decision path",
+    diagram: `flowchart LR
+      A["User problem"] --> B["Requirements"]
+      B --> C["Constraints"]
+      C --> D["Open decision"]
+      D --> E["Acceptance checklist"]`,
+    metrics: [
+      {
+        label: "Coverage",
+        value: "12 / 14",
+        detail: "requirements mapped",
+        progress: 86,
+        tone: "accent",
+      },
+      {
+        label: "Decisions",
+        value: "1 open",
+        detail: "degraded checkout",
+        progress: 78,
+        tone: "warning",
+      },
+      {
+        label: "Readiness",
+        value: "Ready to refine",
+        detail: "implementation gated",
+        progress: 72,
+        tone: "positive",
+      },
+    ],
+    evidence: [
+      {
+        id: "spec-problem",
+        title: "User problem is explicit",
+        detail: "The draft names the recovery failure users experience and the outcome they need.",
+        source: "Living specification",
+        freshness: "current draft",
+        confidence: 96,
+        status: "captured",
+        tone: "positive",
+      },
+      {
+        id: "spec-constraint",
+        title: "Constraints are recorded",
+        detail: "Reliability, privacy, and compatibility constraints are attached to the proposed behavior.",
+        source: "Requirements review",
+        freshness: "current draft",
+        confidence: 88,
+        status: "corroborated",
+        tone: "accent",
+      },
+      {
+        id: "spec-open-decision",
+        title: "One product decision remains open",
+        detail: "The degraded checkout behavior must be chosen before the acceptance checklist can be sealed.",
+        source: "Open questions",
+        freshness: "current",
+        confidence: 100,
+        status: "open gap",
+        tone: "warning",
+      },
+    ],
+    stages: [
+      {
+        id: "spec-problem",
+        title: "Frame the user problem",
+        detail: "The intended outcome and affected users are written in plain language.",
+        status: "complete",
+      },
+      {
+        id: "spec-requirements",
+        title: "Shape requirements and constraints",
+        detail: "Functional behavior and non-functional boundaries are linked to the problem.",
+        status: "complete",
+      },
+      {
+        id: "spec-decisions",
+        title: "Resolve open decisions",
+        detail: "One degraded-mode choice still needs a human decision.",
+        status: "active",
+      },
+      {
+        id: "spec-acceptance",
+        title: "Seal the acceptance checklist",
+        detail: "Implementation should begin only after the final checklist is agreed.",
+        status: "queued",
+      },
+    ],
+    limitation:
+      "A living specification records decisions and uncertainty; it does not authorize implementation until the acceptance checklist is explicitly agreed.",
+  },
   scout: {
     id: "demo-scout-checkout-blast-radius",
     kind: "scout",

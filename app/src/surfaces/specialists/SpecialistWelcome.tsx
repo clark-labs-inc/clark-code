@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowRight,
   ChartColumn,
+  FileText,
   FlaskConical,
   Gauge,
   GitBranch,
@@ -43,6 +44,16 @@ export interface SpecialistStarter {
 }
 
 const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
+  spec: [
+    {
+      title: "Draft a complete specification",
+      detail: "Turn the idea into a living document with clear decisions and open questions.",
+      prompt: "Draft a complete specification for this idea. Start with the user problem, goals, non-goals, requirements, constraints, open questions, and a concrete acceptance checklist.",
+      tab: "document",
+      workflow: "spec:spec",
+      icon: FileText,
+    },
+  ],
   security: [
     {
       title: "Deep scan this repository",
@@ -165,6 +176,7 @@ export function SpecialistWelcome({
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
   const introductionCopy = {
+    spec: "Turn a feature idea into a complete specification. Clark keeps the document living while the conversation resolves requirements, tradeoffs, and open questions.",
     scout: "Choose the company, then explicitly start a run. Company Scout maintains one shared map across authorized source, delivery, runtime, data, identity, ownership, and observability systems without treating the open folder as the company boundary.",
     security: "Choose a repository-level investigation. Security keeps coverage, validated findings, evidence, and remediation organized in the canvas.",
     scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",

@@ -4,7 +4,11 @@ import type { RemoteInfo } from "./remoteWorker";
 import type { ProductSpecialistTarget, ScoutCartographyTarget } from "./localAgent";
 import { productModule } from "../product/productModule";
 
-const SUPPORTED_SPECIALIST_KINDS = ["scout", "security", "scientist", "rsi"] as const;
+// The renderer owns the presentation adapters for every specialist kind that
+// a signed product catalog may register. Product-specific policy and runtime
+// ownership stay in the downstream catalog; this list only gates whether the
+// foundation can safely render the catalog entry.
+const SUPPORTED_SPECIALIST_KINDS = ["spec", "scout", "security", "scientist", "rsi"] as const;
 const SUPPORTED_SPECIALIST_KIND_SET = new Set<string>(SUPPORTED_SPECIALIST_KINDS);
 
 export type SpecialistKind = typeof SUPPORTED_SPECIALIST_KINDS[number];

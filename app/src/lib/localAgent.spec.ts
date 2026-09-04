@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   CODING_MODELS,
   DEFAULT_LOCAL_SETTINGS,
+  MODEL_PICKER_LABEL,
   QUICK_CHAT_MODEL_ID,
   SPECIALIST_MODEL_ID,
   SPECIALIST_MODEL_LABEL,
@@ -53,6 +54,7 @@ beforeEach(() => {
 
 describe("product-supplied model settings", () => {
   it("uses the neutral product model by default", () => {
+    expect(MODEL_PICKER_LABEL).toBe("Model");
     expect(DEFAULT_LOCAL_SETTINGS.model).toBe("local-model");
     expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("Local model");
   });

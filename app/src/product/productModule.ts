@@ -49,6 +49,7 @@ export interface ProductModelOption {
 }
 
 export interface ProductLocalAgentPolicy {
+  pickerLabel: string;
   defaultModel: string;
   defaultReasoningEffort: ProductModelOption["defaultReasoningEffort"];
   models: readonly ProductModelOption[];
@@ -175,6 +176,7 @@ export const neutralProduct: ProductModule = Object.freeze({
   authRequired: false,
   slots: {},
   localAgent: {
+    pickerLabel: "Model",
     defaultModel: modelCatalog.defaultModel,
     defaultReasoningEffort: modelCatalog.defaultReasoningEffort,
     models: modelCatalog.models,

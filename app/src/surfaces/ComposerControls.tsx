@@ -6,6 +6,7 @@ import { cn } from "../lib/cn";
 import {
   CODING_MODELS,
   effectiveModelSettings,
+  MODEL_PICKER_LABEL,
   modelLabel,
 } from "../lib/localAgent";
 import { useSessionStore } from "../store/sessionStore";
@@ -99,7 +100,7 @@ export function ModelPill() {
         disabled={busy || switching}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={busy ? "Finish the current run before changing models" : "Model"}
+        title={busy ? "Finish the current run before changing models" : MODEL_PICKER_LABEL}
         className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary transition duration-base ease-agent hover:bg-accent-subtle hover:text-accent"
       >
         {modelLabel(model)}
@@ -110,7 +111,7 @@ export function ModelPill() {
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Model"
+          aria-label={MODEL_PICKER_LABEL}
           onKeyDown={(event) => {
             const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
             if (!keys.includes(event.key)) return;
@@ -135,7 +136,7 @@ export function ModelPill() {
           className="popover-surface fixed z-elevated max-h-[calc(100vh-7rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-            Model
+            {MODEL_PICKER_LABEL}
           </div>
           {CODING_MODELS.map((candidate, index) => (
             <button
@@ -155,8 +156,10 @@ export function ModelPill() {
               }}
               disabled={busy || switching}
               className={cn(
-                "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
-                candidate.id === model && "bg-accent-subtle",
+                "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left outline-none transition duration-base ease-agent focus-visible:ring-2 focus-visible:ring-accent/50",
+                candidate.id === model
+                  ? "bg-accent-subtle"
+                  : "hover:bg-bg-hover focus-visible:bg-bg-hover",
               )}
             >
               <span className="min-w-0 flex-1">

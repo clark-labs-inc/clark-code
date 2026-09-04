@@ -33,6 +33,39 @@ describe("specialist entitlement verification", () => {
 });
 
 describe("specialist catalog authority", () => {
+  it("accepts the included Spec product manifest", () => {
+    const catalog = parseSpecialistCatalog({
+      schemaVersion: 1,
+      catalogVersion: "1.0.0",
+      catalogSha256: "1".repeat(64),
+      trust: {
+        source: "signed_app_bundle",
+        requiresSignedReleaseBinary: true,
+      },
+      manifests: [{
+        kind: "spec",
+        version: "1.0.0",
+        label: "Spec",
+        headline: "Turn an idea into a specification",
+        value: "A living feature document.",
+        engine: "skill",
+        entitlement: "included",
+        modelPolicy: "included",
+        tabs: [{ id: "document", label: "Document" }],
+        defaultTab: "document",
+        defaultWorkflow: "spec:spec",
+        skillBindings: { "spec:spec": "spec:spec" },
+        slashCommands: [{
+          prefixes: ["/spec"],
+          tab: "document",
+          workflow: "spec:spec",
+        }],
+      }],
+    });
+
+    expect(catalog.manifests.map(({ kind }) => kind)).toEqual(["spec"]);
+  });
+
   it("rejects a manifest without a foundation presentation adapter", () => {
     expect(() => parseSpecialistCatalog({
       schemaVersion: 1,

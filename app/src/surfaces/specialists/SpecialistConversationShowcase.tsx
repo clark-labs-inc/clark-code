@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CircleDashed,
   Database,
+  FileText,
   FlaskConical,
   GitBranch,
   Network,
@@ -66,6 +67,7 @@ function toneFill(tone: SpecialistPresentationTone): string {
 
 function SpecialistIcon({ kind }: { kind: SpecialistKind }) {
   const Icon = {
+    spec: FileText,
     scout: Network,
     security: ShieldCheck,
     scientist: FlaskConical,

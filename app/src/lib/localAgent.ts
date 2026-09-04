@@ -60,6 +60,10 @@ export interface LocalAgentSettings {
 
 const productModels = productModule().localAgent;
 
+/** User-facing name for the choice exposed by the composer. Branded products
+ * may expose usage tiers while the neutral foundation exposes model names. */
+export const MODEL_PICKER_LABEL = productModels.pickerLabel;
+
 export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   cwd: "",
   model: productModels.defaultModel,
