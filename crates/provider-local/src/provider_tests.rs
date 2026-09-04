@@ -1,6 +1,17 @@
 use super::*;
 use agent_core::domain::PendingUpload;
 
+fn contained_sandbox_available(cwd: &std::path::Path) -> bool {
+    let policy = exec_sandbox::SandboxPolicy::workspace_write(cwd.to_path_buf(), Vec::new());
+    match exec_sandbox::SandboxManager::current(policy) {
+        Ok(manager) => matches!(
+            manager.status(),
+            exec_sandbox::SandboxStatus::Enforced { .. }
+        ),
+        Err(_) => false,
+    }
+}
+
 fn provider_test_config() -> ProviderConfig {
     ProviderConfig {
         // Session/prompt unit tests do not execute untrusted model-authored
@@ -323,6 +334,10 @@ async fn project_settings_extend_the_session_sandbox_write_roots() {
 async fn full_access_lifts_file_tool_containment_and_auto_restores_it() {
     let project = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
+    if !contained_sandbox_available(project.path()) {
+        eprintln!("contained sandbox unavailable; skipping host-trust transition assertions");
+        return;
+    }
     let mut provider = LocalAgentProvider::new();
     // Unlike `provider_test_config` (sandbox_mode disabled → always host
     // trusted), this fixture exercises the contained presets themselves.
@@ -375,6 +390,10 @@ async fn live_session_can_admit_and_revoke_an_explicit_read_only_repository() {
     let workspace = tempfile::tempdir().unwrap();
     let repository = tempfile::tempdir().unwrap();
     std::fs::write(repository.path().join("README.md"), "code evidence").unwrap();
+    if !contained_sandbox_available(workspace.path()) {
+        eprintln!("contained sandbox unavailable; skipping read-root admission assertions");
+        return;
+    }
     let mut provider = LocalAgentProvider::new();
     // Unlike `provider_test_config` (sandbox_mode disabled → always host
     // trusted), this fixture exercises the contained presets so read-root
