@@ -76,7 +76,7 @@ export function contextsAfterSpecialistOpen(
     // Opening establishes a new ownership boundary. Saved conversations pass
     // their complete durable context, while a new lens gets only its default
     // workflow. Merging with the previous context here lets composer-local
-    // fields such as Spec's repository focus leak into unrelated composers.
+    // composer-local authority fields leak into unrelated composers.
     [kind]: { ...requestedContext, kind },
   };
 }

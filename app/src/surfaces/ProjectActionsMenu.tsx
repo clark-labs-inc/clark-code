@@ -3,6 +3,7 @@ import {
   Archive,
   Check,
   ChevronLeft,
+  ChevronRight,
   FolderGit2,
   FolderOpen,
   GitBranchPlus,
@@ -34,16 +35,22 @@ export interface ProjectMoveDestination {
 
 export function ProjectHeader({
   group,
+  expanded,
+  conversationPanelId,
   menuOpen,
   reorderable = false,
   dragHandleRef,
+  onToggle,
   onOpenMenu,
   onNewSession,
 }: {
   group: ProjectGroup;
+  expanded: boolean;
+  conversationPanelId: string;
   menuOpen: boolean;
   reorderable?: boolean;
   dragHandleRef?: (element: HTMLElement | null) => void;
+  onToggle: () => void;
   onOpenMenu: (button: HTMLButtonElement) => void;
   onNewSession: () => void;
 }) {
@@ -56,7 +63,7 @@ export function ProjectHeader({
   return (
     <div
       title={group.title}
-      className="group mb-1 mt-3 flex h-7 items-center gap-2 rounded-lg px-2 text-base font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
+      className="group mt-1 flex h-8 items-center gap-1 rounded-lg px-1 text-base font-medium text-ink-secondary hover:bg-bg-hover"
     >
       {reorderable && (
         <span
@@ -69,18 +76,37 @@ export function ProjectHeader({
           <GripVertical className="size-3.5" />
         </span>
       )}
-      <Icon className="size-3.5 shrink-0 text-ink-muted" />
-      <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-        <span className="min-w-0 truncate">{group.label}</span>
-        {group.repositoryLabel && (
-          <span
-            className="shrink-0 text-sm font-normal text-ink-faint"
-            aria-label={`Repository ${group.repositoryLabel}`}
-          >
-            {group.repositoryLabel}
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={group.convos.length === 0}
+        aria-expanded={group.convos.length > 0 ? expanded : undefined}
+        aria-controls={group.convos.length > 0 ? conversationPanelId : undefined}
+        aria-label={group.convos.length > 0 ? `${expanded ? "Collapse" : "Expand"} ${group.label}` : group.label}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-focus disabled:cursor-default"
+      >
+        <ChevronRight
+          className={`size-3 shrink-0 text-ink-faint transition-transform ${expanded ? "rotate-90" : ""} ${group.convos.length === 0 ? "opacity-0" : ""}`}
+          aria-hidden="true"
+        />
+        <Icon className="size-3.5 shrink-0 text-ink-muted" />
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
+          <span className="min-w-0 truncate">{group.label}</span>
+          {group.repositoryLabel && (
+            <span
+              className="shrink-0 text-sm font-normal text-ink-faint"
+              aria-label={`Repository ${group.repositoryLabel}`}
+            >
+              {group.repositoryLabel}
+            </span>
+          )}
+        </span>
+        {group.convos.length > 0 && (
+          <span className="shrink-0 text-sm font-normal tabular-nums text-ink-faint">
+            {group.convos.length}
           </span>
         )}
-      </span>
+      </button>
       {canStartSession && (
         <button
           type="button"

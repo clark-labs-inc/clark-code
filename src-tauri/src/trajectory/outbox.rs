@@ -95,11 +95,6 @@ impl TrajectoryOutbox {
         blocking(move || this.pending_sync()).await
     }
 
-    pub async fn acknowledge(&self, batch_id: &str) -> Result<(), String> {
-        let batch_id = batch_id.to_string();
-        self.acknowledge_many(std::slice::from_ref(&batch_id)).await
-    }
-
     pub async fn acknowledge_many(&self, batch_ids: &[String]) -> Result<(), String> {
         let this = self.clone();
         let batch_ids = batch_ids.to_vec();

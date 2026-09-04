@@ -22,7 +22,7 @@ describe("activity icon restraint", () => {
     // The two assertions below check rendered markup for one fixture, which only
     // catches a regression that happens to use `search` or `execute`. This checks
     // the boundary itself: `surfaces/toolPresentation.tsx` exists so trail-style
-    // surfaces (the Spec workspace) can show a glyph per tool, and WorkLine must
+    // specialist presentations can show a glyph per tool, and WorkLine must
     // never reach for it — there, a leading glyph on every row is noise, because
     // the row already spells out the verb and its target.
     const source = Object.values(

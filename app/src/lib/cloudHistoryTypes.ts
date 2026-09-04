@@ -1,6 +1,6 @@
 import type { WireSnapshot } from "../core-bridge/types";
 import type { ConversationMeta } from "./history";
-import type { SpecialistContext } from "./specialists";
+import { registeredSpecialistContext } from "./specialists";
 
 export interface CloudSummary {
   id: string;
@@ -14,7 +14,7 @@ export interface CloudSummary {
   createdAt: string | number;
   updatedAt: string | number;
   rev: number;
-  specialistContext?: SpecialistContext;
+  specialistContext?: unknown;
 }
 
 export interface CloudDetail extends Partial<CloudSummary> {
@@ -38,7 +38,7 @@ export function metaFromSummary(row: CloudSummary): ConversationMeta {
     createdAt: timestamp(row.createdAt),
     updatedAt: timestamp(row.updatedAt),
     rev: row.rev,
-    specialist: row.specialistContext,
+    specialist: registeredSpecialistContext(row.specialistContext),
   };
 }
 

@@ -43,15 +43,13 @@ All browser journeys used the repository's mock-provider or UI-only harnesses. N
 
 | Journey | Classification | First failing boundary / evidence |
 | --- | --- | --- |
-| Spec selection subchat | Product notification boundary | Reproducible in two sequential runs. Six earlier checks pass. When `prepareDocument` rejects, the composer draft is restored and the visible warning path is reached, but the harness cannot find a live `[data-sonner-toast][data-type="warning"]` for `Could not load the saved spec. Try again.` No browser-console errors or failed requests. Receipts: `target/spec-subchat-smoke/20260820T011204Z-7360/receipt.json` and `target/spec-subchat-smoke/20260820T011321Z-10800/receipt.json`. Catalog-failure and catalog-unavailable warning toasts do pass. |
 | Motion probe, reduced mode | Harness contract mismatch | Full-motion Chromium/WebKit rows pass. Reduced rows report failure because the probe requires a 0 ms toast transition, while the current source CSS and unit contract intentionally use a 120 ms opacity-only reduced-motion fade. Permission-gate fade and no-spatial-motion checks otherwise pass. |
 
-The first concurrent run of artifact/full-GUI/spec journeys also saw Vite `504 Outdated Optimize Dep` responses before React mounted. Sequential retries removed that dependency-optimizer contention: artifact and full-GUI both passed; Spec remained reproducibly red at its notification boundary.
+The first concurrent run of artifact and full-GUI journeys also saw Vite `504 Outdated Optimize Dep` responses before React mounted. Sequential retries removed that dependency-optimizer contention and both passed.
 
 ## Findings
 
 - The current source is buildable and the broad deterministic and browser mock-provider surface is healthy.
-- The concrete follow-up is the saved-document preparation error path in `SpecSelectionThread`: make its warning notification consistently materialize as a warning Sonner toast, or update the acceptance contract if the intended surface has changed.
 - The reduced-motion probe should be aligned with the current low-motion contract (`opacity` fade at the fast duration) instead of asserting zero transition duration.
 
 ## Cleanup

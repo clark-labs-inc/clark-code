@@ -373,7 +373,7 @@ export class MockBridge implements CoreBridge {
 
   async prepareQuickChatWorkspace(id?: string): Promise<{ id: string; path: string }> {
     const workspaceId = id ?? `mock-workspace-${Date.now()}`;
-    return { id: workspaceId, path: `/mock/workspaces/${workspaceId}` };
+    return { id: workspaceId, path: `/mock/.agent/workspace/${workspaceId}` };
   }
 
   subscribe(handler: (s: Snapshot) => void): () => void {

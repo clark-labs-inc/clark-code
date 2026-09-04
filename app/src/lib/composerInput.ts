@@ -11,9 +11,6 @@ export interface ComposerTrigger {
 }
 
 export type ComposerSuggestion =
-  | { kind: "spec_repository"; path: string; current: boolean }
-  | { kind: "spec_repository_picker" }
-  | { kind: "spec_folder" }
   | { kind: "parent_directory_menu" }
   | { kind: "parent_directory_picker" }
   | { kind: "parent_directory"; path: string; root: string }

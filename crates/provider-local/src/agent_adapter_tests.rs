@@ -612,7 +612,7 @@ fn markdown_artifact_only_for_md_inside_the_workspace() {
 
     // Filesystem tools report project-relative locations. Resolve those
     // against the document root so a successful `write_file` immediately
-    // becomes the document artifact shown by the Spec workspace.
+    // becomes the document artifact shown by the artifact workspace.
     let relative =
         markdown_artifact("report.md", "call-2", &docs_canon).expect("relative markdown doc");
     assert_eq!(relative.uri.as_deref(), Some(md.to_str().unwrap()));
@@ -850,8 +850,8 @@ async fn desktop_sink_streams_a_written_document_into_the_snapshot_as_it_is_type
     // the content — exactly how a provider emits `write_file`.
     for (id_delta, name_delta, arguments_delta) in [
         (Some("call-w"), Some("write_"), None),
-        (None, Some("file"), Some("{\"path\":\"new_SPEC.md\",")),
-        (None, None, Some("\"content\":\"# Spec\\n\\n## Recomm")),
+        (None, Some("file"), Some("{\"path\":\"proposal.md\",")),
+        (None, None, Some("\"content\":\"# Proposal\\n\\n## Recomm")),
         (None, None, Some("endation\\n\\nStart here. ")),
     ] {
         ca::EventSink::emit(
@@ -869,13 +869,13 @@ async fn desktop_sink_streams_a_written_document_into_the_snapshot_as_it_is_type
         .await;
     }
 
-    let document = "# Spec\n\n## Recommendation\n\nStart here. Done.";
+    let document = "# Proposal\n\n## Recommendation\n\nStart here. Done.";
     ca::EventSink::emit(
         &sink,
         ca::AgentEvent::ToolExecutionStart {
             tool_call_id: "call-w".into(),
             tool_name: "write_file".into(),
-            args: json!({"path": "new_SPEC.md", "content": document}),
+            args: json!({"path": "proposal.md", "content": document}),
         },
     )
     .await;
@@ -897,7 +897,7 @@ async fn desktop_sink_streams_a_written_document_into_the_snapshot_as_it_is_type
         "expected the document to arrive incrementally, got {appended:?}"
     );
     assert!(
-        appended[0].starts_with("# Spec"),
+        appended[0].starts_with("# Proposal"),
         "the first visible piece should be the start of the document, got {:?}",
         appended[0]
     );

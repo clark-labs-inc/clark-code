@@ -250,7 +250,9 @@ export function Sidebar({
   const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
   const deleteSelected = useSessionStore((s) => s.deleteSelectedConversations);
   const [filter, setFilter] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [expandedProjectKeys, setExpandedProjectKeys] = useState<Set<string>>(
+    () => new Set(["quick-chats"]),
+  );
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [projectPreferences, setProjectPreferences] = useState<ProjectSidebarPreferences>(
@@ -264,6 +266,7 @@ export function Sidebar({
   // The right-click menu: positioned at the cursor; acts on the selection when
   // the right-clicked row is in it, else just that row.
   const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const conversationListRef = useRef<HTMLDivElement>(null);
   const scrollAnchorRef = useRef<SidebarScrollAnchor | null>(null);
   const previousConversationSignatureRef = useRef("");
@@ -413,6 +416,32 @@ export function Sidebar({
     () => groups.filter((group) => projectPreferences.pinned.includes(group.key)),
     [groups, projectPreferences.pinned],
   );
+  const activeGroupKey = useMemo(
+    () => groups.find((group) =>
+      group.convos.some((conversation) => conversation.id === navigatedConversationId)
+    )?.key ?? null,
+    [groups, navigatedConversationId],
+  );
+
+  // Quick chats stay open by default, and navigating to a conversation reveals
+  // its project. Everything else remains collapsed until the user asks for it,
+  // which keeps large project libraries scannable without hiding active work.
+  useEffect(() => {
+    if (!activeGroupKey) return;
+    setExpandedProjectKeys((current) => {
+      if (current.has(activeGroupKey)) return current;
+      return new Set([...current, activeGroupKey]);
+    });
+  }, [activeGroupKey]);
+
+  const toggleProjectExpanded = useCallback((key: string) => {
+    setExpandedProjectKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   const activeWorktreePaths = useMemo(() => {
     const activePaths = conversations
       .filter((conversation) => runningIds.includes(conversation.id))
@@ -430,8 +459,12 @@ export function Sidebar({
   // search filters are part of the user's visible order, so neither can make
   // Shift-click jump through invisible conversations.
   const activeConversationIds = useMemo(
-    () => groups.flatMap((group) => group.convos.map((conversation) => conversation.id)),
-    [groups],
+    () => groups.flatMap((group) =>
+      filter || expandedProjectKeys.has(group.key)
+        ? group.convos.map((conversation) => conversation.id)
+        : []
+    ),
+    [expandedProjectKeys, filter, groups],
   );
   const activeConversationSignature = activeConversationIds.join("\u0000");
 
@@ -805,7 +838,7 @@ export function Sidebar({
       <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
         <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">{productName()}</span>
         <button
-          onClick={() => setSearchOpen((open) => !open)}
+          onClick={() => searchInputRef.current?.focus()}
           aria-label="Search conversations"
           title="Search conversations"
           className="ml-auto grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
@@ -821,30 +854,23 @@ export function Sidebar({
         </button>
       </div>
 
-      <div className="flex flex-col gap-1 px-2 pb-2">
-        <button
-          type="button"
-          onClick={() => newConversation()}
-          title="Start a new session in the current project"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-        >
-          <Plus className="size-4" /> New session
-        </button>
+      <div className="flex items-center gap-1 px-2 pb-2">
         <button
           type="button"
           onClick={() => void startQuickChat()}
           title="Start in a temporary the agent workspace — no project required"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <MessageSquare className="size-4" /> Quick Chat
         </button>
         <button
           type="button"
           onClick={() => setNewProjectOpen(true)}
-          title="Choose a folder or remote SSH host and start a session"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          aria-label="New project"
+          title="New project… Choose a folder or remote SSH host and start a session"
+          className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
         >
-          <FolderPlus className="size-4" /> New project…
+          <FolderPlus className="size-4" />
         </button>
         {/* Always rendered (even at 0) so the row's height never pops in/out
             when switching conversations — a conditional row made the whole
@@ -854,55 +880,17 @@ export function Sidebar({
           <button
             type="button"
             onClick={onOpenArtifacts}
-            className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+            aria-label={`Artifacts, ${artifactCount}`}
+            title={`Artifacts (${artifactCount})`}
+            className="relative grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
           >
             <Library className="size-4" />
-            <span>Artifacts</span>
-            <span
-              className={cn(
-                "ml-auto min-w-5 rounded-full px-1.5 text-center text-sm tabular-nums",
-                artifactCount > 0 ? "bg-chip text-ink-faint" : "text-ink-faint",
-              )}
-            >
-              {artifactCount}
-            </span>
+            {artifactCount > 0 && (
+              <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-info" aria-hidden="true" />
+            )}
           </button>
         )}
       </div>
-
-      {(searchOpen || filter) && (
-        <div className="px-2 pb-2">
-          <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
-            <Search className="size-3.5 shrink-0 text-ink-faint" />
-            <input
-              autoFocus
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search conversations…"
-              aria-label="Search conversations"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setFilter("");
-                  setSearchOpen(false);
-                }
-              }}
-              className="composer-input min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-faint"
-            />
-            {filter && (
-              <button
-                onClick={() => setFilter("")}
-                aria-label="Clear search"
-                className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       <p id="sidebar-selection-help" className="sr-only">
         Use Shift-click or Shift+Arrow Up and Down to select a range. Command or Control-click toggles one conversation. Press Escape to clear the selection.
@@ -934,6 +922,48 @@ export function Sidebar({
             feel ineffective. */}
         <SpecialistNavigation />
 
+        <div className="px-2 pb-2 pt-1">
+          <div className="mb-2 flex min-h-8 items-center gap-2">
+            <span className="text-sm font-medium uppercase tracking-[0.08em] text-ink-faint">
+              Projects
+            </span>
+            <button
+              type="button"
+              onClick={() => newConversation()}
+              title="Start a new session in the current project"
+              className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1 text-sm font-medium text-on-accent shadow-button transition hover:bg-accent-hover"
+            >
+              <Plus className="size-3.5" /> New session
+            </button>
+          </div>
+          <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
+            <Search className="size-3.5 shrink-0 text-ink-faint" />
+            <input
+              ref={searchInputRef}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search projects and chats…"
+              aria-label="Search conversations"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setFilter("");
+              }}
+              className="composer-input min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-faint"
+            />
+            {filter && (
+              <button
+                onClick={() => setFilter("")}
+                aria-label="Clear search"
+                className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {conversations.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-ink-faint">
             {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
@@ -944,64 +974,76 @@ export function Sidebar({
           </p>
         ) : (
           <div className="flex flex-col">
-            {groups.length > 0 && (
-              <div className="px-2 pb-1 pt-2 text-sm font-medium text-ink-faint">Projects</div>
-            )}
             <AnimatePresence initial={false} mode="popLayout">
-              {groups.map((g) => (
-                <ProjectDragAndDrop
-                  key={g.key}
-                  projectKey={g.key}
-                  label={g.label}
-                  enabled={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
-                  onDropProject={dropPinnedProject}
-                >
-                  {(dragHandleRef) => (
-                    <m.section
-                      layout={reduceMotion ? false : "position"}
-                      {...accessibleMotion(RISE_SMALL, reduceMotion)}
-                      transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
-                    >
-                      <ProjectHeader
-                        group={g}
-                        menuOpen={projectMenu?.group.key === g.key}
-                        reorderable={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
-                        dragHandleRef={dragHandleRef}
-                        onOpenMenu={(button) => openProjectMenu(g, button)}
-                        onNewSession={() => startProjectSession(g)}
-                      />
-                      <div className="flex flex-col gap-1">
-                        <AnimatePresence initial={false} mode="popLayout">
-                          {g.convos.map((c) => {
-                            const mutation = mutatingIds.has(c.id)
-                              ? conversationMutation?.kind ?? "archive"
-                              : null;
-                            return (
-                              <ConversationRow
-                                  key={c.id}
-                                  c={c}
-                                  active={navigatedConversationId === c.id}
-                                  streaming={runningIds.includes(c.id)}
-                                  unseen={
-                                    unseenWorkIds.includes(c.id) &&
-                                    navigatedConversationId !== c.id
-                                  }
-                                  opening={openingId === c.id}
-                                  selected={selectedIds.has(c.id)}
-                                  mutation={mutation}
-                                  onSelect={selectConversation}
-                                  onRangeStep={extendSelectionWithKeyboard}
-                                  onArchive={archiveConversationWithFocus}
-                                  onContextMenu={openContextMenu}
-                                />
-                            );
-                          })}
+              {groups.map((g) => {
+                const expanded = Boolean(filter) || expandedProjectKeys.has(g.key);
+                const conversationPanelId = `project-conversations-${encodeURIComponent(g.key)}`;
+                return (
+                  <ProjectDragAndDrop
+                    key={g.key}
+                    projectKey={g.key}
+                    label={g.label}
+                    enabled={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
+                    onDropProject={dropPinnedProject}
+                  >
+                    {(dragHandleRef) => (
+                      <m.section
+                        layout={reduceMotion ? false : "position"}
+                        {...accessibleMotion(RISE_SMALL, reduceMotion)}
+                        transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
+                      >
+                        <ProjectHeader
+                          group={g}
+                          expanded={expanded}
+                          conversationPanelId={conversationPanelId}
+                          menuOpen={projectMenu?.group.key === g.key}
+                          reorderable={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
+                          dragHandleRef={dragHandleRef}
+                          onToggle={() => toggleProjectExpanded(g.key)}
+                          onOpenMenu={(button) => openProjectMenu(g, button)}
+                          onNewSession={() => startProjectSession(g)}
+                        />
+                        <AnimatePresence initial={false}>
+                          {expanded && g.convos.length > 0 && (
+                            <m.div
+                              id={conversationPanelId}
+                              {...(reduceMotion ? EXPAND_REDUCED : EXPAND)}
+                              className="ml-5 overflow-hidden border-l border-border-subtle pl-1"
+                            >
+                              <div className="flex flex-col gap-0.5 py-0.5">
+                                {g.convos.map((c) => {
+                                  const mutation = mutatingIds.has(c.id)
+                                    ? conversationMutation?.kind ?? "archive"
+                                    : null;
+                                  return (
+                                    <ConversationRow
+                                      key={c.id}
+                                      c={c}
+                                      active={navigatedConversationId === c.id}
+                                      streaming={runningIds.includes(c.id)}
+                                      unseen={
+                                        unseenWorkIds.includes(c.id) &&
+                                        navigatedConversationId !== c.id
+                                      }
+                                      opening={openingId === c.id}
+                                      selected={selectedIds.has(c.id)}
+                                      mutation={mutation}
+                                      onSelect={selectConversation}
+                                      onRangeStep={extendSelectionWithKeyboard}
+                                      onArchive={archiveConversationWithFocus}
+                                      onContextMenu={openContextMenu}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </m.div>
+                          )}
                         </AnimatePresence>
-                      </div>
-                    </m.section>
-                  )}
-                </ProjectDragAndDrop>
-              ))}
+                      </m.section>
+                    )}
+                  </ProjectDragAndDrop>
+                );
+              })}
             </AnimatePresence>
 
             {groups.length === 0 && archivedConvos.length > 0 && (

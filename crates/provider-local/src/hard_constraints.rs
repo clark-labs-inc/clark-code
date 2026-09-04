@@ -15,7 +15,7 @@ pub(crate) fn refusal(name: &str, detail: &str, constraints: &[String]) -> Optio
     let shell_deletes = name == "bash" && crate::safety::command_attempts_delete(detail);
     if no_delete && (deletion_tool || patch_deletes || shell_deletes) {
         return Some(
-            "this Spec's protected Full access never deletes files or resources".to_string(),
+            "this protected Full access workflow never deletes files or resources".to_string(),
         );
     }
 
@@ -26,7 +26,7 @@ pub(crate) fn refusal(name: &str, detail: &str, constraints: &[String]) -> Optio
             .any(|part| matches!(part, "push" | "merge"));
     if no_github_push && (shell_pushes || github_push_tool) {
         return Some(
-            "this Spec's protected Full access never pushes or merges changes on GitHub"
+            "this protected Full access workflow never pushes or merges changes on GitHub"
                 .to_string(),
         );
     }

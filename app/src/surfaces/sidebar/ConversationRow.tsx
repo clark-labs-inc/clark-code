@@ -81,13 +81,13 @@ function ConversationRowImpl({
         }}
         aria-busy={mutating || undefined}
         className={cn(
-          "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-base transition duration-fast ease-agent",
+          "group relative flex min-h-8 items-center gap-1 rounded-lg border-l-2 px-2 py-0.5 text-base transition duration-fast ease-agent",
           mutating && "opacity-60",
           selected
-            ? "bg-bg-tertiary text-ink"
+            ? "border-accent bg-bg-tertiary text-ink"
             : active || opening
-              ? "bg-bg-tertiary text-ink"
-              : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
+              ? "border-accent bg-accent-subtle text-ink"
+              : "border-transparent text-ink-secondary hover:bg-bg-hover hover:text-ink",
         )}
       >
         {editing ? (
@@ -167,7 +167,9 @@ function ConversationRowImpl({
                 <span className="size-2 rounded-sm bg-accent" />
               </span>
             ) : (
-              <span className="size-3 shrink-0" aria-hidden="true" />
+              <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
+                <span className={cn("size-1.5 rounded-full", active ? "bg-accent" : "bg-ink-faint/55")} />
+              </span>
             )}
             <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
           </button>

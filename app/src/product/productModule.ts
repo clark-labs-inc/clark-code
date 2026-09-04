@@ -114,22 +114,8 @@ export interface ProductVoicePolicy {
   stream?: ProductVoiceStreamPolicy;
 }
 
-export interface ProductInitialSpecialistDocument {
-  filename: string;
-  markdown: string;
-}
-
-export interface ProductPreparedSpecialistDocument {
-  filename: string;
-}
-
 export interface ProductSpecialistWorkspacePolicy {
   isConversationBound: (kind: string) => boolean;
-  prepareDocument?: (
-    kind: string,
-    conversationId: string,
-    initialDocument?: ProductInitialSpecialistDocument,
-  ) => Promise<ProductPreparedSpecialistDocument | null>;
 }
 
 export interface ProductArtifactPolicy {

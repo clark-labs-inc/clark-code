@@ -9,7 +9,7 @@ describe("cloud composer draft scope", () => {
   it("uses a clean namespace for unbound drafts without changing conversation IDs", () => {
     expect(cloudComposerDraftKey(null)).toBe("new.v3");
     expect(cloudComposerDraftKey("conversation-123")).toBe("conversation-123");
-    expect(cloudComposerDraftKey("specialist:spec:new.v3")).toBe("specialist:spec:new.v3");
+    expect(cloudComposerDraftKey("specialist:rsi:new.v3")).toBe("specialist:rsi:new.v3");
   });
 
   it("recreates a server-absent draft from revision zero", () => {

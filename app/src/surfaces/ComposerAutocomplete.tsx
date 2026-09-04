@@ -1,9 +1,7 @@
 import {
   FileText,
   Folder,
-  FolderGit2,
   FolderOpen,
-  FolderSearch,
   Slash,
   Sparkles,
 } from "lucide-react";
@@ -39,13 +37,9 @@ export function ComposerAutocomplete({
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {
-        const key = suggestion.kind === "spec_repository"
-          ? `${suggestion.kind}:${suggestion.path}`
-          : suggestion.kind === "parent_directory"
+        const key = suggestion.kind === "parent_directory"
             ? `${suggestion.kind}:${suggestion.root}`
-          : suggestion.kind === "spec_repository_picker"
-            || suggestion.kind === "spec_folder"
-            || suggestion.kind === "parent_directory_menu"
+          : suggestion.kind === "parent_directory_menu"
             || suggestion.kind === "parent_directory_picker"
           ? suggestion.kind
           : suggestion.kind === "file" || suggestion.kind === "directory"
@@ -96,32 +90,6 @@ export function ComposerAutocomplete({
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
                   Read-only
-                </span>
-              </>
-            ) : suggestion.kind === "spec_repository" ? (
-              <>
-                <FolderGit2 className="size-3.5 shrink-0 text-accent" />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
-                  {suggestion.path.split(/[\\/]/).filter(Boolean).at(-1)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
-                  {suggestion.current ? "Current folder" : suggestion.path}
-                </span>
-              </>
-            ) : suggestion.kind === "spec_repository_picker" ? (
-              <>
-                <FolderOpen className="size-3.5 shrink-0 text-accent" />
-                <span className="shrink-0 text-xs font-medium text-ink">Choose another folder…</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
-                  Open the folder picker
-                </span>
-              </>
-            ) : suggestion.kind === "spec_folder" ? (
-              <>
-                <FolderSearch className="size-3.5 shrink-0 text-accent" />
-                <span className="shrink-0 font-mono text-xs text-ink">@folder</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
-                  Add a folder inside the focused repository
                 </span>
               </>
             ) : suggestion.kind === "file" || suggestion.kind === "directory" ? (

@@ -19,11 +19,6 @@ import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
 import {
-  isAuthExpiredError,
-  markAuthReconnectRequired,
-  refreshAuthSession,
-} from "../lib/auth";
-import {
   discoverRepositories,
   projectKnowledgeEnabled,
   repositoryIdentityForRoot,
@@ -598,7 +593,6 @@ export function MobileRemoteAgent() {
     const hostId = desktopHostId();
     const instanceId = desktopInstanceId();
     let stopped = false;
-    let authRefresh: Promise<boolean> | null = null;
     let appVersion: Promise<string> | null = null;
     consecutiveFailuresRef.current = 0;
     retryAtRef.current = 0;
@@ -607,35 +601,6 @@ export function MobileRemoteAgent() {
       const current = useSessionStore.getState().auth;
       const currentOwner = codeKeyAccountBinding(current);
       return Boolean(effectOwner && effectOwner === currentOwner);
-    };
-
-    const recoverExpiredAuth = async (error: unknown): Promise<boolean> => {
-      if (stopped || !accountStillCurrent() || !isAuthExpiredError(error)) return false;
-      if (!authRefresh) {
-        const attempt = (async () => {
-          const currentAuth = useSessionStore.getState().auth;
-          if (!currentAuth) return false;
-          try {
-            const refreshed = await refreshAuthSession(currentAuth);
-            if (stopped || !accountStillCurrent()) return false;
-            useSessionStore.setState({ auth: refreshed });
-            return true;
-          } catch {
-            if (stopped || !accountStillCurrent()) return false;
-            useSessionStore.setState({ auth: markAuthReconnectRequired(currentAuth) });
-            void notify(
-              "Clark account needs reconnecting",
-              "Local work is still available. Reconnect from the account menu to restore remote control.",
-            );
-            return false;
-          }
-        })();
-        authRefresh = attempt;
-        void attempt.finally(() => {
-          if (authRefresh === attempt) authRefresh = null;
-        });
-      }
-      return await authRefresh;
     };
 
     const refreshPresence = async () => {
@@ -679,8 +644,8 @@ export function MobileRemoteAgent() {
           },
           refreshRepositories,
         );
-      } catch (error) {
-        await recoverExpiredAuth(error);
+      } catch {
+        /* Product requests own bounded credential recovery and exact replay. */
       }
     };
 
@@ -719,11 +684,9 @@ export function MobileRemoteAgent() {
         }
         consecutiveFailuresRef.current = 0;
         retryAtRef.current = 0;
-      } catch (error) {
-        if (!(await recoverExpiredAuth(error))) {
-          consecutiveFailuresRef.current += 1;
-          retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
-        }
+      } catch {
+        consecutiveFailuresRef.current += 1;
+        retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
         /* Remote control is a background affordance; normal desktop use continues. */
       } finally {
         commandBusyRef.current = false;

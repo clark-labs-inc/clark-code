@@ -961,14 +961,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           throw new Error("Quick Chat requires Clark Code native workspace.");
         }
         requestedProjectRoot = (await bridge.prepareQuickChatWorkspace(id)).path;
-        const specialistKind = openingMeta?.specialist?.kind;
-        const workspacePolicy = productModule().specialistWorkspace;
-        if (
-          specialistKind
-          && workspacePolicy?.isConversationBound(specialistKind)
-        ) {
-          await workspacePolicy.prepareDocument?.(specialistKind, id);
-        }
       }
       let config;
       let options;

@@ -26,7 +26,10 @@ describe("ProjectHeader", () => {
           kind: "remote",
           remoteHost: "ubuntu@cpu",
         })}
+        expanded
+        conversationPanelId="project-conversations-remote"
         menuOpen={false}
+        onToggle={vi.fn()}
         onOpenMenu={vi.fn()}
         onNewSession={vi.fn()}
       />,
@@ -43,7 +46,10 @@ describe("ProjectHeader", () => {
     const html = renderToStaticMarkup(
       <ProjectHeader
         group={group({})}
+        expanded={false}
+        conversationPanelId="project-conversations-other"
         menuOpen={false}
+        onToggle={vi.fn()}
         onOpenMenu={vi.fn()}
         onNewSession={vi.fn()}
       />,
@@ -56,8 +62,11 @@ describe("ProjectHeader", () => {
     const html = renderToStaticMarkup(
       <ProjectHeader
         group={group({ key: "p:/repo", label: "Repo", kind: "local", path: "/repo" })}
+        expanded={false}
+        conversationPanelId="project-conversations-repo"
         menuOpen={false}
         reorderable
+        onToggle={vi.fn()}
         onOpenMenu={vi.fn()}
         onNewSession={vi.fn()}
       />,
@@ -66,5 +75,30 @@ describe("ProjectHeader", () => {
     expect(html).toContain('data-project-drag-handle="p:/repo"');
     expect(html).toContain("Drag Repo to reorder pinned projects");
     expect(html).toContain("Project actions for Repo");
+  });
+
+  it("exposes project expansion and the conversation count from the header", () => {
+    const html = renderToStaticMarkup(
+      <ProjectHeader
+        group={group({
+          key: "quick-chats",
+          label: "Quick chats",
+          convos: [
+            { id: "one", title: "One", provider: "local", createdAt: 1, updatedAt: 1 },
+            { id: "two", title: "Two", provider: "local", createdAt: 2, updatedAt: 2 },
+          ],
+        })}
+        expanded
+        conversationPanelId="project-conversations-quick"
+        menuOpen={false}
+        onToggle={vi.fn()}
+        onOpenMenu={vi.fn()}
+        onNewSession={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Collapse Quick chats"');
+    expect(html).toContain('aria-controls="project-conversations-quick"');
+    expect(html).toContain(">2</span>");
   });
 });

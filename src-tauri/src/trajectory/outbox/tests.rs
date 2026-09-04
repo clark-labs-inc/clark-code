@@ -162,7 +162,10 @@ async fn legacy_compaction_folds_acknowledged_events_before_reclaiming_disk() {
     base.session = Some(SessionId::new("session-legacy"));
     outbox.initialize(&config(), &base, 0).await.unwrap();
     let batch = outbox.enqueue(&request("run-legacy")).await.unwrap();
-    outbox.acknowledge(&batch.batch_id).await.unwrap();
+    outbox
+        .acknowledge_many(std::slice::from_ref(&batch.batch_id))
+        .await
+        .unwrap();
 
     assert!(storage::migrate_legacy_database(&path).unwrap());
     let conn = open(&path).unwrap();
@@ -309,7 +312,10 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
         .all(|event| !matches!(event, AgentEvent::GoalUpdated { .. })));
 
     for batch in &pending {
-        outbox.acknowledge(&batch.batch_id).await.unwrap();
+        outbox
+            .acknowledge_many(std::slice::from_ref(&batch.batch_id))
+            .await
+            .unwrap();
     }
     let acknowledged = recover_snapshot(path, "user@example.com".into(), "session-1".into(), None)
         .await
@@ -333,8 +339,14 @@ async fn checkpoint_discards_only_acknowledged_covered_batches() {
         .unwrap();
     let first = outbox.enqueue(&request("first")).await.unwrap();
     let second = outbox.enqueue(&request("second")).await.unwrap();
-    outbox.acknowledge(&first.batch_id).await.unwrap();
-    outbox.acknowledge(&second.batch_id).await.unwrap();
+    outbox
+        .acknowledge_many(std::slice::from_ref(&first.batch_id))
+        .await
+        .unwrap();
+    outbox
+        .acknowledge_many(std::slice::from_ref(&second.batch_id))
+        .await
+        .unwrap();
     commit_pending_snapshot(
         path.clone(),
         "owner".into(),
@@ -727,7 +739,10 @@ async fn snapshot_publication_waits_for_its_exact_acknowledged_prefix() {
     .unwrap_err();
     assert!(pending.contains("still syncing"));
 
-    outbox.acknowledge(&first.batch_id).await.unwrap();
+    outbox
+        .acknowledge_many(std::slice::from_ref(&first.batch_id))
+        .await
+        .unwrap();
     wait_for_acknowledged_prefix(
         path,
         "owner".into(),

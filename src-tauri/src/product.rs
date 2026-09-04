@@ -94,42 +94,6 @@ impl ProductRequestContext<'_> {
         crate::commands::read_workspace_markdown_in(source_uri, conversation_id, workspace).await
     }
 
-    pub async fn write_workspace_markdown(
-        &self,
-        conversation_id: &str,
-        filename: &str,
-        markdown: &[u8],
-    ) -> Result<(), String> {
-        let workspace = self.workspace_root(conversation_id).await;
-        crate::commands::write_workspace_markdown_in(conversation_id, filename, markdown, workspace)
-            .await
-    }
-
-    pub async fn ensure_workspace_markdown(
-        &self,
-        conversation_id: &str,
-        filename: &str,
-        markdown: &[u8],
-    ) -> Result<bool, String> {
-        let workspace = self.workspace_root(conversation_id).await;
-        crate::commands::ensure_workspace_markdown_in(
-            conversation_id,
-            filename,
-            markdown,
-            workspace,
-        )
-        .await
-    }
-
-    pub async fn remove_workspace_markdown(
-        &self,
-        source_uri: &str,
-        conversation_id: &str,
-    ) -> Result<(), String> {
-        let workspace = self.workspace_root(conversation_id).await;
-        crate::commands::remove_workspace_markdown_in(source_uri, conversation_id, workspace).await
-    }
-
     pub async fn skill_catalog_service(&self) -> Arc<provider_local::SkillCatalogService> {
         self.state.runtime_registry.current_skill_catalogs().await
     }

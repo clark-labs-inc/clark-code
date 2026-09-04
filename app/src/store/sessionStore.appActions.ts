@@ -83,6 +83,10 @@ import { useSpecialistStore } from "./specialistStore";
 import { resetStableOrder } from "../lib/stableOrder";
 import { authAccountMatches } from "../lib/account";
 import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import {
+  configureProductAuthRecovery,
+  recoverProductAuthentication,
+} from "../product/productBridge";
 
 type AppActions = Pick<
   SessionState,
@@ -140,6 +144,38 @@ export function authAccountChanged(
   const nextOwner = codeKeyAccountBinding(next);
   if (currentOwner && nextOwner) return currentOwner !== nextOwner;
   return true;
+}
+
+/** Rotate the native credential for the account that still owns the store.
+ * Every authenticated product surface and native cloud event shares this
+ * boundary through productBridge's single-flight recovery. */
+export async function refreshActiveProductAuthentication(
+  set: SessionSet,
+  get: SessionGet,
+): Promise<void> {
+  const startedWith = get().auth;
+  if (!startedWith) throw new Error("Sign in again to restore product access.");
+
+  try {
+    const refreshed = await refreshAuthSession(
+      startedWith,
+      () => authAccountMatches(startedWith, get().auth),
+    );
+    if (!authAccountMatches(startedWith, get().auth)) {
+      throw new Error("The active account changed while Clark refreshed access.");
+    }
+    configureCloudHistoryCredentials(cloudCreds(refreshed));
+    set({ auth: refreshed });
+  } catch (error) {
+    const current = get().auth;
+    if (current && authAccountMatches(startedWith, current)) {
+      set({
+        auth: markAuthReconnectRequired(current),
+        warning: "Your account needs reconnecting. Local work remains available.",
+      });
+    }
+    throw error;
+  }
 }
 
 function activateSignedInAccount(
@@ -336,6 +372,7 @@ export function handleCloudHistoryConflict(
 }
 
 export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
+  configureProductAuthRecovery(() => refreshActiveProductAuthentication(set, get));
   return {
   checkForUpdate: async () => {
     const ready = get().update;
@@ -514,37 +551,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         );
       }
       configureCloudHistoryCredentials(cloudCreds(get().auth));
-      // Native trajectory sync hit a 401 mid-retry: refresh the host-owned
-      // Google/the agent credential generation. The retry loop reads it natively,
-      // so the run self-heals without any WebView credential. Single-
-      // flight: retries can raise the event repeatedly during one refresh.
-      // A failed refresh mid-run must NOT sign the user out; the append just
-      // exhausts its retries and surfaces as a soft cloud-sync warning.
-      let refreshingCloudToken = false;
+      // Native trajectory delivery and authenticated product calls share the
+      // same refresh flight. The native retry loop then reads the rotated host-
+      // owned credential without exposing it to the WebView.
       bridge.onCloudAuthExpired?.(() => {
-        if (refreshingCloudToken) return;
-        refreshingCloudToken = true;
-        void (async () => {
-          try {
-            const auth = get().auth;
-            const refreshed = auth ? await refreshAuthSession(auth) : null;
-            if (refreshed && authAccountMatches(get().auth, auth)) {
-              configureCloudHistoryCredentials(cloudCreds(refreshed));
-              set({ auth: refreshed });
-              await get().syncCloudIndex();
-            }
-          } catch {
-            const auth = get().auth;
-            if (auth) {
-              set({
-                auth: markAuthReconnectRequired(auth),
-                warning: "Your account needs reconnecting. Local work remains available.",
-              });
-            }
-          } finally {
-            refreshingCloudToken = false;
-          }
-        })();
+        void recoverProductAuthentication()
+          .then(() => get().syncCloudIndex())
+          .catch(() => undefined);
       });
       // A network delivery warning means the SQLite prefix is safe and the run
       // can continue. A local journal failure is fail-closed by the native
@@ -987,16 +1000,16 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     const current = get().auth;
     if (!current) return;
     try {
-      const refreshed = await refreshAuthSession(current);
-      if (!authAccountMatches(get().auth, current)) return;
-      configureCloudHistoryCredentials(cloudCreds(refreshed));
-      set({ auth: refreshed, error: null, warning: null });
+      await recoverProductAuthentication();
+      if (!authAccountMatches(current, get().auth)) return;
+      set({ error: null, warning: null });
       await get().syncCloudIndex();
       return;
     } catch {
       // A retained refresh token may no longer be usable. Re-authenticate the
       // same account interactively without destroying its local task state.
     }
+    if (!authAccountMatches(current, get().auth)) return;
     const reauthenticated = await signInWithGoogle();
     if (!authAccountMatches(reauthenticated, current)) {
       activateSignedInAccount(set, get, reauthenticated);

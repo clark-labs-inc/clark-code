@@ -102,10 +102,10 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  spec-subchat-e2e:
+  browser-integrations-e2e:
     name: Clark Code browser integrations
     runs-on: ubuntu-latest
-    # The specialist, sub-chat, and resilience suites run against one browser
+    # The specialist and resilience suites run against one browser
     # boundary and can legitimately exceed fifteen minutes on a cold runner.
     # Keep a bounded ceiling without turning a healthy integration run into a
     # cancellation-only CI failure.
@@ -128,8 +128,6 @@ jobs:
           pnpm --dir harness install --frozen-lockfile
       - name: Install Chromium for the browser boundary
         run: pnpm --dir harness exec playwright install --with-deps chromium
-      - name: Test Spec scoped sub-conversation end to end
-        run: pnpm --dir harness test:spec-subchat
       - name: Test every specialist runtime and UI transition end to end
         run: pnpm --dir harness test:specialists
       - name: Test Clark Code recovery and fault combinations end to end
@@ -321,7 +319,7 @@ jobs:
   required:
     name: CI required
     if: always()
-    needs: [rust, frontend, spec-subchat-e2e, tauri, public-boundary]
+    needs: [rust, frontend, browser-integrations-e2e, tauri, public-boundary]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -329,13 +327,13 @@ jobs:
         env:
           RUST_RESULT: ${{ needs.rust.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
-          SPEC_SUBCHAT_E2E_RESULT: ${{ needs.spec-subchat-e2e.result }}
+          BROWSER_INTEGRATIONS_E2E_RESULT: ${{ needs.browser-integrations-e2e.result }}
           TAURI_RESULT: ${{ needs.tauri.result }}
           PUBLIC_BOUNDARY_RESULT: ${{ needs.public-boundary.result }}
         run: |
           test "$RUST_RESULT" = success
           test "$FRONTEND_RESULT" = success
-          test "$SPEC_SUBCHAT_E2E_RESULT" = success
+          test "$BROWSER_INTEGRATIONS_E2E_RESULT" = success
           test "$TAURI_RESULT" = success
           test "$PUBLIC_BOUNDARY_RESULT" = success
           {
@@ -345,7 +343,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Rust core and providers | $RUST_RESULT |"
             echo "| Frontend | $FRONTEND_RESULT |"
-            echo "| Clark Code browser integrations | $SPEC_SUBCHAT_E2E_RESULT |"
+            echo "| Clark Code browser integrations | $BROWSER_INTEGRATIONS_E2E_RESULT |"
             echo "| Native Tauri matrix | $TAURI_RESULT |"
             echo "| Public boundary | $PUBLIC_BOUNDARY_RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"

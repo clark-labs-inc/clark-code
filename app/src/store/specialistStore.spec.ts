@@ -10,42 +10,40 @@ describe("specialist navigation state", () => {
   it("does not carry composer context into an unrelated new specialist composer", () => {
     const contexts = contextsAfterSpecialistOpen(
       {
-        spec: {
-          kind: "spec",
-          repositoryPath: "/repos/previous",
+        security: {
+          kind: "security",
           objectId: "previous-object",
-          workflow: "spec:previous",
+          workflow: "security:previous",
         },
       },
-      "spec",
-      "spec:default",
+      "security",
+      "security:default",
     );
 
-    expect(contexts.spec).toEqual({
-      kind: "spec",
-      workflow: "spec:default",
+    expect(contexts.security).toEqual({
+      kind: "security",
+      workflow: "security:default",
     });
   });
 
   it("restores only the exact context owned by an opened saved conversation", () => {
     const contexts = contextsAfterSpecialistOpen(
       {
-        spec: {
-          kind: "spec",
-          repositoryPath: "/repos/previous",
+        security: {
+          kind: "security",
           organizationId: "previous-organization",
         },
       },
-      "spec",
-      "spec:default",
+      "security",
+      "security:default",
       {
-        kind: "spec",
+        kind: "security",
         objectId: "opened-conversation-object",
       },
     );
 
-    expect(contexts.spec).toEqual({
-      kind: "spec",
+    expect(contexts.security).toEqual({
+      kind: "security",
       objectId: "opened-conversation-object",
     });
   });

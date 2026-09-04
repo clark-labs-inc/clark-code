@@ -451,7 +451,10 @@ function AccountSection() {
   const reconnect = useSessionStore((s) => s.reconnectAuth);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
   const SettingsSlot = productModule().slots.settings;
-  const productAccess = useProductAccess(Boolean(SettingsSlot));
+  const productAccess = useProductAccess(
+    Boolean(auth && SettingsSlot),
+    codeKeyAccountBinding(auth),
+  );
 
   if (!auth) return null;
   const user = auth.user;

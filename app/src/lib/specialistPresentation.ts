@@ -1,4 +1,4 @@
-import type { SpecialistKind } from "./specialists";
+import { isSupportedSpecialistKind, type SpecialistKind } from "./specialists";
 import type { SpecialistPresentationPayload } from "../core-bridge/types";
 
 export type SpecialistPresentationTone =
@@ -49,7 +49,7 @@ export interface SpecialistConversationPresentation {
   limitation: string;
 }
 
-const PRESENTATIONS: Readonly<Record<string, SpecialistConversationPresentation>> = {
+const PRESENTATIONS: Readonly<Record<SpecialistKind, SpecialistConversationPresentation>> = {
   scout: {
     id: "demo-scout-checkout-blast-radius",
     kind: "scout",
@@ -486,7 +486,7 @@ export function specialistPresentationFromPayload(
 ): SpecialistConversationPresentation | null {
   if (
     !payload.id
-    || !payload.kind
+    || !isSupportedSpecialistKind(payload.kind)
     || !payload.title
     || !payload.summary
     || !Array.isArray(payload.metrics)

@@ -158,13 +158,13 @@ async fn protected_full_access_refuses_deletion_and_github_push_without_promptin
         gate.hard_refusal("bash", &bash_gate("git -C repo push origin main"))
             .await
             .as_deref(),
-        Some("this Spec's protected Full access never pushes or merges changes on GitHub")
+        Some("this protected Full access workflow never pushes or merges changes on GitHub")
     );
     assert_eq!(
         gate.hard_refusal("bash", &bash_gate("rm notes.txt"))
             .await
             .as_deref(),
-        Some("this Spec's protected Full access never deletes files or resources")
+        Some("this protected Full access workflow never deletes files or resources")
     );
 
     let mut patch = gate_info("apply_patch", &Value::Null);

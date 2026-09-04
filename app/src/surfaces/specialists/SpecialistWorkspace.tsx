@@ -20,6 +20,7 @@ import { openExternal } from "../../lib/externalLinks";
 import {
   SPECIALISTS,
   projectedSpecialistAccess,
+  specialistAccessAfterProductFailure,
   specialistAccessAfterLoadFailure,
   specialistAccessBadge,
   specialistNeedsEntitlementVerification,
@@ -53,6 +54,7 @@ import { syncSecurityInsights } from "../../lib/securityCloud";
 import { saveSecurityScanPdf } from "../../lib/securityReport";
 import type { SecurityScanRecord } from "../../core-bridge/types";
 import { cn } from "../../lib/cn";
+import { codeKeyAccountBinding } from "../../lib/account";
 import { UpdatePill } from "../TopBar";
 import { ScoutCanvas } from "./ScoutCanvas";
 import { SecurityCanvas } from "./SecurityCanvas";
@@ -137,7 +139,7 @@ export function SpecialistWorkspace({
     ? state.conversations.find((conversation) => conversation.id === state.session?.id)
     : undefined);
   const boundContext = boundConversation?.specialist;
-  const productAccess = useProductAccess(true);
+  const productAccess = useProductAccess(Boolean(auth), codeKeyAccountBinding(auth));
   const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const setSettingsOpen = useSessionStore((state) => state.setSettingsOpen);
   const configuredCwd = useSessionStore(
@@ -161,14 +163,18 @@ export function SpecialistWorkspace({
   const [organizationName, setOrganizationName] = useState("");
   const [organizationDomain, setOrganizationDomain] = useState("");
   const definition = SPECIALISTS[active];
-  const supportsCanvas = active !== "rsi";
+  const supportsCanvas = active === "scout" || active === "security" || active === "scientist";
   const context = boundContext?.kind === active ? boundContext : contexts[active] ?? { kind: active };
   const preview = previewAccess();
-  const projected = preview
+  const productProjection = preview
     ? specialistNeedsEntitlementVerification(definition.entitlement)
       ? preview === "paid" ? "ready" : "free"
       : "ready"
     : projectedSpecialistAccess(Boolean(auth), productAccess.access, active);
+  const projected = specialistAccessAfterProductFailure(
+    productProjection,
+    Boolean(productAccess.error) && !productAccess.loading,
+  );
   const accessCapability = capabilityAccess(productAccess.access, active);
   const access = projected === "ready"
     ? serverAccess === "unknown" ? "loading" : serverAccess
@@ -566,13 +572,13 @@ export function SpecialistWorkspace({
               await load();
             }}
           />
-        ) : (
+        ) : active === "scientist" ? (
           <ScientistCanvas
             tab={tabs[active] as ScientistTab}
             overview={data.researchOverview}
             artifacts={data.scienceArtifacts}
           />
-        )
+        ) : null
       )}
     </div>
   );
@@ -714,9 +720,8 @@ export function SpecialistWorkspace({
           }}
           onWorkspaceSetup={() => openSpecialist("scout")}
           onRetry={() => {
-            void productAccess.reload().catch(() => undefined);
             setServerAccess("unknown");
-            void load();
+            void productAccess.reload().catch(() => undefined);
           }}
         />
       ) : (

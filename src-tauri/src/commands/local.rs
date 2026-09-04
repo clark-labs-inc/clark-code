@@ -202,7 +202,7 @@ pub struct ProjectDirectory {
     pub path: String,
 }
 
-/// List the immediate directories beside `cwd` for Spec's repository picker.
+/// List the immediate directories beside `cwd` for repository-aware mentions.
 /// This is intentionally shallow: typing `@` must not walk every sibling repo.
 #[tauri::command]
 pub async fn local_list_sibling_directories(

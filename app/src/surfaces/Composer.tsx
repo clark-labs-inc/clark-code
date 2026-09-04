@@ -556,11 +556,6 @@ function ScopedComposer() {
       s.cmd.run?.();
       return;
     }
-    if (
-      s.kind === "spec_repository"
-      || s.kind === "spec_repository_picker"
-      || s.kind === "spec_folder"
-    ) return;
     const insert = `@${s.path}${
       s.kind === "directory" || s.kind === "parent_directory" ? "/" : ""
     } `;

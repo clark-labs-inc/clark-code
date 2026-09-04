@@ -91,11 +91,11 @@ describe("per-conversation model", () => {
 
   it("clears an abandoned specialist start draft when starting a new session", () => {
     const owner = composerDraftOwner(null);
-    const draftId = specialistStartComposerDraftId("spec");
-    saveComposerDraft(owner, draftId, "unsent Spec request");
+    const draftId = specialistStartComposerDraftId("security");
+    saveComposerDraft(owner, draftId, "unsent Security request");
     useSpecialistStore.setState({
-      active: "spec",
-      contexts: { spec: { kind: "spec" } },
+      active: "security",
+      contexts: { security: { kind: "security" } },
     });
 
     useSessionStore.getState().endSession();

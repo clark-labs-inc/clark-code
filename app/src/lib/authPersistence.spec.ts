@@ -90,4 +90,23 @@ describe("native auth persistence", () => {
     });
     expect(JSON.stringify(invoke.mock.calls)).not.toMatch(/token|secret|clientId|clientSecret/i);
   });
+
+  it("does not replace the cached account descriptor after refresh ownership is lost", async () => {
+    const retained = { ...descriptor, connection: "offline" as const };
+    const refreshed = { ...descriptor, connection: "ready" as const };
+    invoke.mockImplementation((command: string, args?: { operation?: string }) => {
+      if (command !== "product_request") throw new Error(`unexpected command ${command}`);
+      if (args?.operation === "account.load") return Promise.resolve(retained);
+      if (args?.operation === "account.refresh") return Promise.resolve(refreshed);
+      throw new Error(`unexpected operation ${args?.operation}`);
+    });
+    const auth = await loadAuth();
+    await auth.initializeAuthSession();
+
+    await expect(auth.refreshAuthSession(retained, () => false)).rejects.toThrow(
+      "active account changed",
+    );
+
+    expect(auth.loadAuthSession()).toEqual(retained);
+  });
 });

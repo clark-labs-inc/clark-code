@@ -85,7 +85,7 @@ exemption remains in `tokenPolicy.spec.ts`).
 
 Static-analysis tests over production sources:
 
-| Spec | Enforces |
+| Policy test | Enforces |
 | --- | --- |
 | `lib/motionPolicy.spec.ts` | no inline motion literals, no `transition-all`, JS↔CSS token sync, reduced-motion contract |
 | `lib/typographyPolicy.spec.ts` | no arbitrary `text-[…]` sizes |

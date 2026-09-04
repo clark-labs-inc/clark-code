@@ -102,7 +102,7 @@ export function SshSettings() {
       previous.focus();
       return;
     }
-    document.querySelector<HTMLElement>("[aria-label='Spec execution target'] button")?.focus();
+    document.querySelector<HTMLElement>("[aria-label$=' execution target'] button")?.focus();
   }, []);
 
   const close = useCallback(() => {

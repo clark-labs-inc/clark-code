@@ -9,11 +9,11 @@ vi.mock("../product/productBridge", () => ({
 import { clearSubmittedCloudComposerDraft } from "./cloudComposerDraft";
 
 const creds = { accountScope: "account-one" };
-const submitted = "Write the complete specification.";
+const submitted = "Write the complete research plan.";
 
 function draft(text: string, rev: number) {
   return {
-    draftKey: "specialist:spec:new.v3",
+    draftKey: "specialist:rsi:new.v3",
     text,
     rev,
     updatedAt: `2026-08-12T00:00:0${rev}.000Z`,
@@ -30,7 +30,7 @@ describe("cloud composer draft conflict handling", () => {
 
     await expect(clearSubmittedCloudComposerDraft(
       creds,
-      "specialist:spec:new.v3",
+      "specialist:rsi:new.v3",
       submitted,
     )).resolves.toEqual({ outcome: "cleared", draft: draft("", 5) });
     expect(product.request).toHaveBeenCalledTimes(2);
@@ -44,7 +44,7 @@ describe("cloud composer draft conflict handling", () => {
 
     await expect(clearSubmittedCloudComposerDraft(
       creds,
-      "specialist:spec:new.v3",
+      "specialist:rsi:new.v3",
       submitted,
     )).resolves.toEqual({ outcome: "preserved_newer", draft: newer });
     expect(product.request).toHaveBeenCalledTimes(2);
@@ -59,7 +59,7 @@ describe("cloud composer draft conflict handling", () => {
 
     await expect(clearSubmittedCloudComposerDraft(
       creds,
-      "specialist:spec:new.v3",
+      "specialist:rsi:new.v3",
       submitted,
     )).rejects.toThrow("did not accept its current revision");
     expect(product.request).toHaveBeenCalledTimes(3);

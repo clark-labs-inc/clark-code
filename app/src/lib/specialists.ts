@@ -4,7 +4,14 @@ import type { RemoteInfo } from "./remoteWorker";
 import type { ProductSpecialistTarget, ScoutCartographyTarget } from "./localAgent";
 import { productModule } from "../product/productModule";
 
-export type SpecialistKind = string;
+const SUPPORTED_SPECIALIST_KINDS = ["scout", "security", "scientist", "rsi"] as const;
+const SUPPORTED_SPECIALIST_KIND_SET = new Set<string>(SUPPORTED_SPECIALIST_KINDS);
+
+export type SpecialistKind = typeof SUPPORTED_SPECIALIST_KINDS[number];
+
+export function isSupportedSpecialistKind(value: string): value is SpecialistKind {
+  return SUPPORTED_SPECIALIST_KIND_SET.has(value);
+}
 export type SpecialistWorkflow = string;
 export type SpecialistTab = string;
 export type ScoutTab = "map" | "changes" | "simulations" | "evidence" | "runs";
@@ -16,8 +23,6 @@ export interface SpecialistContext {
   organizationId?: string;
   workspaceId?: string;
   repositoryId?: string;
-  /** Local repository root selected as code evidence for a living Spec. */
-  repositoryPath?: string;
   objectKind?: string;
   objectId?: string;
   workflow?: SpecialistWorkflow;
@@ -30,6 +35,22 @@ export interface SpecialistContext {
   scoutRunRequestId?: string;
   targetId?: string;
 }
+
+const SPECIALIST_CONTEXT_STRING_FIELDS = [
+  "organizationId",
+  "workspaceId",
+  "repositoryId",
+  "objectKind",
+  "objectId",
+  "workflow",
+  "programId",
+  "campaignId",
+  "studyId",
+  "experimentId",
+  "runId",
+  "scoutRunRequestId",
+  "targetId",
+] as const satisfies ReadonlyArray<Exclude<keyof SpecialistContext, "kind">>;
 
 /** Filesystem roots a conversation-bound specialist may inspect without
  * making its document workspace writable. */
@@ -112,7 +133,7 @@ export function createSpecialistRegistry(
   const byKind: Record<string, SpecialistDefinition> = {};
   for (const definition of definitions) {
     if (
-      !/^[a-z][a-z0-9_-]{1,63}$/.test(definition.kind)
+      !isSupportedSpecialistKind(definition.kind)
       || byKind[definition.kind]
       || !definition.tabs.some((tab) => tab.id === definition.defaultTab)
       || !definition.slashCommands.every((command) =>
@@ -140,6 +161,14 @@ function catalogObject(value: unknown, label: string): Record<string, unknown> {
 function catalogString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value) throw new Error(`${label} is invalid`);
   return value;
+}
+
+function catalogSpecialistKind(value: unknown): SpecialistKind {
+  const kind = catalogString(value, "specialist kind");
+  if (!isSupportedSpecialistKind(kind)) {
+    throw new Error(`Specialist kind has no registered presentation adapter: ${kind}`);
+  }
+  return kind as SpecialistKind;
 }
 
 export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt {
@@ -193,7 +222,7 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
       throw new Error(`Specialist manifest ${index} has an invalid skill binding`);
     }
     return {
-      kind: catalogString(manifest.kind, "specialist kind"),
+      kind: catalogSpecialistKind(manifest.kind),
       version: catalogString(manifest.version, "specialist version"),
       label: catalogString(manifest.label, "specialist label"),
       headline: catalogString(manifest.headline, "specialist headline"),
@@ -392,6 +421,27 @@ export function isSpecialistKind(value: string): value is SpecialistKind {
   return Boolean(SPECIALIST_REGISTRY.get(value));
 }
 
+/** Accept durable specialist metadata only when its adapter is present in the
+ * signed catalog loaded by this renderer. Retired or malformed contexts become
+ * ordinary conversations instead of leaking into specialist navigation or a
+ * provider recipe that no longer exists. */
+export function registeredSpecialistContext(value: unknown): SpecialistContext | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  if (typeof row.kind !== "string" || !isSpecialistKind(row.kind)) return undefined;
+  const fields: Array<readonly [string, string]> = [];
+  for (const field of SPECIALIST_CONTEXT_STRING_FIELDS) {
+    const fieldValue = row[field];
+    if (fieldValue === undefined) continue;
+    if (typeof fieldValue !== "string") return undefined;
+    fields.push([field, fieldValue]);
+  }
+  return {
+    kind: row.kind,
+    ...Object.fromEntries(fields),
+  };
+}
+
 export type SpecialistAccessState =
   | "loading"
   | "signed_out"
@@ -440,6 +490,16 @@ export function projectedSpecialistAccess(
     .includes(capability.reason)
     ? "action_needed"
     : "free";
+}
+
+/** A rejected product access request is terminal for this attempt. Preserve
+ * definitive local/catalog states, but never present an unknown projection as
+ * an endless access check. */
+export function specialistAccessAfterProductFailure(
+  projected: SpecialistAccessState,
+  failed: boolean,
+): SpecialistAccessState {
+  return failed && projected === "loading" ? "offline" : projected;
 }
 
 /** Keep already verified access distinct from a later specialist-data

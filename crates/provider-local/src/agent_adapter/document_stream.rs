@@ -1,6 +1,6 @@
 //! Incremental projection of a document being written by a tool call.
 //!
-//! A `write_file` whose payload is a whole specification takes the model the
+//! A `write_file` whose payload is a whole document takes the model the
 //! better part of a minute to emit. Those argument fragments already arrive
 //! here token by token; without this module they are accumulated, discarded,
 //! and the document only reaches the UI once the file is on disk — one large
@@ -18,7 +18,7 @@
 //!   locate-before-payload (`path → content`), so the target is decodable
 //!   before any payload arrives. The UI only learns the path once arguments
 //!   validate — after the whole payload has streamed — which is too late to
-//!   stop a source file from rendering as the spec, and too late to avoid
+//!   stop a source file from rendering as a document, and too late to avoid
 //!   shipping every code write over IPC once per token.
 
 use std::collections::BTreeMap;
@@ -143,7 +143,7 @@ impl DocumentStreams {
     /// the validated `raw_input` carries the payload for anything that wants it.
     ///
     /// Matched by call id, never by tool name: parallel writes in one message
-    /// share a name, and two specs opening on the same heading would let the
+    /// share a name, and two documents opening on the same heading would let the
     /// longer stream be claimed by whichever call settled first — dropping text
     /// from one document and repeating it in the other.
     pub(super) fn settle(
@@ -203,7 +203,7 @@ mod tests {
                 0,
                 Some("call-1"),
                 Some("write_"),
-                Some("{\"path\":\"new_SPEC.md\",")
+                Some("{\"path\":\"proposal.md\",")
             ),
             None,
         );
@@ -212,11 +212,11 @@ mod tests {
                 0,
                 None,
                 Some("file"),
-                Some("\"content\":\"# Spec\\n\\n## Recommend")
+                Some("\"content\":\"# Proposal\\n\\n## Recommend")
             ),
             // `## ` is already past a word boundary; `Recommend` is held back
             // so a reader never sees a fragment resolve into another word.
-            Some("# Spec\n\n## ".into()),
+            Some("# Proposal\n\n## ".into()),
         );
         assert_eq!(
             streams.observe_delta(0, None, None, Some("ation\\n\\nStart here.\"}")),
@@ -246,7 +246,7 @@ mod tests {
     fn a_source_file_write_never_streams() {
         // The UI cannot know the target until arguments validate — after the
         // whole payload has streamed — so this gate is the only thing standing
-        // between a code file and the spec surface.
+        // between a code file and the document surface.
         let mut streams = DocumentStreams::default();
         assert_eq!(
             streams.observe_delta(
@@ -269,19 +269,19 @@ mod tests {
     #[test]
     fn a_half_streamed_path_defers_rather_than_misjudging() {
         let mut streams = DocumentStreams::default();
-        // `new_SPEC.m` so far — neither markdown nor not-markdown yet.
+        // `proposal.m` so far — neither markdown nor not-markdown yet.
         assert_eq!(
             streams.observe_delta(
                 0,
                 Some("call-1"),
                 Some("write_file"),
-                Some("{\"path\":\"new_SPEC.m")
+                Some("{\"path\":\"proposal.m")
             ),
             None,
         );
         assert_eq!(
-            streams.observe_delta(0, None, None, Some("d\",\"content\":\"# Spec ")),
-            Some("# Spec ".into()),
+            streams.observe_delta(0, None, None, Some("d\",\"content\":\"# Proposal ")),
+            Some("# Proposal ".into()),
         );
     }
 
@@ -321,11 +321,11 @@ mod tests {
                 0,
                 Some("call-1"),
                 Some("write_file"),
-                Some("{\"path\":\"new_SPEC.md\",\"content\":\"Visible then pend"),
+                Some("{\"path\":\"proposal.md\",\"content\":\"Visible then pend"),
             ),
             Some("Visible then ".into()),
         );
-        let args = serde_json::json!({"path": "new_SPEC.md", "content": "Visible then pending"});
+        let args = serde_json::json!({"path": "proposal.md", "content": "Visible then pending"});
         assert_eq!(
             append(streams.settle("call-1", "write_file", &args)),
             Some("pending".into()),

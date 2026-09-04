@@ -508,7 +508,7 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = system_prompt(&sb, false, false, None, None);
 
-        // Spec folded into ordinary conversation: interview first, then build.
+        // Opening build requests stay in ordinary conversation: interview first, then build.
         assert!(p.contains("Opening a conversation with a request to build something"));
         assert!(p.contains("Clarify step by step"));
         assert!(p.contains("one short question at a time"));

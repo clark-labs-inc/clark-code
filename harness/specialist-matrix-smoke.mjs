@@ -365,7 +365,8 @@ try {
     }
     checks.push(`${specialist.kind}_provider_authority_projection_and_terminal_state`);
 
-    await page.locator('[data-qa="specialist-nav-spec"]').click();
+    await page.getByRole("button", { name: "New session", exact: true }).click();
+    await page.getByRole("button", { name: "Specialist lenses", exact: true }).click();
     await page.locator(`[data-qa="specialist-nav-${specialist.kind}"]`).click();
     const row = page.locator(`[data-qa^="specialist-conversation-${specialist.kind}-"]`).first();
     await row.waitFor();

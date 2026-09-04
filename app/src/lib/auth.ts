@@ -108,21 +108,17 @@ export async function signOut(): Promise<void> {
   cachedSession = null;
 }
 
-export function isAuthExpiredError(error: unknown): boolean {
-  const message = String(error);
-  return (
-    /\b401\b/.test(message) ||
-    /Unauthorized/i.test(message) ||
-    /ExpiredSignature/i.test(message) ||
-    /JWT validation failed/i.test(message)
-  );
-}
-
-export async function refreshAuthSession(session: AuthSession): Promise<AuthSession> {
+export async function refreshAuthSession(
+  session: AuthSession,
+  sessionStillActive: () => boolean,
+): Promise<AuthSession> {
   if (!isTauri()) throw new Error("Account refresh requires the native desktop app.");
   const descriptor = await productRequest<AuthSession>("account.refresh");
   if (descriptor.user.id !== session.user.id) {
     throw new Error("Clark refreshed a different account than the active session.");
+  }
+  if (!sessionStillActive()) {
+    throw new Error("The active account changed while Clark refreshed access.");
   }
   cachedSession = descriptor;
   return descriptor;

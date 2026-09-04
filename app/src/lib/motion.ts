@@ -224,15 +224,6 @@ export const CHAT_REDUCED_TEXT_ANIMATION = {
   stagger: 0,
 } as const;
 
-/** Cadence for new text appearing inside a live Spec revision. Pretext reserves
- * the final line geometry while words arrive, so the document feels written
- * in place instead of repeatedly reflowing around the reader. */
-export const SPEC_TEXT_REVEAL = {
-  maxDurationMs: 1_400,
-  minIntervalMs: 18,
-  maxIntervalMs: 55,
-} as const;
-
 const USER_MESSAGE_ROW: MotionProps = {
   initial: { opacity: 0, transform: "translate3d(8px, 2px, 0) scale(0.995)" },
   animate: { opacity: 1, transform: "translate3d(0, 0, 0) scale(1)" },

@@ -565,7 +565,7 @@ fn streamed_document_input_is_released_once_the_call_settles() {
     // transcript page — so keeping it would store each written document twice,
     // forever.
     let id = ToolCallId::new("tc-write");
-    let document = "# Spec\n\nBody that is long enough to matter.\n";
+    let document = "# Proposal\n\nBody that is long enough to matter.\n";
     let events = vec![
         AgentEvent::ToolCall {
             run: run(),
@@ -643,7 +643,7 @@ fn streamed_document_input_accumulates_across_argument_deltas() {
             run: run(),
             id: id.clone(),
             patch: ToolCallPatch {
-                append_input: "# Spec\n\n".into(),
+                append_input: "# Proposal\n\n".into(),
                 ..Default::default()
             },
         },
@@ -659,7 +659,7 @@ fn streamed_document_input_accumulates_across_argument_deltas() {
 
     let snap = reduce_all(&events);
     let tc = &snap.tool_calls[&id];
-    assert_eq!(tc.streamed_input, "# Spec\n\n## Recommendation\n");
+    assert_eq!(tc.streamed_input, "# Proposal\n\n## Recommendation\n");
     // Streamed input is the tool's argument, never its output.
     assert!(tc.content.is_empty());
 }

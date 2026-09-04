@@ -52,6 +52,26 @@ export function sidebarFixtureEnabled(search = typeof window === "undefined" ? "
 }
 
 export function sidebarFixtureConversations(now = Date.now()): ConversationMeta[] {
+  const quickChats: ConversationMeta[] = [
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      title: "can you look at latest audio files",
+      provider: "local",
+      project: "/workspace/.agent/workspace/00000000-0000-4000-8000-000000000001",
+      mode: "default",
+      createdAt: now - 10 * 60 * 1000,
+      updatedAt: now - 2 * 60 * 1000,
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000002",
+      title: "hi",
+      provider: "local",
+      project: "/workspace/.agent/workspace/00000000-0000-4000-8000-000000000002",
+      mode: "default",
+      createdAt: now - 20 * 60 * 1000,
+      updatedAt: now - 15 * 60 * 1000,
+    },
+  ];
   const active = fixtureProjects.flatMap((project, projectIndex) =>
     project.titles.map((title, titleIndex) => {
       const index = projectIndex * project.titles.length + titleIndex;
@@ -99,5 +119,5 @@ export function sidebarFixtureConversations(now = Date.now()): ConversationMeta[
     specialist: { kind: "rsi" },
   };
 
-  return [...active, specialist, ...archived];
+  return [...quickChats, ...active, specialist, ...archived];
 }

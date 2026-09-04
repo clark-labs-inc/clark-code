@@ -138,6 +138,5 @@ installProductModule({
   },
   specialistWorkspace: {
     isConversationBound: (kind) => kind === "scout",
-    prepareDocument: async () => null,
   },
 });

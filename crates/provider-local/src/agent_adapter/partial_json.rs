@@ -115,7 +115,7 @@ mod tests {
     fn decodes_any_named_field_and_skips_what_precedes_it() {
         assert_eq!(
             partial_json_string_field(
-                "{\"path\":\"new_SPEC.md\",\"new_string\":\"## Recommend",
+                "{\"path\":\"proposal.md\",\"new_string\":\"## Recommend",
                 "new_string",
             ),
             Some(("## Recommend".into(), false)),

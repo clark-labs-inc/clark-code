@@ -8,6 +8,7 @@ import { isAccountReconnectError } from "../lib/errors";
 import { authConnection } from "../lib/auth";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
+import { codeKeyAccountBinding } from "../lib/account";
 const ACTION =
   "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-base text-ink-secondary transition duration-base ease-agent hover:bg-accent-subtle hover:text-ink";
 
@@ -27,7 +28,10 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const AccountSlot = productModule().slots.account;
-  const productAccess = useProductAccess(open && Boolean(AccountSlot));
+  const productAccess = useProductAccess(
+    open && Boolean(auth && AccountSlot),
+    codeKeyAccountBinding(auth),
+  );
 
   useEffect(() => {
     if (!open) return;
