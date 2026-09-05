@@ -1,6 +1,7 @@
 import type { RefObject } from "react";
 import { Library, MessageSquare, PanelLeft, PanelLeftClose, Plus, Search, X } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
+import { useSpecialistStore } from "../../store/specialistStore";
 import { productName } from "../../product/productModule";
 
 export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef, artifactCount, onOpenArtifacts }: {
@@ -12,7 +13,13 @@ export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef, art
   artifactCount: number;
   onOpenArtifacts?: () => void;
 }) {
-  const chooseProject = useSessionStore((s) => s.setNewProjectOpen);
+  // Keep the primary action useful in both states: while a session is open,
+  // "New session" means detach to the composer; from the start screen it
+  // opens the folder/remote chooser for a new project.
+  const specialistActive = useSpecialistStore((s) => s.active !== null);
+  const chooseProject = useSessionStore((s) => s.session || s.opening || specialistActive
+    ? s.endSession
+    : s.setNewProjectOpen);
   const quickChat = useSessionStore((s) => s.startQuickChat);
   const action = rail
     ? "grid size-9 place-items-center rounded-lg text-ink-secondary hover:bg-bg-hover"
