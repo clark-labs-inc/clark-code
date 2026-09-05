@@ -1,20 +1,17 @@
 import { describe, expect, it } from "vitest";
 import sidebarSource from "./Sidebar.tsx?raw";
+import headerSource from "./sidebar/SidebarHeader.tsx?raw";
 // The row itself lives in its own memoized module; the sidebar wires the state
 // into it. Assertions about row markup have to read the row's source.
 import conversationRowSource from "./sidebar/ConversationRow.tsx?raw";
 
 describe("Sidebar creation actions", () => {
-  it("keeps New session, Quick Chat, and New project as distinct actions", () => {
-    expect(sidebarSource).toContain('aria-label="New session"');
-    expect(sidebarSource).toContain("New session");
-    expect(sidebarSource).toContain('aria-label="Quick Chat"');
-    expect(sidebarSource).toContain("> Quick Chat");
-    expect(sidebarSource).toContain('aria-label="New project"');
-    expect(sidebarSource).toContain("New project…");
-    expect(sidebarSource).toContain("onClick={() => newConversation()}");
-    expect(sidebarSource).toContain("onClick={() => void startQuickChat()}");
-    expect(sidebarSource).toContain("onClick={() => setNewProjectOpen(true)}");
+  it("uses one folder chooser and a separate project-free quick chat action", () => {
+    expect(headerSource).toContain('aria-label="New session"');
+    expect(headerSource).toContain('onClick={() => chooseProject(true)}');
+    expect(headerSource).toContain('aria-label="New quick chat"');
+    expect(headerSource).toContain("await quickChat()");
+    expect(headerSource).not.toContain('aria-label="New project"');
   });
 
   it("renders a blue finished-not-yet-visited dot from unseen open rows", () => {

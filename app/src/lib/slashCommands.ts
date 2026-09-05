@@ -42,7 +42,7 @@ export interface SlashCommand {
 export function slashCommands(): SlashCommand[] {
   const s = () => useSessionStore.getState();
   return [
-    { name: "new", hint: "Start a new conversation", run: () => s().endSession() },
+    { name: "new", hint: "Choose a folder for a new session", run: () => s().setNewProjectOpen(true) },
     {
       name: "goal",
       hint: "Keep working autonomously until the objective is done",

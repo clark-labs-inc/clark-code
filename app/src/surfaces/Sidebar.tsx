@@ -2,14 +2,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Plus, MessageSquare, Archive, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderPlus, Search, X, Trash2, Library,
+  Archive, Trash2, X,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { liveSessions, openRemote } from "../store/sessionStore.runtime";
 import { projectName, removeRecentProject } from "../lib/localAgent";
 import { codeKeyAccountBinding } from "../lib/account";
-import { useIsNarrow } from "../lib/responsive";
+import { useSidebarDrawer } from "./sidebar/useSidebarDrawer";
 import {
   DEFAULT_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -25,13 +24,13 @@ import { openProjectPath } from "../lib/openPath";
 import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
 import {
   groupSidebarProjects,
+  sidebarConversationSearchText,
   loadProjectSidebarPreferences,
   saveProjectSidebarPreferences,
   withProjectAlias,
   withProjectPinned,
   withPinnedProjectMoved,
   withoutProjectPreferences,
-  projectDisplayName,
   type ProjectGroup,
   type ProjectSidebarPreferences,
 } from "../lib/projectSidebar";
@@ -59,10 +58,13 @@ import {
 } from "./ProjectActionsMenu";
 import { ProjectDragAndDrop, type ProjectDropEdge } from "./ProjectDragAndDrop";
 import { ConversationRow } from "./sidebar/ConversationRow";
-import { ArchivedRow } from "./sidebar/ArchivedRow";
+import { SidebarArchive } from "./sidebar/SidebarArchive";
+import { sidebarProjectHost } from "../lib/sidebarProjectTarget";
+import { newConversation } from "./sidebar/newSession";
 import { useSpecialistStore } from "../store/specialistStore";
 import { SpecialistNavigation } from "./specialists/SpecialistNavigation";
-import { productName } from "../product/productModule";
+import { ConversationContextMenu } from "./sidebar/ConversationContextMenu";
+import { SidebarHeader } from "./sidebar/SidebarHeader";
 import { announce } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 
 interface SidebarScrollAnchor {
@@ -92,99 +94,6 @@ function projectMoveDestinations(
 }
 
 
-/** Right-click menu for one-or-many conversations. Acts on the whole sidebar
- *  selection when the right-clicked row is part of it, otherwise just the
- *  right-clicked row. "Archive" soft-deletes; "Delete" hard-deletes (with an
- *  inline confirm — it can't be undone). */
-function ConversationContextMenu({
-  menu,
-  count,
-  onClose,
-  onArchive,
-  onDelete,
-}: {
-  menu: { x: number; y: number };
-  count: number;
-  onClose: () => void;
-  onArchive: () => void;
-  onDelete: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const label = count > 1 ? `${count} conversations` : "conversation";
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      style={{ left: menu.x, top: menu.y }}
-      className="popover-surface fixed z-50 w-52 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
-    >
-      {confirming ? (
-        <div className="px-1.5 py-1">
-          <div className="mb-2 px-1 text-sm text-ink-muted">
-            Permanently delete {count > 1 ? `these ${count} conversations` : "this conversation"}? This can't be undone.
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              role="menuitem"
-              onClick={() => {
-                onDelete();
-                onClose();
-              }}
-              className="flex-1 rounded-lg bg-danger/10 px-2 py-1.5 text-sm font-medium text-danger transition hover:bg-danger/20"
-            >
-              Delete
-            </button>
-            <button
-              role="menuitem"
-              onClick={() => setConfirming(false)}
-              className="flex-1 rounded-lg px-2 py-1.5 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <button
-            role="menuitem"
-            onClick={() => {
-              onArchive();
-              onClose();
-            }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-base text-ink-secondary transition hover:bg-accent-subtle hover:text-ink"
-          >
-            <Archive className="size-4" />
-            Archive {label}
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => setConfirming(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-base text-ink-secondary transition hover:bg-danger/10 hover:text-danger"
-          >
-            <Trash2 className="size-4" />
-            Delete {label}
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 export function Sidebar({
   artifactCount = 0,
   onOpenArtifacts,
@@ -209,30 +118,15 @@ export function Sidebar({
   // Runs that finished in the background and haven't been opened yet — the
   // blue "finished, not yet visited" dots.
   const unseenWorkIds = useSessionStore((s) => s.unseenWorkIds);
-  const endSession = useSessionStore((s) => s.endSession);
   const defaultProject = useSessionStore((s) => s.localSettings.cwd);
   const localSettings = useSessionStore((s) => s.localSettings);
   const flashNotice = useSessionStore((s) => s.flashNotice);
-  const newConversation = (nextProjectLabel?: string) => {
-    const runningCheckout = session && runningIds.includes(session.id)
-      ? activeProjectRoot?.trim() || defaultProject.trim()
-      : null;
-    useSpecialistStore.getState().close();
-    endSession();
-    if (runningCheckout && nextProjectLabel) {
-      flashNotice(
-        `Started a new session in ${nextProjectLabel}. ${projectDisplayName(runningCheckout)} is still running in the sidebar.`,
-      );
-    }
-  };
   const selectProvider = useSessionStore((s) => s.selectProvider);
   const setProjectMode = useSessionStore((s) => s.setProjectMode);
   const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const setProjectFolder = useSessionStore((s) => s.setProjectFolder);
   const setSshOpen = useSessionStore((s) => s.setSshOpen);
-  const setNewProjectOpen = useSessionStore((s) => s.setNewProjectOpen);
   const openProjectTerminalAction = useSessionStore((s) => s.openProjectTerminal);
-  const startQuickChat = useSessionStore((s) => s.startQuickChat);
   const openProjectTerminal = async (path?: string) => {
     useSpecialistStore.getState().close();
     await openProjectTerminalAction(path);
@@ -240,7 +134,6 @@ export function Sidebar({
   const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
   const recentProjects = useSessionStore((s) => s.recentProjects);
   const openConversation = useSessionStore((s) => s.openConversation);
-  const archiveConversation = useSessionStore((s) => s.archiveConversation);
   const restoreConversation = useSessionStore((s) => s.restoreConversation);
   const deleteConversation = useSessionStore((s) => s.deleteConversation);
   const selectedIds = useSessionStore((s) => s.selectedConversationIds);
@@ -249,11 +142,14 @@ export function Sidebar({
   const setSelection = useSessionStore((s) => s.setConversationSelection);
   const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
   const deleteSelected = useSessionStore((s) => s.deleteSelectedConversations);
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const finishRename = useCallback(() => setRenameId(null), []);
   const [filter, setFilter] = useState("");
   const [expandedProjectKeys, setExpandedProjectKeys] = useState<Set<string>>(
     () => new Set(["quick-chats"]),
   );
   const [archivedOpen, setArchivedOpen] = useState(false);
+  useEffect(() => { if (filter.trim()) setArchivedOpen(true); }, [filter]);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
   const [projectPreferences, setProjectPreferences] = useState<ProjectSidebarPreferences>(
     () => loadProjectSidebarPreferences(undefined, accountScope),
@@ -280,8 +176,10 @@ export function Sidebar({
   // The conversation sidebar is horizontally resizable; the width persists per
   // window and is clamped so the conversation pane keeps a usable minimum.
   const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth());
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [resizingSidebar, setResizingSidebar] = useState(false);
-  const asideRef = useRef<HTMLElement>(null);
+  const drawer = useSidebarDrawer(navigatedConversationId);
+  const asideRef = drawer.ref;
   const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
   const sidebarDoubleClickRef = useRef<{ time: number; x: number } | null>(null);
 
@@ -347,7 +245,7 @@ export function Sidebar({
 
   useEffect(() => {
     const onResize = () =>
-      setSidebarWidth((current) => constrainSidebarWidth(current, window.innerWidth));
+      setViewportWidth(window.innerWidth);
     window.addEventListener("resize", onResize);
     return () => {
       window.removeEventListener("resize", onResize);
@@ -355,11 +253,10 @@ export function Sidebar({
     };
   }, []);
 
-  const renderedWidth = constrainSidebarWidth(sidebarWidth, window.innerWidth);
+  const renderedWidth = constrainSidebarWidth(sidebarWidth, viewportWidth);
   const maxSidebarWidth = constrainSidebarWidth(window.innerWidth, window.innerWidth);
-  // Below this width the full sidebar would crowd out the conversation, so it
-  // auto-collapses to the icon rail (and can't be expanded until there's room).
-  const narrow = useIsNarrow(768);
+  const narrow = drawer.narrow;
+  const closeDrawer = drawer.setOpen;
 
   useEffect(() => {
     setProjectPreferences(loadProjectSidebarPreferences(undefined, accountScope));
@@ -375,10 +272,10 @@ export function Sidebar({
       fuzzyFilter(
         conversations,
         filter,
-        (c) => `${c.title} ${c.project ? projectName(c.project) : ""} ${c.remoteHost ?? ""}`,
+        (c) => sidebarConversationSearchText(c, projectPreferences),
         5000,
       ).map((m) => m.item),
-    [conversations, filter],
+    [conversations, filter, projectPreferences.aliases],
   );
   // Rank by immutable creation time, shared by the group + row ordering: the
   // newest-created chat stays on top and activity never reshuffles the list.
@@ -612,6 +509,7 @@ export function Sidebar({
     const { mutatingIds, selectedIds, activeConversationIds } = latest.current;
     if (mutatingIds.has(id)) return;
     if (intent === "open") {
+      closeDrawer(false);
       selectionAnchorRef.current = id;
       setSelection(new Set());
       useSpecialistStore.getState().close();
@@ -631,7 +529,7 @@ export function Sidebar({
     if (range.length === 0) return;
     if (!anchor || !activeConversationIds.includes(anchor)) selectionAnchorRef.current = id;
     setSelection(additive ? new Set([...selectedIds, ...range]) : new Set(range));
-  }, [openConversation, setSelection]);
+  }, [closeDrawer, openConversation, setSelection]);
 
   const extendSelectionWithKeyboard = useCallback((id: string, direction: -1 | 1) => {
     const { activeConversationIds } = latest.current;
@@ -650,11 +548,7 @@ export function Sidebar({
     restoredFocusIdRef.current = id;
     void restoreConversation(id);
   }, [captureScrollAnchor, restoreConversation]);
-  const archiveConversationWithFocus = useCallback((id: string) => {
-    captureScrollAnchor();
-    requestMutationFocus(id);
-    void archiveConversation(id);
-  }, [archiveConversation, captureScrollAnchor, requestMutationFocus]);
+
   const deleteArchivedConversation = useCallback((id: string) => {
     captureScrollAnchor();
     requestMutationFocus(null);
@@ -727,18 +621,15 @@ export function Sidebar({
   const startProjectSession = (group: ProjectGroup) => {
     setProjectMenu(null);
     if (group.kind === "remote") {
-      const destination = group.remoteHost;
-      const candidates = loadSshHosts(codeKeyAccountBinding(auth)).filter(
-        (candidate) => candidate.host.trim() === destination,
-      );
-      const host =
-        candidates.find((candidate) => candidate.remoteRoot.trim() === group.remoteRoot) ??
-        candidates[0];
+      const hosts = loadSshHosts(accountScope);
+      const host = sidebarProjectHost(group, hosts);
       if (!host) {
         flashNotice(`Reconnect ${group.label} in Remote hosts to start a new session.`);
         setSshOpen(true);
         return;
       }
+      saveSshHosts(hosts.map((candidate) => candidate.id === host.id ? host : candidate), accountScope);
+      useSessionStore.getState().bumpSshHostsRevision();
       selectProvider("local");
       setProjectMode("remote");
       setSelectedHostId(host.id);
@@ -758,65 +649,31 @@ export function Sidebar({
     e.preventDefault();
     if (mutatingIds.size > 0) return;
     setProjectMenu(null);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(8, Math.min(e.type === "click" ? rect.right : e.clientX, window.innerWidth - 216));
+    const y = Math.max(8, Math.min(e.type === "click" ? rect.bottom : e.clientY, window.innerHeight - 180));
     // Act on the whole selection when the right-clicked row is part of it;
     // otherwise the action targets just this row (and the selection becomes it,
     // so the visual matches what the menu will act on).
     if (selectedIds.has(id)) {
       selectionAnchorRef.current = id;
-      setMenu({ x: e.clientX, y: e.clientY, ids: [...selectedIds] });
+      setMenu({ x, y, ids: [...selectedIds] });
     } else {
       selectionAnchorRef.current = id;
-      setSelection(new Set([id]));
-      setMenu({ x: e.clientX, y: e.clientY, ids: [id] });
+      setSelection(new Set());
+      setMenu({ x, y, ids: [id] });
     }
   }, [setSelection]);
 
-  if (collapsed || narrow) {
+  const archiveSection = <SidebarArchive archivedConvos={archivedConvos} open={archivedOpen}
+    onToggle={() => setArchivedOpen((open) => !open)} mutatingIds={mutatingIds}
+    mutationKind={conversationMutation?.kind} onRestore={restoreAndOpenConversation} onDelete={deleteArchivedConversation} />;
+
+  if (narrow ? !drawer.open : collapsed) {
     return (
       <div className="flex w-12 shrink-0 flex-col items-center gap-1 bg-bg-secondary py-2">
-        {!narrow && (
-          <button
-            onClick={() => setCollapsed(false)}
-            aria-label="Expand sidebar"
-            className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-          >
-            <PanelLeft className="size-4" />
-          </button>
-        )}
-        <button
-          onClick={() => newConversation()}
-          aria-label="New session"
-          title="New session"
-          className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-        >
-          <Plus className="size-4" />
-        </button>
-        <button
-          onClick={() => void startQuickChat()}
-          aria-label="Quick Chat"
-          title="Quick Chat — no project required"
-          className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-        >
-          <MessageSquare className="size-4" />
-        </button>
-        <button
-          onClick={() => setNewProjectOpen(true)}
-          aria-label="New project"
-          title="New project — choose a folder or remote SSH host and start a session"
-          className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-        >
-          <FolderPlus className="size-4" />
-        </button>
-        {onOpenArtifacts && (
-          <button
-            onClick={onOpenArtifacts}
-            aria-label={`Artifacts, ${artifactCount}`}
-            title={`Artifacts (${artifactCount})`}
-            className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-          >
-            <Library className="size-4" />
-          </button>
-        )}
+        <SidebarHeader rail onToggle={() => narrow ? drawer.setOpen(true) : setCollapsed(false)} filter={filter} onFilter={setFilter}
+          searchRef={searchInputRef} artifactCount={artifactCount} onOpenArtifacts={onOpenArtifacts} />
         <SpecialistNavigation rail />
         <div className="mt-auto">
           <ProfileMenu variant="rail" />
@@ -826,71 +683,25 @@ export function Sidebar({
   }
 
   return (
+    <>
+    {narrow && <button type="button" tabIndex={-1} aria-label="Close sidebar" onClick={() => drawer.setOpen(false)} className="fixed inset-0 z-30 bg-scrim" />}
     <aside
+      role={narrow ? "dialog" : undefined}
+      aria-modal={narrow || undefined}
+      aria-label="Sidebar navigation"
+      tabIndex={narrow ? -1 : undefined}
+      onKeyDown={drawer.onKeyDown}
       ref={asideRef}
       className={cn(
         "flex min-h-0 shrink-0 overflow-hidden text-base leading-5",
         resizingSidebar && "cursor-col-resize select-none",
+        narrow && "fixed inset-y-0 left-0 z-40 shadow-lifted",
       )}
-      style={{ width: renderedWidth }}
+      style={{ width: narrow ? "min(320px, calc(100vw - 40px))" : renderedWidth }}
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-secondary">
-      <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
-        <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">{productName()}</span>
-        <button
-          onClick={() => searchInputRef.current?.focus()}
-          aria-label="Search conversations"
-          title="Search conversations"
-          className="ml-auto grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-        >
-          <Search className="size-4" />
-        </button>
-        <button
-          onClick={() => setCollapsed(true)}
-          aria-label="Collapse sidebar"
-          className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-        >
-          <PanelLeftClose className="size-4" />
-        </button>
-      </div>
-
-      <div className="flex items-center gap-1 px-2 pb-2">
-        <button
-          type="button"
-          onClick={() => void startQuickChat()}
-          title="Start in a temporary the agent workspace — no project required"
-          className="flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-        >
-          <MessageSquare className="size-4" /> Quick Chat
-        </button>
-        <button
-          type="button"
-          onClick={() => setNewProjectOpen(true)}
-          aria-label="New project"
-          title="New project… Choose a folder or remote SSH host and start a session"
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-        >
-          <FolderPlus className="size-4" />
-        </button>
-        {/* Always rendered (even at 0) so the row's height never pops in/out
-            when switching conversations — a conditional row made the whole
-            list below jump up/down as artifact counts differed per chat. The
-            badge keeps a fixed slot; at 0 it's dimmed to match the icon. */}
-        {onOpenArtifacts && (
-          <button
-            type="button"
-            onClick={onOpenArtifacts}
-            aria-label={`Artifacts, ${artifactCount}`}
-            title={`Artifacts (${artifactCount})`}
-            className="relative grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-          >
-            <Library className="size-4" />
-            {artifactCount > 0 && (
-              <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-info" aria-hidden="true" />
-            )}
-          </button>
-        )}
-      </div>
+      <SidebarHeader rail={false} onToggle={() => narrow ? drawer.setOpen(false) : setCollapsed(true)} filter={filter} onFilter={setFilter}
+        searchRef={searchInputRef} artifactCount={artifactCount} onOpenArtifacts={onOpenArtifacts} />
 
       <p id="sidebar-selection-help" className="sr-only">
         Use Shift-click or Shift+Arrow Up and Down to select a range. Command or Control-click toggles one conversation. Press Escape to clear the selection.
@@ -916,61 +727,15 @@ export function Sidebar({
           }
         }}
       >
-        {/* Keep specialist navigation in the same scroll region as ordinary
-            conversations. A persistent specialist tree otherwise steals most
-            of the sidebar's usable height and makes scrolling the chat list
-            feel ineffective. */}
-        <SpecialistNavigation />
-
-        <div className="px-2 pb-2 pt-1">
-          <div className="mb-2 flex min-h-8 items-center gap-2">
-            <span className="text-sm font-medium uppercase tracking-[0.08em] text-ink-faint">
-              Projects
-            </span>
-            <button
-              type="button"
-              onClick={() => newConversation()}
-              title="Start a new session in the current project"
-              className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1 text-sm font-medium text-on-accent shadow-button transition hover:bg-accent-hover"
-            >
-              <Plus className="size-3.5" /> New session
-            </button>
-          </div>
-          <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
-            <Search className="size-3.5 shrink-0 text-ink-faint" />
-            <input
-              ref={searchInputRef}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Search projects and chats…"
-              aria-label="Search conversations"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setFilter("");
-              }}
-              className="composer-input min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-faint"
-            />
-            {filter && (
-              <button
-                onClick={() => setFilter("")}
-                aria-label="Clear search"
-                className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
-              >
-                <X className="size-3" />
-              </button>
-            )}
-          </div>
-        </div>
+        <h2 className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-ink-muted">Projects & chats</h2>
 
         {conversations.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-ink-faint">
-            {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
+            {conversationsLoading ? "Loading conversations…" : "Choose New session to open a project, or start a quick chat."}
           </p>
         ) : visible.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-ink-faint">
-            No conversations match “{filter}”.
+            No projects or chats match “{filter}”.
           </p>
         ) : (
           <div className="flex flex-col">
@@ -1004,12 +769,16 @@ export function Sidebar({
                           onNewSession={() => startProjectSession(g)}
                         />
                         <AnimatePresence initial={false}>
-                          {expanded && g.convos.length > 0 && (
+                          {expanded && (
                             <m.div
                               id={conversationPanelId}
                               {...(reduceMotion ? EXPAND_REDUCED : EXPAND)}
                               className="ml-5 overflow-hidden border-l border-border-subtle pl-1"
                             >
+                              {g.convos.length === 0 && <div className="px-2 py-2 text-sm text-ink-muted">
+                                <p>No sessions yet.</p>
+                                <button type="button" onClick={() => startProjectSession(g)} className="mt-1 text-accent hover:underline">Start a session</button>
+                              </div>}
                               <div className="flex flex-col gap-0.5 py-0.5">
                                 {g.convos.map((c) => {
                                   const mutation = mutatingIds.has(c.id)
@@ -1019,6 +788,8 @@ export function Sidebar({
                                     <ConversationRow
                                       key={c.id}
                                       c={c}
+                                      renameRequested={renameId === c.id}
+                                      onRenameDone={finishRename}
                                       active={navigatedConversationId === c.id}
                                       streaming={runningIds.includes(c.id)}
                                       unseen={
@@ -1030,7 +801,6 @@ export function Sidebar({
                                       mutation={mutation}
                                       onSelect={selectConversation}
                                       onRangeStep={extendSelectionWithKeyboard}
-                                      onArchive={archiveConversationWithFocus}
                                       onContextMenu={openContextMenu}
                                     />
                                   );
@@ -1048,67 +818,16 @@ export function Sidebar({
 
             {groups.length === 0 && archivedConvos.length > 0 && (
               <p className="px-1 py-6 text-center text-sm text-ink-faint">
-                No active conversations.
+                {filter ? "No active chats match. Archived matches are below." : "No active conversations."}
               </p>
             )}
           </div>
         )}
+        {filter && archiveSection}
+        <SpecialistNavigation />
       </div>
 
-      {/* This header is always present so archiving and restoring never insert
-          or remove a sidebar control. The tray itself only grows after an
-          explicit click and its height is animated. */}
-      <div className="shrink-0 pt-1">
-        <button
-          onClick={() => setArchivedOpen((open) => !open)}
-          disabled={archivedConvos.length === 0}
-          aria-controls="archived-conversations"
-          aria-expanded={archivedConvos.length > 0 ? archivedOpen : undefined}
-          className="flex min-h-9 w-full items-center gap-2 px-4 py-1 text-base font-medium text-ink-muted transition hover:text-ink disabled:cursor-default disabled:opacity-55"
-        >
-          <ChevronRight
-            className={`size-3 shrink-0 transition-transform ${archivedOpen && archivedConvos.length > 0 ? "rotate-90" : ""}`}
-          />
-          <span>Archived</span>
-          <span className="ml-auto shrink-0 text-sm font-normal tabular-nums text-ink-faint">
-            {archivedConvos.length}
-          </span>
-        </button>
-        <AnimatePresence initial={false}>
-          {archivedOpen && archivedConvos.length > 0 && (
-            <m.div
-              id="archived-conversations"
-              {...(reduceMotion ? EXPAND_REDUCED : EXPAND)}
-              className="overflow-hidden"
-            >
-              <div className="flex max-h-56 flex-col gap-1 overflow-y-auto px-2 pb-2">
-                <AnimatePresence initial={false} mode="popLayout">
-                  {archivedConvos.map((c) => {
-                    const mutation = mutatingIds.has(c.id)
-                      ? conversationMutation?.kind ?? "restore"
-                      : null;
-                    return (
-                      <m.div
-                        key={c.id}
-                        layout={reduceMotion ? false : "position"}
-                        {...accessibleMotion(RISE_SMALL, reduceMotion)}
-                        transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
-                      >
-                        <ArchivedRow
-                          c={c}
-                          mutation={mutation}
-                          onRestore={restoreAndOpenConversation}
-                          onDelete={deleteArchivedConversation}
-                        />
-                      </m.div>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
-            </m.div>
-          )}
-        </AnimatePresence>
-      </div>
+      {!filter && archiveSection}
 
       <div className="relative shrink-0">
         <AnimatePresence initial={false}>
@@ -1184,7 +903,11 @@ export function Sidebar({
         <ConversationContextMenu
           menu={{ x: menu.x, y: menu.y }}
           count={menu.ids.length}
-          onClose={() => setMenu(null)}
+          onClose={() => {
+            document.querySelector<HTMLButtonElement>(`[data-sidebar-conversation-button="${CSS.escape(menu.ids[0])}"]`)?.focus();
+            setMenu(null);
+          }}
+          onRename={() => setRenameId(menu.ids[0])}
           onArchive={() => {
               setSelection(new Set(menu.ids));
               requestMutationFocus(selectionAnchorRef.current);
@@ -1209,7 +932,10 @@ export function Sidebar({
             projectMenu.group.key,
             projectPreferences.pinned,
           )}
-          onClose={() => setProjectMenu(null)}
+          onClose={() => {
+            projectMenu.trigger.focus();
+            setProjectMenu(null);
+          }}
           onPin={(pinned) =>
             commitProjectPreferences(
               withProjectPinned(projectPreferences, projectMenu.group.key, pinned),
@@ -1326,7 +1052,7 @@ export function Sidebar({
         />
       )}
       </div>
-      <div
+      {!narrow && <div
         role="separator"
         aria-label="Resize sidebar"
         aria-orientation="vertical"
@@ -1351,7 +1077,8 @@ export function Sidebar({
               : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent",
           )}
         />
-      </div>
+      </div>}
     </aside>
+    </>
   );
 }

@@ -207,7 +207,7 @@ export function groupSidebarProjects(
     if (isQuickChatProject(conversation.project, conversation.id)) {
       key = "quick-chats";
       label = "Quick chats";
-      title = "Conversations in temporary the agent workspaces";
+      title = "Conversations in separate agent workspaces";
       kind = "none";
     } else if (conversation.remoteHost) {
       key = remoteProjectKey(conversation.remoteHost, conversation.project);
@@ -288,4 +288,15 @@ export function groupSidebarProjects(
       }
       return a.latest - b.latest;
     });
+}
+
+/** Search the same labels the sidebar displays, including project-free chats. */
+export function sidebarConversationSearchText(conversation: ConversationMeta, preferences: ProjectSidebarPreferences): string {
+  const quick = isQuickChatProject(conversation.project, conversation.id);
+  const key = quick ? "quick-chats" : conversation.remoteHost
+    ? remoteProjectKey(conversation.remoteHost, conversation.project)
+    : conversation.project ? `p:${conversation.project}` : "none";
+  return [conversation.title, conversation.project, conversation.remoteHost,
+    quick ? "Quick chats" : !conversation.project ? "Other" : "",
+    preferences.aliases[key]].filter(Boolean).join(" ");
 }

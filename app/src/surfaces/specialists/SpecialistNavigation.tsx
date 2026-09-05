@@ -148,6 +148,8 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
     open(kind);
   };
 
+  if (ITEMS.length === 0) return null;
+
   if (rail) {
     return (
       <div className="mt-2 flex flex-col gap-1 border-t border-border-subtle pt-2">

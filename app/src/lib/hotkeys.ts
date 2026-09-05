@@ -20,6 +20,10 @@ function isTyping(el: EventTarget | null): boolean {
   );
 }
 
+export function hotkeyBlocked(defaultPrevented: boolean, key: string, insideModal: boolean): boolean {
+  return defaultPrevented || (key === "Tab" && insideModal);
+}
+
 /** Register global keyboard shortcuts. Bindings are read through a ref, so the
  *  listener is attached once and callers don't need to memoize the array. */
 export function useHotkeys(bindings: Hotkey[]): void {
@@ -27,6 +31,8 @@ export function useHotkeys(bindings: Hotkey[]): void {
   ref.current = bindings;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const insideModal = Boolean((e.target as HTMLElement | null)?.closest?.('[role="dialog"], [aria-modal="true"]'));
+      if (hotkeyBlocked(e.defaultPrevented, e.key, insideModal)) return;
       const mod = e.metaKey || e.ctrlKey;
       for (const b of ref.current) {
         if (e.key.toLowerCase() !== b.key.toLowerCase()) continue;

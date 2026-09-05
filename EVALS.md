@@ -117,3 +117,90 @@ conversation read through the tool, real sleep/lock/restart, and alternate-tool
 isolation remain **not run**. User-assisted acceptance steps and schema limits
 are in [`crates/desktop-integrations/README.md`](crates/desktop-integrations/README.md).
 Do not promote deterministic receipts into a live iMessage claim.
+
+## Sidebar navigation audit — 2026-09-04
+
+The local foundation sidebar was audited and repaired in the Codex in-app browser
+using disposable projects and the mock bridge. The retained [audit and screenshots](docs/sidebar-audit/README.md)
+record folder-based session creation, visible project/conversation actions,
+explicit rename, keyboard menu navigation and focus return, archive/search/restore,
+and a dismissible narrow-window navigation drawer. Search indexes project paths
+and aliases; archived matches appear in the search region. Empty specialist
+catalogs no longer expose an empty disclosure.
+
+Frontend typecheck, production build, and the full deterministic frontend suite
+passed (835 passed, 5 skipped). These checks and the recorded browser interactions
+do not prove a packaged native build, OS folder picker, live SSH, paid providers,
+full accessibility compliance, or branded specialist/account flows. Failure and
+pending-start cancellation handling in the chooser was reviewed in source, not
+fault-injected in the browser.
+
+Browser-preview Quick Chat follow-up: `mockBridge.sidebar.spec.ts` now verifies
+that default-generated workspace IDs are distinct UUIDs and that two new Quick
+Chats form one `quick-chats` sidebar group. The three focused mock-sidebar tests
+and frontend typecheck passed. This corrects preview IDs only; it does not migrate
+previously created `mock-workspace-*` fixture history or change native workspaces.
+
+Additional sidebar papercuts (same audit): `sidebarProjectTarget.spec.ts` pins
+exact remote-project folder selection even when a saved host's default changed,
+and search text matching the visible Quick chats and project-alias labels.
+`newProjectDialog.spec.ts` pins retention of an edited or cleared folder when
+saved hosts refresh. `hotkeys.spec.ts` pins consumed-event ownership and rejects
+modal Tab navigation as a background global shortcut. The folder chooser also
+filters hidden controls from its focus loop and includes disclosure summaries.
+
+In-app browser checks confirmed Quick chats search, Quick Chat composer focus,
+Command-backslash opening the narrow-window drawer, and reverse/forward Tab
+wrapping inside the session chooser. The first keyboard check exposed background
+Shift-Tab changing approval policy; after the fix, repeated modal Shift-Tab left
+Approve for me unchanged. The preview policy was restored before continuing.
+A development hot-reload hook-order error during editing was recovered with a
+fresh page load; subsequent interactive checks passed. Exact remote-folder and
+host-refresh contracts are deterministic checks, not live SSH acceptance.
+Final frontend typecheck/build and full suite passed: 843 passed, 5 skipped.
+
+## UI highlighting and motion — 2026-09-05
+
+Syntax highlighting now uses a module worker in browsers. The worker loads
+language grammars on demand; the production worker entry is about 190 kB
+uncompressed rather than an inline bundle of all grammars. Browser callers
+share duplicate requests, match replies by request identity, and retain plain
+code if worker initialization, messaging, or a 15-second request deadline fails.
+The existing source-identity guard still prevents stale highlighted markup from
+covering a replacement code fence. Server-side rendering uses the same engine
+without a worker.
+
+Validation on the current working tree: frontend typecheck/build and 847 tests
+passed (5 skipped). `highlight.worker.spec.ts` covers duplicate and out-of-order
+requests, separate line/block output, worker failure, and stalled requests.
+`node harness/highlight-staleness-probe.mjs` passed in Chromium and with
+`ENGINE=webkit` in the WebKit proxy. The cold-worker step waits for actual
+highlighted output, bounded at 15 seconds, instead of assuming a 900 ms load.
+
+The two 12-turn Chromium streaming probes (301 snapshot pushes each) retained
+under `target/perf/20260905T075115Z-ad5abaee-streamA1-chromium` and
+`target/perf/20260905T075346Z-ad5abaee-streamA1-chromium` provide local attribution:
+Shiki regex tokenization appeared in the first main-thread profile and left the
+main-thread leaderboard after worker isolation. Both runs failed machine
+quiescence and used Vite development mode plus a profiler. Their timing and
+frame-loss figures are not authoritative performance baselines; the disposable
+traces are not release evidence. Controlled packaged-native timing remains
+unmeasured; navigation/streaming acceptance is recorded below.
+
+Navigation acceptance on 2026-09-05: `node harness/workspace-motion.mjs`
+passed in Chromium and WebKit, each with normal and reduced motion. It proves
+stable workspace-node identity across chat switches, per-conversation draft
+separation, preserved draft/focus during a streaming update, no repeated
+navigation animation on that update, no blank-opacity navigation phase, and
+settings scroll reset. Normal navigation uses the shared 200 ms transform cue;
+reduced motion uses a 120 ms opacity cue. These are deterministic browser
+fixtures, not hosted-model or cross-platform packaged-release receipts.
+
+`./script/build_and_run.sh` compiled and launched the unsigned native debug
+application successfully in 28.67 seconds, and the WebView loaded the frontend.
+This is native startup evidence, not a measured native interaction benchmark.
+
+Final regression checks for this UI change: frontend typecheck, production
+build, 847 frontend tests (5 skipped), Rust formatting, Clippy for the four
+foundation crates, 816 nextest tests (8 skipped), and the agent-core WASM
+compile check passed. No hosted-provider calls or release deployment were run.

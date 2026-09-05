@@ -37,7 +37,10 @@ describe("GUI motion policy", () => {
   it("keeps the primary workspace shell stable across navigation", () => {
     const workspace = sourceModules["../AuthenticatedWorkspace.tsx"];
 
-    expect(workspace).toContain("data-workspace-stage={workspaceStage}");
+    expect(workspace).toContain("<WorkspaceStage");
+    expect(workspace).toContain("stage={workspaceStage}");
+    expect(sourceModules["../components/WorkspaceStage.tsx"])
+      .toContain("data-workspace-stage={stage}");
     expect(workspace).not.toContain("key={workspaceStage}");
     expect(workspace).not.toContain("SCREEN_FADE");
     expect(workspace).not.toContain("<AnimatePresence initial={false} mode=\"wait\">");

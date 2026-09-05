@@ -9,7 +9,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { isAccountReconnectError } from "../lib/errors";
 import { authConnection } from "../lib/auth";
-import { OVERLAY, accessibleMotion } from "../lib/motion";
+import { OVERLAY, RISE_SMALL, accessibleMotion } from "../lib/motion";
 import { useModalFocus } from "../lib/modalFocus";
 import { APPROVAL_POLICIES } from "../lib/permissions";
 import { OUTPUT_STYLES } from "../lib/outputStyle";
@@ -602,8 +602,11 @@ export function Settings({
             onClose={() => setOpen(false)}
           />
 
-          <main className="min-w-0 flex-1 overflow-y-auto bg-bg">
-            <div className="mx-auto w-full max-w-[42rem] px-8 pb-20 pt-10 lg:px-10 lg:pt-12">
+          <main key={section} className="min-w-0 flex-1 overflow-y-auto bg-bg">
+            <m.div
+              {...accessibleMotion(RISE_SMALL, reduce)}
+              className="mx-auto w-full max-w-[42rem] px-8 pb-20 pt-10 lg:px-10 lg:pt-12"
+            >
               <header className="mb-7">
                 <h3 className="text-lg font-semibold tracking-tight text-ink">
                   {activeSection?.label}
@@ -630,7 +633,7 @@ export function Settings({
               {section === "account" && <AccountSection />}
               {section === "computer-use" && <ComputerUseSection />}
               {section === "about" && <AboutSection />}
-            </div>
+            </m.div>
           </main>
         </m.section>
       )}

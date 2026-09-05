@@ -26,6 +26,8 @@ const perfEntry = fileURLToPath(
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Keep on-demand Shiki grammars split inside the highlighting worker too.
+  worker: { format: "es" },
   resolve: {
     alias: {
       "@product-entry": productEntry,

@@ -372,7 +372,7 @@ export class MockBridge implements CoreBridge {
   async removeReadRoots(_sessionId: string, _roots: string[]): Promise<void> {}
 
   async prepareQuickChatWorkspace(id?: string): Promise<{ id: string; path: string }> {
-    const workspaceId = id ?? `mock-workspace-${Date.now()}`;
+    const workspaceId = id ?? crypto.randomUUID();
     return { id: workspaceId, path: `/mock/.agent/workspace/${workspaceId}` };
   }
 

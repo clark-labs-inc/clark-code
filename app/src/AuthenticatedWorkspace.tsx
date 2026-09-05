@@ -21,6 +21,7 @@ import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
 import { ManagedWorktreeTransitionDialog } from "./surfaces/ManagedWorktreeJourney";
 import { ConversationMutationTransition } from "./surfaces/ConversationMutationTransition";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
+import { WorkspaceStage } from "./components/WorkspaceStage";
 import { ArtifactWorkspaceEmpty } from "./surfaces/work/ArtifactWorkspaceEmpty";
 import type { Artifact } from "./core-bridge/types";
 import {
@@ -53,9 +54,9 @@ const SshSettings = lazy(() =>
 const NewProjectDialogLazy = lazy(() =>
   import("./surfaces/NewProjectDialog").then((module) => ({ default: module.NewProjectDialog })),
 );
-const Settings = lazy(() =>
-  import("./surfaces/Settings").then((module) => ({ default: module.Settings })),
-);
+const loadSettings = () =>
+  import("./surfaces/Settings").then((module) => ({ default: module.Settings }));
+const Settings = lazy(loadSettings);
 
 export default function AuthenticatedWorkspace({
   textSize,
@@ -143,7 +144,15 @@ export default function AuthenticatedWorkspace({
       "requestIdleCallback" in window
         ? (id: number) => window.cancelIdleCallback(id)
         : (id: number) => window.clearTimeout(id);
-    const id = schedule(() => void loadConversation());
+    // Warm settings after the conversation chunk so opening it does not leave
+    // a dead click while its null Suspense fallback downloads. This imports
+    // code only; account and integration effects still run only when opened.
+    const id = schedule(() => {
+      void loadConversation().then(loadSettings).catch(() => {
+        // A speculative preload failure must not become an unhandled error.
+        // The ordinary lazy boundary owns errors if the user opens the panel.
+      });
+    });
     return () => cancel(id);
   }, []);
   useEffect(() => {
@@ -282,7 +291,7 @@ export default function AuthenticatedWorkspace({
 
   useHotkeys([
     { key: "k", mod: true, allowInInput: true, run: () => useSessionStore.getState().togglePalette() },
-    { key: "n", mod: true, run: () => useSessionStore.getState().endSession() },
+    { key: "n", mod: true, run: () => useSessionStore.getState().setNewProjectOpen(true) },
     { key: "\\", mod: true, allowInInput: true, run: () => useSessionStore.getState().toggleSidebar() },
     {
       key: "j",
@@ -306,14 +315,9 @@ export default function AuthenticatedWorkspace({
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}
-        {/* Keep one stable workspace shell across navigation. Full-pane exit
-            and enter fades create a blank luminance pulse that reads like a
-            camera shutter, while keyed remounts make the whole screen feel
-            unstable. The branch still owns exactly one interactive composer;
-            local rows, dialogs, and progress states retain their subtle motion. */}
-        <div
-          data-workspace-stage={workspaceStage}
-          className="flex min-h-0 flex-1 flex-col"
+        <WorkspaceStage
+          stage={workspaceStage}
+          navigationKey={`${workspaceStage}:${session?.id ?? ""}:${activeSpecialist ?? ""}`}
         >
             {openingScreen ? (
               <OpeningScreen />
@@ -425,7 +429,7 @@ export default function AuthenticatedWorkspace({
                 <Composer />
               </>
             )}
-        </div>
+        </WorkspaceStage>
         {/* The terminal drawer lives at the shell level (not inside a branch)
             so it survives switching between the start screen and a session —
             and so the sidebar can open it in a freshly picked project folder

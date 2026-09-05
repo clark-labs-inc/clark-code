@@ -44,7 +44,7 @@ function ArchivedRowImpl({
           <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
         )}
         <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
-        <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
+        <ArchiveRestore className="size-3.5 shrink-0 transition" />
       </button>
       {confirming ? (
         <span className="flex shrink-0 items-center gap-1">
@@ -70,7 +70,7 @@ function ArchivedRowImpl({
             disabled={mutating}
           title="Delete permanently"
           aria-label={`Delete ${c.title} permanently`}
-          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-danger/10 hover:text-danger"
         >
           <Trash2 className="size-3.5" />
         </button>

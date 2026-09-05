@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Laptop, Server, Folder, FolderOpen, Check, Plus, GitBranch, GitFork,
+  Laptop, Server, Folder, FolderOpen, Check, Plus, GitBranch, GitFork, Loader2,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -21,16 +21,14 @@ import { RemoteFolderBrowser } from "./EnvironmentPicker";
 import type { ManagedWorktreeBase } from "../core-bridge/bridge";
 import { loadManagedWorktreeBase, saveManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 import { useModalFocus } from "../lib/modalFocus";
-import { newProjectDialogKeyboardIntent } from "../lib/newProjectDialog";
+import { newProjectDialogKeyboardIntent, remoteFolderAfterHostRefresh } from "../lib/newProjectDialog";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
 const CHIP =
   "flex min-h-9 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition duration-base ease-agent";
 
-/** The "New project…" chooser: pick where the new project runs (this machine,
- *  or a remote SSH host) and auto-start its first session. Starting a session
- *  immediately is the point — the folder/host step alone is not the goal. */
+/** Choose a local or remote folder, then start a session in that environment. */
 export function NewProjectDialog() {
   const open = useSessionStore((s) => s.newProjectOpen);
   const setOpen = useSessionStore((s) => s.setNewProjectOpen);
@@ -53,6 +51,8 @@ export function NewProjectDialog() {
   const [hosts, setHosts] = useState<SshHost[]>(() => loadSshHosts(accountScope));
   const [selectedHostId, setSelectedHostIdLocal] = useState<string | null>(null);
   const [remoteRoot, setRemoteRoot] = useState("");
+  const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
 
   // Refresh hosts when the manage-hosts modal closes (a host may have been
@@ -66,7 +66,7 @@ export function NewProjectDialog() {
       setSelectedHostIdLocal(nextId);
       setRemoteRoot((current) => {
         const host = loaded.find((h) => h.id === nextId);
-        return current && host && host.remoteRoot === current ? current : host?.remoteRoot ?? "";
+        return remoteFolderAfterHostRefresh(current, stillThere, host?.remoteRoot ?? "");
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,7 +96,10 @@ export function NewProjectDialog() {
     [hosts, selectedHostId],
   );
 
-  const close = () => setOpen(false);
+  const close = () => {
+    if (startingRef.current) useSessionStore.getState().endSession();
+    setOpen(false);
+  };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const intent = newProjectDialogKeyboardIntent(event.key);
@@ -107,14 +110,15 @@ export function NewProjectDialog() {
       return;
     }
     if (intent !== "cycle_focus" || !dialogRef.current) return;
+    event.stopPropagation();
     const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
-    ));
+      "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])",
+    )).filter((element) => element.getClientRects().length > 0);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
     const active = document.activeElement;
-    if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+    if (event.shiftKey && (active === first || active === dialogRef.current || !dialogRef.current.contains(active))) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
@@ -147,24 +151,41 @@ export function NewProjectDialog() {
   const remoteReady = Boolean(selectedHost && hostReady({ ...selectedHost, remoteRoot }));
 
   const start = async () => {
-    if (!open) return;
-    if (mode === "local") {
-      if (!localReady) return;
-      await startNewProject({ kind: "local", path: localPath.trim(), base: localBase });
-    } else {
-      if (!selectedHost || !remoteReady) return;
-      const host = { ...selectedHost, remoteRoot: remoteRoot.trim() };
-      // Keep the UI + next-session selection in sync for when this dialog is
-      // opened again.
-      setProjectMode("remote");
-      setSelectedHostId(host.id);
-      saveSshHosts(
-        hosts.map((h) => h.id === host.id ? host : h),
-        accountScope,
-      );
-      await startNewProject({ kind: "remote", host });
+    if (!open || startingRef.current || (mode === "local" ? !localReady : !remoteReady)) return;
+    startingRef.current = true;
+    setStarting(true);
+    setPickerError(null);
+    try {
+      if (mode === "local") {
+        if (!localReady) return;
+        await startNewProject({ kind: "local", path: localPath.trim(), base: localBase });
+      } else {
+        if (!selectedHost || !remoteReady) return;
+        const host = { ...selectedHost, remoteRoot: remoteRoot.trim() };
+        // Keep the UI + next-session selection in sync for when this dialog is
+        // opened again.
+        setProjectMode("remote");
+        setSelectedHostId(host.id);
+        saveSshHosts(
+          hosts.map((h) => h.id === host.id ? host : h),
+          accountScope,
+        );
+        await startNewProject({ kind: "remote", host });
+      }
+      const current = useSessionStore.getState();
+      if (!current.newProjectOpen) return;
+      if (current.error || !current.session) {
+        setPickerError(current.error || "The session could not start. Check the folder or host and try again.");
+        return;
+      }
+      setOpen(false);
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("textarea.composer-input")?.focus());
+    } catch (error) {
+      setPickerError(String(error));
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
-    close();
   };
 
   return (
@@ -188,11 +209,12 @@ export function NewProjectDialog() {
           >
             <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
               <h2 id="new-project-title" className="text-base font-semibold text-ink">
-                New project
+                New session
               </h2>
             </div>
 
             <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+              <p className="text-sm text-ink-muted">Choose the folder where this session will work.</p>
               {/* Target machine */}
               <div className="flex gap-1.5 rounded-xl bg-bg-secondary p-1">
                 <button
@@ -223,8 +245,57 @@ export function NewProjectDialog() {
 
               {mode === "local" ? (
                 <div className="flex flex-col gap-3">
-                  <div className="rounded-xl border border-border-subtle bg-bg-secondary/55 p-2.5">
-                    <div className="px-0.5 text-xs font-semibold text-ink-secondary">First session checkout</div>
+                  {inTauri() && (
+                    <button
+                      type="button"
+                      onClick={() => void chooseLocal()}
+                      className="flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
+                    >
+                      <FolderOpen className="size-4" /> Choose folder…
+                    </button>
+                  )}
+                  <label htmlFor="session-folder" className="text-sm font-medium text-ink-secondary">Project folder</label>
+                  <input
+                    id="session-folder"
+                    type="text"
+                    value={localPath}
+                    onChange={(e) => setLocalPath(e.target.value)}
+                    placeholder={inTauri() ? "…or paste an absolute path" : "/Users/you/code/my-project"}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    aria-label="Project folder path"
+                    className={cn(input, "font-mono")}
+                  />
+                  {recentProjects.length > 0 && (
+                    <div>
+                      <div className="px-1 pb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                        Recent
+                      </div>
+                      <div className="flex flex-col gap-0.5">
+                        {recentProjects.map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setLocalPath(p)}
+                            className={cn(
+                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
+                              p === localPath && "bg-accent-subtle",
+                            )}
+                          >
+                            <Folder className="size-4 shrink-0 text-ink-muted" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-sm text-ink">{projectName(p)}</span>
+                              <span className="block truncate text-xs text-ink-faint">{p}</span>
+                            </span>
+                            {p === localPath && <Check className="size-4 shrink-0 text-accent" />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <details className="rounded-xl border border-border-subtle bg-bg-secondary/55 p-2.5">
+                    <summary className="cursor-pointer text-sm font-medium text-ink-secondary">Checkout options · {localBase === "current" ? "This folder" : "Fresh worktree"}</summary>
                     <div className="mt-2 grid grid-cols-2 gap-1.5">
                       <button
                         type="button"
@@ -257,59 +328,7 @@ export function NewProjectDialog() {
                         {localBase === "default" && <Check className="mt-0.5 size-3.5 shrink-0 text-accent" />}
                       </button>
                     </div>
-                  </div>
-                  {inTauri() && (
-                    <button
-                      type="button"
-                      onClick={() => void chooseLocal()}
-                      className="flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
-                    >
-                      <FolderOpen className="size-4" /> Choose folder…
-                    </button>
-                  )}
-                  <input
-                    type="text"
-                    value={localPath}
-                    onChange={(e) => setLocalPath(e.target.value)}
-                    placeholder={inTauri() ? "…or paste an absolute path" : "/Users/you/code/my-project"}
-                    autoCorrect="off"
-                    autoCapitalize="off"
-                    spellCheck={false}
-                    aria-label="Project folder path"
-                    className={cn(input, "font-mono")}
-                  />
-                  {pickerError && (
-                    <p role="alert" className="px-1 text-xs text-danger">
-                      {pickerError} Paste an absolute path above to continue.
-                    </p>
-                  )}
-                  {recentProjects.length > 0 && (
-                    <div>
-                      <div className="px-1 pb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-                        Recent
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        {recentProjects.map((p) => (
-                          <button
-                            key={p}
-                            type="button"
-                            onClick={() => setLocalPath(p)}
-                            className={cn(
-                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
-                              p === localPath && "bg-accent-subtle",
-                            )}
-                          >
-                            <Folder className="size-4 shrink-0 text-ink-muted" />
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm text-ink">{projectName(p)}</span>
-                              <span className="block truncate text-xs text-ink-faint">{p}</span>
-                            </span>
-                            {p === localPath && <Check className="size-4 shrink-0 text-accent" />}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  </details>
                 </div>
               ) : (
                 <div className="flex min-h-0 flex-col gap-4">
@@ -381,6 +400,7 @@ export function NewProjectDialog() {
               )}
             </div>
 
+            {pickerError && <p role="alert" className="px-5 pb-3 text-sm text-danger">{pickerError}</p>}
             <div className="flex items-center justify-end gap-2 border-t border-border-subtle px-5 py-3.5">
               <button
                 type="button"
@@ -392,14 +412,15 @@ export function NewProjectDialog() {
               <button
                 type="button"
                 onClick={() => void start()}
-                disabled={mode === "local" ? !localReady : !remoteReady}
+                disabled={starting || (mode === "local" ? !localReady : !remoteReady)}
                 title={mode === "remote" && selectedHost && !hostReady({ ...selectedHost, remoteRoot })
                   ? "Choose a remote folder first."
                   : undefined}
                 className="flex items-center gap-2 rounded-lg bg-accent px-4 py-1.5 text-sm font-semibold text-on-accent transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {mode === "remote" ? <Server className="size-4" /> : <Laptop className="size-4" />}
-                Start session
+                {starting && <Loader2 className="size-4 animate-spin" />}
+                {starting ? "Starting…" : "Start session"}
               </button>
             </div>
           </m.div>

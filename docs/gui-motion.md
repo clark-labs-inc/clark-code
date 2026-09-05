@@ -31,9 +31,10 @@ an action. It should not decorate every update.
    surfaces. If continuity genuinely needs layout animation, scope `layout` to
    the smallest element and use `layout="position"` when size interpolation
    would distort content.
-3. Use `AnimatePresence` only around stable, keyed children. Use `mode="wait"`
-   for one-at-a-time screen or panel replacement; use `popLayout` only for lists
-   where the surrounding content should reflow immediately.
+3. Use `AnimatePresence` only around stable, keyed children. Keep the primary
+   workspace shell mounted and acknowledge navigation with `WorkspaceStage`;
+   do not delay new content behind an outgoing screen. Use `popLayout` only
+   for lists where the surrounding content should reflow immediately.
 4. Keep feedback quick: 120 ms for controls, 200 ms for normal entries, and
    300 ms only for a deliberate large reveal.
 5. Do not add `will-change` by default. Persistent compositor layers consume
@@ -51,20 +52,15 @@ numbers; `motionPolicy.spec.ts` enforces this by source scan.
 
 Spread the full preset, then use the helpers for the parts that vary:
 
-- `accessibleMotion(preset, reduce)` — the single reduced-motion gate. When
-  `reduce` is true it returns `{ initial: false, animate: { opacity: 1,
-  transform: "none" }, exit: { opacity: 0, transition: { duration: fast } },
-  transition: { duration: 0 } }`, i.e. the enter snaps in and the exit is a
-  short opacity-only fade with no spatial movement. When `reduce` is false it
-  returns the chosen preset unchanged. Dialogs, overlays, and reduced-motion
-  choreography should route here.
-- `staggeredTransition(reduce, index, perIndex = 0.04, overrides?)` — the
-  transition for the `index`-th row of a stagger. Under full motion it returns
-  `{ duration: base, ease: out, delay: perIndex * index }`; under reduced
-  motion it returns `{ duration: 0 }` (no choreography). Pass `overrides` for a
-  per-site duration or a fixed delay, e.g.
-  `staggeredTransition(reduce, 0, 0.04, { duration: DUR.slow })` or
-  `staggeredTransition(reduce, 0, 0.04, { delay: 0.08 })`.
+- `accessibleMotion(preset, reduce)` — the shared reduced-motion gate. Under
+  reduce, enter and exit use a brief 120 ms opacity fade, without transforms.
+- `staggeredTransition(reduce, index, perIndex = 0.04, overrides?)` — spreads
+  normal entries across the shared cadence. Under reduce, rows fade together
+  over 120 ms with no stagger.
+- `workspaceNavigationMotion(reduce)` — a 200 ms, 3 px navigation cue starting
+  at 96% opacity, so the workspace never flashes blank. Under reduce it uses
+  only a 120 ms opacity cue. `WorkspaceStage` owns cancellation during rapid
+  navigation and never restarts the cue for streamed content updates.
 - `REDUCED_EXIT` — `{ opacity: 0, transition: { duration: fast } }`, for the
   small number of bespoke surfaces that spread their own props and must keep the
   reduced-motion fade-out exit.
@@ -82,8 +78,8 @@ Spread the full preset, then use the helpers for the parts that vary:
 | `OVERLAY` | `{ opacity: 0 }` | `{ opacity: 0 }` | fast · out |
 | `DIALOG` | `{ opacity: 0, translateY(6px) scale(0.99) }` | `{ opacity: 0, translateY(3px) scale(0.995) }` | base · out |
 
-`EXPAND_REDUCED` is the reduced-motion counterpart to `EXPAND`: enter snaps,
-exit is an opacity-only fade. Use it with the same ternary as the transients in
+`EXPAND_REDUCED` is the reduced-motion counterpart to `EXPAND`: entry and
+exit use brief opacity-only fades without geometry animation. Use it with the same ternary as the transients in
 `Conversation.tsx`: `{...(reduce ? EXPAND_REDUCED : EXPAND)}`.
 
 The speed scale mirrors CSS: `DUR.fast = 120ms`, `DUR.base = 200ms`,
@@ -110,16 +106,16 @@ The root `MotionConfig reducedMotion="user"` follows the operating-system
 preference. Components that choreograph presence also call `useReducedMotion`
 and send the result through `accessibleMotion`, so the foundation policy is:
 
-- **Enters snap in.** Reduced motion keeps content appearing immediately — no
-  slides, no rises, no choreographed stagger, no scale.
+- **Enters use brief opacity cues.** Reduced motion removes slides, rises,
+  choreographed stagger, and scale while keeping state changes legible.
 - **Exits are a short opacity-only fade.** A disappearing surface fades out over
   120 ms instead of hard-cutting at `duration: 0`; a glitch cut reads as a bug,
   and the fade requires no spatial movement.
 
 Under reduce, `accessibleMotion` and `staggeredTransition` (and `REDUCED_EXIT`
 for bespoke spreads) are what guarantee both halves of that policy. The global
-`prefers-reduced-motion: reduce` block disables CSS animation, transitions, and
-smooth scrolling while preserving semantic status text.
+`prefers-reduced-motion: reduce` block removes spatial CSS motion and smooth
+scrolling while retaining brief fades and semantic status text.
 
 Do not use movement as the only signal. Focus, labels, live-region text, color,
 and icons must continue to communicate the same state.

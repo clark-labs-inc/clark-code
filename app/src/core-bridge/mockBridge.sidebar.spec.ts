@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import { MockBridge } from "./mockBridge";
+import { groupSidebarProjects, isQuickChatProject } from "../lib/projectSidebar";
 
 describe("MockBridge sidebar fixture", () => {
+  it("groups newly created quick chats together instead of creating project rows", async () => {
+    const bridge = new MockBridge();
+    const first = await bridge.prepareQuickChatWorkspace();
+    const second = await bridge.prepareQuickChatWorkspace();
+    expect(first.id).not.toBe(second.id);
+    expect(isQuickChatProject(first.path, first.id)).toBe(true);
+    const conversations = [first, second].map((workspace) => ({
+      id: workspace.id, project: workspace.path, title: "New Quick Chat",
+      provider: "local", createdAt: 1, updatedAt: 1,
+    }));
+    const groups = groupSidebarProjects(conversations, [], () => 0, { pinned: [], aliases: {} });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe("quick-chats");
+    expect(groups[0].convos).toHaveLength(2);
+  });
   it("creates distinct conversation ids for a realistic multi-conversation list", async () => {
     const bridge = new MockBridge();
 

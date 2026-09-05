@@ -9,10 +9,10 @@
  *  The comparator only works while the callback props keep a stable identity;
  *  `Sidebar` holds them through `useCallback` with a latest-value ref for that
  *  reason. Adding a prop here means adding it to the comparator below. */
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import * as m from "motion/react-m";
 import { useReducedMotion } from "motion/react";
-import { Archive, Loader2, MessageSquare } from "lucide-react";
+import { MoreHorizontal, Loader2, MessageSquare } from "lucide-react";
 import type React from "react";
 
 import { useSessionStore } from "../../store/sessionStore";
@@ -26,6 +26,8 @@ import { DUR, RISE_SMALL, accessibleMotion, staggeredTransition } from "../../li
 
 function ConversationRowImpl({
   c,
+  renameRequested,
+  onRenameDone,
   active,
   streaming,
   unseen,
@@ -34,10 +36,11 @@ function ConversationRowImpl({
   mutation,
   onSelect,
   onRangeStep,
-  onArchive,
   onContextMenu,
 }: {
   c: ConversationMeta;
+  renameRequested: boolean;
+  onRenameDone: () => void;
   active: boolean;
   /** A run is currently streaming in this conversation. */
   streaming: boolean;
@@ -50,7 +53,6 @@ function ConversationRowImpl({
   mutation: SidebarConversationMutationKind | null;
   onSelect: (id: string, intent: ConversationSelectionIntent, additive?: boolean) => void;
   onRangeStep: (id: string, direction: -1 | 1) => void;
-  onArchive: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, id: string) => void;
 }) {
   const reduceMotion = useReducedMotion();
@@ -59,9 +61,18 @@ function ConversationRowImpl({
   const [draft, setDraft] = useState(c.title);
   const mutating = mutation !== null;
 
+  useEffect(() => {
+    if (renameRequested) { setDraft(c.title); setEditing(true); }
+  }, [renameRequested, c.title]);
+
+  const focusRow = () => requestAnimationFrame(() => {
+    document.querySelector<HTMLButtonElement>(`[data-sidebar-conversation-button="${CSS.escape(c.id)}"]`)?.focus();
+  });
   const commit = () => {
+    onRenameDone();
     setEditing(false);
-    rename(c.id, draft);
+    if (draft.trim()) rename(c.id, draft.trim());
+    focusRow();
   };
 
   return (
@@ -101,8 +112,10 @@ function ConversationRowImpl({
               onKeyDown={(e) => {
                 if (e.key === "Enter") commit();
                 if (e.key === "Escape") {
+                  onRenameDone();
                   setDraft(c.title);
                   setEditing(false);
+                  focusRow();
                 }
               }}
               aria-label="Rename conversation"
@@ -141,6 +154,7 @@ function ConversationRowImpl({
             }}
             disabled={mutating}
             data-sidebar-conversation-button={c.id}
+            aria-current={active ? "page" : undefined}
             aria-pressed={selected}
             aria-describedby="sidebar-selection-help"
             aria-label={
@@ -176,13 +190,14 @@ function ConversationRowImpl({
         )}
         {!editing && (
           <button
-            onClick={() => onArchive(c.id)}
+            onClick={(event) => onContextMenu(event, c.id)}
             disabled={mutating}
-            title="Archive conversation"
-            aria-label="Archive conversation"
-            className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait"
+            title="Conversation actions"
+            aria-label={`Actions for ${c.title}`}
+            aria-haspopup="menu"
+            className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink disabled:cursor-wait"
           >
-            <Archive className="size-3.5" />
+            <MoreHorizontal className="size-3.5" />
           </button>
         )}
       </div>
@@ -194,6 +209,8 @@ export const ConversationRow = memo(
   ConversationRowImpl,
   (a, b) =>
     a.c === b.c
+    && a.renameRequested === b.renameRequested
+    && a.onRenameDone === b.onRenameDone
     && a.active === b.active
     && a.streaming === b.streaming
     && a.unseen === b.unseen
@@ -202,6 +219,5 @@ export const ConversationRow = memo(
     && a.mutation === b.mutation
     && a.onSelect === b.onSelect
     && a.onRangeStep === b.onRangeStep
-    && a.onArchive === b.onArchive
     && a.onContextMenu === b.onContextMenu,
 );

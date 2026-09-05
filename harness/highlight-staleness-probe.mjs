@@ -10,8 +10,8 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
-import { chromium } from "playwright";
-const root = "/Users/stan/Documents/git/clark-desktop/";
+import { chromium, webkit } from "playwright";
+const root = new URL("../", import.meta.url).pathname;
 const port = await new Promise((r,j)=>{const s=createServer();s.once("error",j);s.listen(0,"127.0.0.1",()=>{const{port}=s.address();s.close(()=>r(port));});});
 const url=`http://127.0.0.1:${port}/`;
 const vite=spawn("node",["node_modules/vite/bin/vite.js","--host","127.0.0.1","--port",String(port),"--strictPort"],{cwd:`${root}app`,env:{...process.env,VITE_PERF_HOOKS:"1",VITE_PRODUCT_DEV_AUTH:"1"},stdio:["ignore","pipe","pipe"]});
@@ -20,7 +20,7 @@ const seed=`const scope=encodeURIComponent("id:perf-qa");
 localStorage.setItem("agent-desktop.dev-account",JSON.stringify({user:{id:"perf-qa",name:"Perf QA",method:"local"}}));
 localStorage.setItem('agent-desktop:local-agent:'+scope,JSON.stringify({cwd:"/tmp",model:"local-model",reasoningEffort:"high"}));
 localStorage.setItem('agent-desktop:project-context:'+scope,JSON.stringify({cwd:"/tmp"}));`;
-const b=await chromium.launch({headless:true});
+const b=await (process.env.ENGINE === "webkit" ? webkit : chromium).launch({headless:true});
 const failures=[];
 try{
   const ctx=await b.newContext({viewport:{width:1360,height:880}});
@@ -54,7 +54,14 @@ try{
 
   // 1. TS fence highlights.
   await setFence("```ts\nconst alpha = 1;\nconst beta = 2;\n```");
-  await sleep(900);
+  // A cold module worker must fetch its engine, themes, and first grammar.
+  // Wait for the actual output; a fixed sleep conflates readiness with a
+  // machine-dependent startup deadline, especially in the WebKit proxy.
+  await p.waitForFunction(
+    () => document.querySelector(".shiki-host")?.textContent?.includes("alpha"),
+    null,
+    { timeout: 15_000 },
+  );
   let s1 = await read();
   if (s1.shiki < 1 || !s1.shikiText?.includes("alpha")) failures.push(`step1: expected highlighted alpha fence, got ${JSON.stringify(s1)}`);
 

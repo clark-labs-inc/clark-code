@@ -251,7 +251,10 @@ function MessageImpl({
     <m.div
       initial={animateEntry ? rowMotion.initial : false}
       animate={rowMotion.animate}
-      transition={animateEntry ? rowMotion.transition : { duration: 0 }}
+      // Entry eligibility lasts one snapshot; the animation lasts several.
+      // Keep its timing stable when the next token arrives. initial={false}
+      // already prevents replayed history from animating on mount.
+      transition={rowMotion.transition}
       data-chat-message-role={role === "agent" ? "assistant" : role}
       data-chat-message-motion={
         animateEntry ? (reduce ? "fade" : "enter") : "settled"

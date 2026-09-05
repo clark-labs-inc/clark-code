@@ -16,10 +16,11 @@ import {
   Pin,
   PinOff,
   Server,
-  SquarePen,
+  Plus,
   X,
 } from "lucide-react";
 import type { ProjectGroup } from "../lib/projectSidebar";
+import { handleMenuNavigation } from "../lib/menuNavigation";
 import { ManagedWorktreeManager } from "./ManagedWorktreeManager";
 
 export interface ProjectMenuPosition {
@@ -79,14 +80,13 @@ export function ProjectHeader({
       <button
         type="button"
         onClick={onToggle}
-        disabled={group.convos.length === 0}
-        aria-expanded={group.convos.length > 0 ? expanded : undefined}
-        aria-controls={group.convos.length > 0 ? conversationPanelId : undefined}
-        aria-label={group.convos.length > 0 ? `${expanded ? "Collapse" : "Expand"} ${group.label}` : group.label}
+        aria-expanded={expanded}
+        aria-controls={conversationPanelId}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${group.label}`}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-focus disabled:cursor-default"
       >
         <ChevronRight
-          className={`size-3 shrink-0 text-ink-faint transition-transform ${expanded ? "rotate-90" : ""} ${group.convos.length === 0 ? "opacity-0" : ""}`}
+          className={`size-3 shrink-0 text-ink-faint transition-transform ${expanded ? "rotate-90" : ""}`}
           aria-hidden="true"
         />
         <Icon className="size-3.5 shrink-0 text-ink-muted" />
@@ -116,9 +116,9 @@ export function ProjectHeader({
           }}
           title={newSessionLabel}
           aria-label={newSessionLabel}
-          className="grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink"
         >
-          <SquarePen className="size-3.5" />
+          <Plus className="size-3.5" />
         </button>
       )}
       {group.kind !== "none" && (
@@ -132,8 +132,8 @@ export function ProjectHeader({
           aria-label={`Project actions for ${group.label}`}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          className={`grid size-5 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-sunken hover:text-ink focus-visible:opacity-100 ${
-            menuOpen ? "bg-bg-sunken text-ink opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+          className={`grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink focus-visible:opacity-100 ${
+            menuOpen ? "bg-bg-sunken text-ink opacity-100" : "opacity-100"
           }`}
         >
           <MoreHorizontal className="size-3.5" />
@@ -165,7 +165,7 @@ function MenuItem({
       disabled={disabled}
       autoFocus={autoFocus}
       onClick={onClick}
-      className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-base transition disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
         danger
           ? "text-ink-secondary hover:bg-danger/10 hover:text-danger"
           : "text-ink-secondary hover:bg-bg-hover hover:text-ink"
@@ -253,6 +253,7 @@ export function ProjectActionsMenu({
   return (
     <div
       ref={ref}
+      onKeyDown={handleMenuNavigation}
       role="menu"
       aria-label={`Project actions for ${group.label}`}
       style={{
@@ -312,16 +313,15 @@ export function ProjectActionsMenu({
           </MenuItem>
           <MenuItem
             icon={Archive}
-            disabled={group.convos.length === 0}
-            onClick={() => {
+                onClick={() => {
               onArchive();
               onClose();
             }}
           >
-            Archive chats
+            Archive all chats
           </MenuItem>
           <MenuItem icon={X} danger onClick={() => setMode("remove")}>
-            Remove
+            Remove project…
           </MenuItem>
         </>
       )}

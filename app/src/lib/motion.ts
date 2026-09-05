@@ -40,6 +40,26 @@ export const FADE = {
   transition: { duration: DUR.fast, ease: EASE.out },
 } as const;
 
+/** Navigation acknowledges the replacement without hiding the reading surface
+ * or retaining an outgoing interactive tree. Used by the stable workspace. */
+export function workspaceNavigationMotion(reduce: boolean | null): {
+  frames: Keyframe[];
+  options: KeyframeAnimationOptions;
+} {
+  return {
+    frames: reduce
+      ? [{ opacity: 0.96 }, { opacity: 1 }]
+      : [
+          { opacity: 0.96, transform: "translateX(3px)" },
+          { opacity: 1, transform: "translateX(0)" },
+        ],
+    options: {
+      duration: (reduce ? DUR.fast : DUR.base) * 1000,
+      easing: `cubic-bezier(${EASE.out.join(",")})`,
+    },
+  };
+}
+
 /** A gentle rise: fade + a few px up. The canonical "a card/row appeared"
  * motion. A direct transform string gives every supported WebView the best
  * chance to keep it on the compositor; it never changes layout height. */
