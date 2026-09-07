@@ -25,8 +25,6 @@ use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
 mod resolution;
 #[path = "orchestration_tool_schema.rs"]
 mod schema;
-#[path = "orchestration_scout/mod.rs"]
-mod scout;
 #[path = "orchestration_tool_support.rs"]
 mod support;
 #[path = "orchestration_writer_tool.rs"]
@@ -92,10 +90,6 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
         resolution::tool(shared.clone()),
     ];
     tools.extend(writer::tools(writer_config));
-    tools.extend(scout::tools(
-        shared.config.scout_capsules.clone(),
-        shared.config.clone(),
-    ));
     tools
 }
 

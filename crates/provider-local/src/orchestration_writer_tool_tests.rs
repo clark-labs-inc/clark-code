@@ -75,8 +75,6 @@ fn config() -> OrchestrationToolsConfig {
         headers: HashMap::new(),
         root_model: "strong".into(),
         reasoning_effort: None,
-        scout_capsules: None,
-        scout_cartography: None,
     }
 }
 
@@ -196,8 +194,6 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
             headers: HashMap::new(),
             root_model: model.clone(),
             reasoning_effort: Some("low".into()),
-            scout_capsules: None,
-            scout_cartography: None,
         },
         pending: Mutex::new(HashMap::new()),
     });

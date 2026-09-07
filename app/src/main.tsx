@@ -11,23 +11,6 @@ if (import.meta.env.DEV) {
 }
 
 async function start(): Promise<void> {
-  if (
-    import.meta.env.DEV
-    && new URLSearchParams(window.location.search).has("rsi-loop-preview")
-  ) {
-    const { RsiLoopPreview } = await import("./surfaces/specialists/RsiLoopPreview");
-    ReactDOM.createRoot(document.getElementById("root")!).render(
-      <React.StrictMode>
-        <LazyMotion features={domMax} strict>
-          <MotionConfig reducedMotion="user">
-            <RsiLoopPreview />
-          </MotionConfig>
-        </LazyMotion>
-      </React.StrictMode>,
-    );
-    return;
-  }
-
   // Restore native encrypted auth before importing stores; their initial state
   // is synchronously partitioned by the active account.
   await initializeAuthSession();

@@ -36,9 +36,3 @@ that projection instead of reconstructing remote access policy.
 
 The repository guard in `harness/product-boundary.spec.mjs` checks these
 constraints across source, tests, documentation, fixtures, and configuration.
-
-## Stable wire identifiers
-
-Some Scout protocol crates retain versioned signing domains and adapter ids
-used by existing receipts. They are interoperability identifiers, not service
-configuration. Changing them requires a new protocol version.

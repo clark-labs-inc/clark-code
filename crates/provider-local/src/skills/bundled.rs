@@ -6,19 +6,11 @@ const ADDRESS_COMMENTS: &str = include_str!("../../skills/github/gh-address-comm
 const FIX_CI: &str = include_str!("../../skills/github/gh-fix-ci/SKILL.md");
 const YEET: &str = include_str!("../../skills/github/yeet/SKILL.md");
 const SENTRY: &str = include_str!("../../skills/sentry/SKILL.md");
-const SCOUT: &str = include_str!("../../skills/scout/SKILL.md");
 const SECURITY_SCAN: &str = include_str!("../../skills/security/security-scan/SKILL.md");
 const SECURITY_DIFF: &str = include_str!("../../skills/security/security-diff/SKILL.md");
 const SECURITY_DEEP: &str = include_str!("../../skills/security/security-deep/SKILL.md");
 
 const BASH: &[&str] = &["bash"];
-const SCOUT_TOOLS: &[&str] = &[
-    "scout_capabilities",
-    "scout_repository_census",
-    "scout_adapter",
-    "scout_enterprise",
-    "scout_enterprise_query",
-];
 const SECURITY_TOOLS: &[&str] = &[
     "security_scan_contract",
     "security_poc_execute",
@@ -49,11 +41,6 @@ pub(super) fn skills() -> Vec<Skill> {
         bundled("github", "agent://skills/github/gh-fix-ci", FIX_CI, BASH),
         bundled("github", "agent://skills/github/yeet", YEET, BASH),
         bundled("sentry", "agent://skills/sentry", SENTRY, BASH),
-        {
-            let mut scout = bundled("scout", "agent://skills/scout", SCOUT, SCOUT_TOOLS);
-            scout.allow_implicit_invocation = false;
-            scout
-        },
         {
             let mut security = bundled(
                 "security",

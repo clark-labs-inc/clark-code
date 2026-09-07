@@ -512,7 +512,7 @@ export interface ProviderInfo {
 }
 
 export interface SpecialistProjectionPublished {
-  specialist: "scientist" | "rsi";
+  specialist: "scientist";
   organizationId: string;
   sequence: number;
   programId?: string;

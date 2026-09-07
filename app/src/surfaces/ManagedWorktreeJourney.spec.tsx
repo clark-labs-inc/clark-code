@@ -105,14 +105,14 @@ describe("managed worktree decision copy", () => {
   it("restores an independent starting point when switching specialists", () => {
     // The neutral foundation test product has no branded catalog, so drive the
     // store boundary directly with the same active identities a product emits.
-    useSpecialistStore.setState({ active: "rsi" });
+    useSpecialistStore.setState({ active: "security" });
     useSessionStore.getState().setManagedWorktreeBase("default");
 
     useSpecialistStore.setState({ active: "scientist" });
     expect(useSessionStore.getState().managedWorktreeBase).toBe("current");
     useSessionStore.getState().setManagedWorktreeBase("current");
 
-    useSpecialistStore.setState({ active: "rsi" });
+    useSpecialistStore.setState({ active: "security" });
     expect(useSessionStore.getState().managedWorktreeBase).toBe("default");
 
     useSpecialistStore.getState().close();

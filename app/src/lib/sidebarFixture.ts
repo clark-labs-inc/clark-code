@@ -110,13 +110,13 @@ export function sidebarFixtureConversations(now = Date.now()): ConversationMeta[
   ];
 
   const specialist: ConversationMeta = {
-    id: "sidebar-fixture-rsi-01",
-    title: "Create a deterministic evaluation harness",
+    id: "sidebar-fixture-scientist-01",
+    title: "Design a deterministic replication",
     provider: "specialist",
     project: "/workspace/northstar",
     createdAt: now - 25 * 60 * 1000,
     updatedAt: now - 2 * 60 * 1000,
-    specialist: { kind: "rsi" },
+    specialist: { kind: "scientist" },
   };
 
   return [...quickChats, ...active, specialist, ...archived];

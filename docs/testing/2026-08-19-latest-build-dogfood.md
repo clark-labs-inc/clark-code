@@ -34,7 +34,7 @@ All browser journeys used the repository's mock-provider or UI-only harnesses. N
 | Artifact delivery | PASS | Inline SVG, save-copy download, workspace, real PDF rasterization and PDF download; `target/artifact-delivery-smoke/receipt.json` |
 | Full GUI | PASS | Multi-turn chat, permission, goals/steering/completion/clear, 12 slash commands, terminal/MCP/memory/compact, side question, artifacts, mobile overflow; `target/full-gui-smoke/20260820T011300Z-10560/` |
 | Resilience matrix | PASS | Clean, recoverable transport faults, all recoverable faults, provider loss pause, upstream+process pause, explicit cancel; 6/6 cases; `target/resilience-smoke/20260820T011204Z-7354/` |
-| Specialist matrix | PASS | Scout, Security, RSI catalog/canvas/start-failure/running/settlement/detach-reattach/mobile/access gates; 23 checks; `target/specialist-matrix-smoke/20260820T011204Z-7366/` |
+| Specialist matrix | PASS | Security catalog/canvas/start-failure/running/settlement/detach-reattach/mobile/access gates; retained receipt predates the current catalog; `target/specialist-matrix-smoke/20260820T011204Z-7366/` |
 | Sidebar resize | PASS | Drag, keyboard bounds, reload persistence, collapse/expand, double-click reset; probe output ended `sidebar-resize-probe: PASS` |
 | Text selection clearing | PASS | Chromium mid-stream and settled selection cleared on empty-area clicks; `selection-repro.mjs chromium` |
 | Chat-switch profile | PASS (exploratory) | 4 warm switches at 17–65 ms with 10 heavy transcript turns; `/tmp/agent-profile/results.json` |

@@ -177,8 +177,6 @@ async fn paid_large_four_writer_workstreams() {
             headers: HashMap::new(),
             root_model: model.clone(),
             reasoning_effort: Some("low".into()),
-            scout_capsules: None,
-            scout_cartography: None,
         },
         pending: Mutex::new(HashMap::new()),
     });

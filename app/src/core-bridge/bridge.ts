@@ -370,7 +370,7 @@ export interface CoreBridge {
   /** Best-effort cloud sync failed for part of a run (the run itself keeps
    *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */
   onCloudSyncWarning?(handler: (message: string) => void): () => void;
-  /** A native Scientist/RSI projection was durably accepted by the agent
+  /** A native Scientist projection was durably accepted by the agent
    * cloud and its canvas can refresh from the authoritative endpoint. */
   onSpecialistProjectionPublished?(
     handler: (receipt: SpecialistProjectionPublished) => void,

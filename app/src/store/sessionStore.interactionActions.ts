@@ -57,14 +57,10 @@ import {
 import { activeSpecialistContext } from "./specialistStore";
 import { specialistModelSettings } from "../lib/specialistModel";
 import {
-  scoutCartographyTarget,
   productSpecialistTarget,
   specialistReadRoots,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
-import {
-  specialistUsesProtectedFullAccess,
-} from "../lib/permissions";
 import { isQuickChatProject, projectDisplayName } from "../lib/projectSidebar";
 import { quickChatModelSettings } from "../lib/localAgent";
 import {
@@ -271,7 +267,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         ? localConnectConfig(
           effSettings,
           remoteTarget(activeRemote),
-          scoutCartographyTarget(activeSpecialistContext(), activeRemote, get().activeRemoteHost),
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
@@ -281,7 +276,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         : localConnectConfig(
           effSettings,
           undefined,
-          scoutCartographyTarget(activeSpecialistContext(), undefined, "local"),
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
@@ -436,7 +430,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       ? localConnectConfig(
         settings,
         remoteTarget(previousEntry.remote),
-        scoutCartographyTarget(previousMeta?.specialist, previousEntry.remote, previousEntry.remoteHost),
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
@@ -446,7 +439,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       : localConnectConfig(
         settings,
         undefined,
-        scoutCartographyTarget(previousMeta?.specialist, undefined, "local"),
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
@@ -809,10 +801,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
   setApprovalPolicy: (mode) => {
     const { auth, bridge, session, approvalPolicies } = get();
-    const focusedSpecialist = session
-      ? get().conversations.find((conversation) => conversation.id === session.id)?.specialist?.kind
-      : activeSpecialistContext()?.kind;
-    if (focusedSpecialist === "scout") return;
     // With an open local chat, change THAT chat's level — not every live
     // conversation's. Other chats keep running under whatever they were pinned
     // with; only the focused conversation's override (and its host mode) move.
@@ -866,10 +854,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
   cycleApprovalPolicy: () => {
     const { approvalPolicy, approvalPolicies, setApprovalPolicy, session, activeProvider } = get();
-    const specialistKind = session
-      ? get().conversations.find((conversation) => conversation.id === session.id)?.specialist?.kind
-      : activeSpecialistContext()?.kind;
-    if (specialistUsesProtectedFullAccess(specialistKind)) return;
     // Permission modes only govern the local engine; with a cloud session (or
     // a cloud target on the start screen) the pill is hidden and Shift+Tab
     // cycling an invisible mode would just surprise the next local session.
@@ -883,12 +867,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   },
 
   setCollaborationMode: (mode) => {
-    const focusedSpecialist = get().session
-      ? get().conversations.find(
-        (conversation) => conversation.id === get().session?.id,
-      )?.specialist?.kind
-      : activeSpecialistContext()?.kind;
-    if (focusedSpecialist === "scout" && mode !== "default") return;
     const { auth, bridge, session } = get();
     if (session) {
       // A chat is in focus — pin the mode to THAT conversation only, never the

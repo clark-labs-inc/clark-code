@@ -52,19 +52,10 @@ import { activeSpecialistContext, useSpecialistStore } from "./specialistStore";
 import {
   researchRuntimeSpecialist,
   productSpecialistTarget,
-  type RsiScoutContextSnapshot,
   type SpecialistContext,
-  scoutCartographyTarget,
   specialistConnectConfig,
   specialistReadRoots,
-  newScoutRunRequestId,
 } from "../lib/specialists";
-import {
-  companyScoutMap,
-  specialistQuery,
-  type CompanyScoutMap,
-  type ScoutSnapshotEntry,
-} from "../lib/specialistCloud";
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
@@ -119,28 +110,6 @@ type ConversationActions = Pick<
   | "archiveSelectedConversations"
   | "deleteSelectedConversations"
 >;
-
-const RSI_SCOUT_CONTEXT_BUDGET_MS = 3_000;
-
-export async function withinOptionalContextBudget<T>(
-  operation: Promise<T>,
-  budgetMs = RSI_SCOUT_CONTEXT_BUDGET_MS,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<T>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error("optional specialist context timed out")),
-          budgetMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-}
 
 function syncNextSessionTarget(
   get: SessionGet,
@@ -306,7 +275,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   },
 
   startSession: async (startOptions) => {
-    const { bridge, activeProvider, auth } = get();
+    const { bridge, activeProvider } = get();
     if (!bridge || !activeProvider) return;
     const quickChat = startOptions?.quickChat ?? null;
     const requestedReadRoots = startOptions?.readRoots?.filter((root) => root.trim()) ?? [];
@@ -318,23 +287,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         error: `Join or create a Clark workspace before starting ${specialistDefinition.label}.`,
       });
       return;
-    }
-    // Validate the human-selected company authority before allocating any local
-    // conversation workspace. This keeps a failed start entirely side-effect
-    // free and prevents the previous package from becoming an implicit scope.
-    if (specialistContext?.kind === "scout") {
-      if (!specialistContext.organizationId?.trim()) {
-        set({ error: "Choose a company before starting Scout." });
-        return;
-      }
-      if (!specialistContext.workspaceId?.trim()) {
-        set({ error: "Company Scout is still being prepared. Wait a moment and try again." });
-        return;
-      }
-      specialistContext = {
-        ...specialistContext,
-        scoutRunRequestId: newScoutRunRequestId(),
-      };
     }
     const workspacePolicy = productModule().specialistWorkspace;
     let specialistWorkspace: { id: string; path: string } | null = null;
@@ -362,9 +314,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     }
     const sessionProvider = specialistDefinition ? "specialist" : activeProvider;
     const isLocal = activeProvider === "local";
-    // Specialists use the same explicit execution target as ordinary coding
-    // sessions. Scout's company map remains a separate authority;
-    // the native host carries that trusted recipe into the selected worker.
     const isRemote = isLocal
       && get().projectMode === "remote";
     const startHost = isRemote
@@ -444,9 +393,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       let config;
       let options;
       let remoteHost: string | null = null;
-      const collaboration_mode = specialistContext?.kind === "scout"
-        ? "default" as const
-        : get().collaborationMode;
+      const collaboration_mode = get().collaborationMode;
       const mode = approvalPolicyForSpecialist(
         get().approvalPolicy,
         specialistContext?.kind,
@@ -462,62 +409,9 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           localSessionPath = specialistHost.remoteRoot.trim();
           remoteHost = specialistHost.host.trim();
         }
-        let scoutContext: RsiScoutContextSnapshot | undefined;
-        if (specialistDefinition.kind === "rsi" && specialistContext.organizationId) {
-          const credentials = cloudCreds(auth);
-          if (credentials) {
-            const organizationId = specialistContext.organizationId;
-            const preferredWorkspaceId = specialistContext.workspaceId;
-            try {
-              scoutContext = await withinOptionalContextBudget((async () => {
-                const maps = await specialistQuery<CompanyScoutMap[]>(
-                  credentials,
-                  "scout",
-                  "scout_workspaces",
-                  organizationId,
-                );
-                const map = companyScoutMap(maps, preferredWorkspaceId);
-                if (!map) return undefined;
-                const snapshot = await specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
-                  credentials,
-                  "scout",
-                  "scout_snapshot",
-                  organizationId,
-                  map.id,
-                );
-                const entries = snapshot.entries.slice(0, 64).map((entry) => ({
-                  objectKind: entry.object_kind,
-                  objectId: entry.object_id,
-                  classification: entry.event.classification,
-                  attributes: entry.event.fact.attributes,
-                }));
-                while (
-                  entries.length > 0
-                  && new TextEncoder().encode(JSON.stringify({
-                    schemaVersion: 1,
-                    workspaceId: map.id,
-                    entries,
-                  })).length > 16 * 1024
-                ) {
-                  entries.pop();
-                }
-                return {
-                  schemaVersion: 1,
-                  workspaceId: map.id,
-                  entries,
-                };
-              })());
-            } catch {
-              // RSI remains available with project-local context when Scout has
-              // no company map, the read-only snapshot is temporarily offline,
-              // or optional cloud context exceeds the bounded startup budget.
-            }
-          }
-        }
         config = specialistConnectConfig(
           specialistContext,
           localSessionPath,
-          scoutContext,
           specialistHost
             ? { host: specialistHost.host.trim(), remoteRoot: localSessionPath }
             : undefined,
@@ -545,7 +439,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = localConnectConfig(
           localSettings,
           remoteTarget(remote),
-          scoutCartographyTarget(specialistContext, remote, remoteHost),
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
@@ -562,7 +455,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = localConnectConfig(
           sessionSettings,
           undefined,
-          scoutCartographyTarget(specialistContext, undefined, "local"),
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
@@ -969,13 +861,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // The model comes from the conversation's per-chat override when one was
       // set, else the global default — so reopening a chat that ran a different
       // model starts it on that model again, not the current default.
-      const collaboration_mode = openingMeta?.specialist?.kind === "scout"
-        ? "default" as const
-        : effectiveCollaborationMode(
-          get().collaborationMode,
-          get().collaborationModes,
-          id,
-        );
+      const collaboration_mode = effectiveCollaborationMode(
+        get().collaborationMode,
+        get().collaborationModes,
+        id,
+      );
       // The approval level likewise comes from this chat's own override when it
       // has one, else the global default — so reopening a chat you'd set to
       // "Full access" restarts it there, not on whatever the composer happens
@@ -995,14 +885,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         // a chat already pinned keeps its own level.
         pinApprovalPolicy(get, set, id, mode);
       }
-      // A legacy Scout conversation without an exact company-map binding cannot
-      // be repaired by silently selecting cloud authority during reopen.
-      let resolvedSpecialist = openingMeta?.specialist;
-      if (openingMeta?.specialist?.kind === "scout" && !openingMeta.specialist.workspaceId?.trim()) {
-        throw new Error(
-          "This Scout conversation predates the company-wide Scout map. Start a new Scout conversation.",
-        );
-      }
+      const resolvedSpecialist = openingMeta?.specialist;
       if (isSpecialist) {
         if (!openingMeta?.specialist) {
           throw new Error("This specialist conversation has no saved specialist context.");
@@ -1024,7 +907,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = specialistConnectConfig(
           openingMeta.specialist,
           requestedProjectRoot,
-          undefined,
           specialistHost
             ? { host: specialistHost.host.trim(), remoteRoot: requestedProjectRoot }
             : undefined,
@@ -1056,7 +938,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = localConnectConfig(
           effSettings,
           remoteTarget(remote),
-          scoutCartographyTarget(resolvedSpecialist, remote, remoteHost),
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
@@ -1072,7 +953,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = localConnectConfig(
           { ...effSettings, cwd: requestedProjectRoot },
           undefined,
-          scoutCartographyTarget(resolvedSpecialist, undefined, "local"),
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),

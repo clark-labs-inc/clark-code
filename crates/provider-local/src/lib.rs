@@ -54,12 +54,8 @@ mod root_execution;
 mod runtime_plugins;
 mod safety;
 mod sandbox;
-mod scout_policy;
 pub mod security;
 mod security_history;
-pub mod scout_census {
-    pub use scout_capability_census::*;
-}
 mod skills;
 mod tools;
 mod workspace;
@@ -100,11 +96,7 @@ pub use orchestration::{local_read_only_harness, WorkspaceDigestGuard};
 #[doc(hidden)]
 pub use planning::{complete_plan_markdown_for_eval, planning_prompt_contract_for_eval};
 pub use platform::{
-    feature_context_section, personal_memory_section, repository_context_section,
-    scope_personal_memories, FeatureContextFeedbackReceipt, FeatureContextFeedbackRequest,
-    FeatureContextGap, FeatureContextObject, FeatureContextObligation, FeatureContextPacket,
-    FeatureContextQueryKind, FeatureContextRepository, FeatureContextRepositoryBinding,
-    FeatureContextRequest, FeatureContextResponse, FeatureContextRevision,
+    personal_memory_section, repository_context_section, scope_personal_memories,
     OrganizationKnowledgeHit, OrganizationKnowledgePacket, OrganizationKnowledgeResponse,
     PersonalMemory, PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
 };

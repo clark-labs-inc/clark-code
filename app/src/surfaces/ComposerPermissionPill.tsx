@@ -11,7 +11,6 @@ import { cn } from "../lib/cn";
 import {
   APPROVAL_POLICIES,
   approvalPolicyForSpecialist,
-  specialistUsesProtectedFullAccess,
   type ApprovalPolicy,
 } from "../lib/permissions";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
@@ -24,19 +23,6 @@ const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   full: ShieldAlert,
 };
 
-export function ScoutFullAccessIndicator() {
-  return (
-    <div
-      aria-label="Scout uses protected Full access"
-      title="Scout always uses Full access"
-      className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-warning"
-    >
-      <ShieldAlert className="size-3.5" />
-      Full access
-    </div>
-  );
-}
-
 /** Approval policy selector. Sandboxed "Approve for me" is the default. */
 export function ComposerPermissionPill() {
   const session = useSessionStore((s) => s.session);
@@ -47,7 +33,6 @@ export function ComposerPermissionPill() {
     ? s.conversations.find((conversation) => conversation.id === s.session?.id)?.specialist?.kind
     : null);
   const specialist = conversationSpecialist ?? activeSpecialist;
-  const protectedFullAccess = specialistUsesProtectedFullAccess(specialist);
   // The pill shows THIS chat's level — its own override when it has one, else
   // the account default — so switching chats never displays a sibling's mode.
   const mode = approvalPolicyForSpecialist(
@@ -113,11 +98,7 @@ export function ComposerPermissionPill() {
 
   const info = APPROVAL_POLICIES.find((item) => item.id === mode) ?? APPROVAL_POLICIES[1];
   const Icon = MODE_ICON[mode];
-  if (!isLocalTarget && !protectedFullAccess) return null;
-
-  if (protectedFullAccess && specialist) {
-    return <ScoutFullAccessIndicator />;
-  }
+  if (!isLocalTarget) return null;
 
   return (
     <div ref={ref} className="relative">

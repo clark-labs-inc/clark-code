@@ -254,20 +254,8 @@ impl Provider for LocalAgentProvider {
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let mut config = self.config()?.clone();
-        let scout_full_access = config.scout_cartography.is_some();
-        let collaboration_mode = if scout_full_access {
-            CollaborationMode::Default
-        } else {
-            options.collaboration_mode.unwrap_or_default()
-        };
-        // A Scout-bound provider spans the human-selected organization and
-        // workspace. Its Full Access authority is fixed by the product
-        // contract and cannot be weakened by stale or modified client state.
-        let session_mode = if scout_full_access {
-            Some("full".to_string())
-        } else {
-            options.mode.clone()
-        };
+        let collaboration_mode = options.collaboration_mode.unwrap_or_default();
+        let session_mode = options.mode.clone();
         let restored_goal = options.resume.as_ref().and_then(|resume| {
             resume.items.iter().rev().find_map(|item| match item {
                 agent_core::provider::ResumeItem::Goal { goal } => Some(goal.clone()),
@@ -459,31 +447,11 @@ impl Provider for LocalAgentProvider {
                 )
                 .await
         };
-        let feature_context_registration = if config.tools_enabled
-            && !self.isolation.disposable_writer()
-        {
-            self.context_provider.clone().map(|provider| {
-                let scout = config.scout_cartography.as_ref();
-                (
-                    provider,
-                    crate::tools::feature_context::FeatureContextBinding {
-                        repository_fingerprint: self.repository_fingerprint.clone(),
-                        organization_id: scout.map(|binding| binding.organization_id.to_string()),
-                        workspace_id: scout.map(|binding| binding.workspace_id.to_string()),
-                    },
-                )
-            })
-        } else {
-            None
-        };
         let registry = self.next_run_registry_mut()?;
         if config.tools_enabled && skills.enabled().next().is_some() {
             registry.enable_skills(skills.clone());
         } else {
             registry.disable_skills();
-        }
-        if let Some((provider, binding)) = feature_context_registration {
-            registry.enable_feature_context(provider, binding);
         }
         self.skills = skills;
         self.skill_environment_id = Some(skill_environment_id);
@@ -747,22 +715,6 @@ impl Provider for LocalAgentProvider {
         )
         .await
         .map_err(Error::Other)?;
-        let scout_turn =
-            crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, "scout:scout");
-        if scout_turn {
-            // An explicit Scout invocation is already a capability selection.
-            // Pre-activate its typed dependencies so the model does not have
-            // to rediscover them through `tool_search` before every bounded
-            // evidence action. This is especially important for remote
-            // sessions, where an unnecessary discovery turn can outlive the
-            // interactive run window.
-            let mut session = self.session.lock().await;
-            session.deferred_tools.extend(
-                crate::scout_policy::EVIDENCE_TOOLS
-                    .iter()
-                    .map(|name| (*name).to_string()),
-            );
-        }
         let security_deep_turn = crate::skills::invokes_skill(
             &run_skills,
             &input.blocks,
@@ -775,15 +727,13 @@ impl Provider for LocalAgentProvider {
                 .any(|skill| {
                     crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, skill)
                 });
-        // The conversation picker is not an entitlement source. Scout and
-        // Security pin their own execution routes below; Clark Code's gateway then
+        // The conversation picker is not an entitlement source. Security pins
+        // its execution route below; Clark Code's gateway then
         // admits those routes against the API key's current personal/workspace
         // coverage. Rejecting here merely because the base conversation uses
         // the included lane blocks paid workspace members before the
         // authoritative billing boundary can run.
-        let model_override = if scout_turn {
-            config.skill_model_overrides.get("scout")
-        } else if security_turn {
+        let model_override = if security_turn {
             config.skill_model_overrides.get("security")
         } else {
             None
@@ -873,103 +823,23 @@ impl Provider for LocalAgentProvider {
                 .ok()?;
             crate::platform::repository_context_section(&context)
         };
-        let approved_feature_pin = {
-            let session = self.session.lock().await;
-            session
-                .planning
-                .proposed_plan
-                .as_ref()
-                .filter(|plan| plan.status == agent_core::domain::ProposedPlanStatus::Approved)
-                .and_then(|plan| {
-                    plan.context_revisions
-                        .iter()
-                        .find(|revision| revision.context_kind == "enterprise_feature_context")
-                        .cloned()
-                })
-        };
-        let feature_context = async {
-            let provider = self.context_provider.as_ref()?;
-            let scout_binding = config.scout_cartography.as_ref();
-            if !config.project_knowledge_enabled
-                && self.repository_fingerprint.is_none()
-                && scout_binding.is_none()
-            {
-                return None;
-            }
-            let pinned_revision = approved_feature_pin.as_ref().map(|revision| {
-                crate::platform::FeatureContextRevision {
-                    effective_at_ms: revision.effective_at_ms,
-                    known_at_ms: revision.known_at_ms,
-                    selector_sha256: revision.selector_sha256.clone(),
-                }
-            });
-            let request = crate::platform::FeatureContextRequest {
-                action: crate::platform::FeatureContextQueryKind::Task,
-                query: approved_feature_pin
-                    .as_ref()
-                    .map(|revision| revision.query.clone())
-                    .unwrap_or_else(|| knowledge_query.clone()),
-                repository_fingerprint: self.repository_fingerprint.clone(),
-                organization_id: approved_feature_pin
-                    .as_ref()
-                    .and_then(|revision| revision.organization_id.clone())
-                    .or_else(|| scout_binding.map(|binding| binding.organization_id.to_string())),
-                workspace_id: approved_feature_pin
-                    .as_ref()
-                    .and_then(|revision| revision.workspace_id.clone())
-                    .or_else(|| scout_binding.map(|binding| binding.workspace_id.to_string())),
-                object_ids: Vec::new(),
-                target_object_ids: Vec::new(),
-                changed_since_ms: None,
-                max_depth: 2,
-                pinned_revision,
-                max_objects: 96,
-            };
-            provider.feature_context(&request).await.ok()
-        };
-
         // The tree may be shared with other agents, so git state is re-taken
         // per turn (a session-start snapshot would go stale) and lands in the
         // turn message, keeping the cached system-prompt prefix stable.
         let git_snapshot =
             crate::repository::working_tree_snapshot(self.executor.as_ref(), sandbox.root());
 
-        // Attachment extraction/vision, repository recall, enterprise feature
-        // context, and the git snapshot are independent read-only preflight
-        // work. Overlap them so
+        // Attachment extraction/vision, repository recall, and the git
+        // snapshot are independent read-only preflight work. Overlap them so
         // first-token latency is bounded by the slowest branch instead of
         // adding the durations together.
-        let (attachment_context, repository_context, feature_context, git_snapshot) = tokio::join!(
+        let (attachment_context, repository_context, git_snapshot) = tokio::join!(
             attachment_context,
             repository_context,
-            feature_context,
             git_snapshot
         );
         if let Some(section) = repository_context {
             context_sections.push(section);
-        }
-        if let Some(response) = feature_context {
-            let revisions = response
-                .packets
-                .iter()
-                .map(|packet| agent_core::domain::PlanContextRevision {
-                    context_kind: "enterprise_feature_context".into(),
-                    organization_id: Some(packet.organization_id.clone()),
-                    workspace_id: Some(packet.workspace_id.clone()),
-                    query: packet.query.clone(),
-                    effective_at_ms: packet.revision.effective_at_ms,
-                    known_at_ms: packet.revision.known_at_ms,
-                    selector_sha256: packet.revision.selector_sha256.clone(),
-                })
-                .collect();
-            self.session
-                .lock()
-                .await
-                .planning
-                .set_context_revisions(revisions);
-            if let Some(section) = crate::platform::feature_context_section(&response) {
-                context_sections.push(section);
-            }
         }
         if let Some(git) = git_snapshot {
             context_sections.push(git);
@@ -1019,7 +889,7 @@ impl Provider for LocalAgentProvider {
         // only when memories are on, and always off the turn's latency path.
         // Extraction quality may use a host-pinned model instead of inheriting
         // the active conversation model.
-        let memory_extraction = (!scout_turn && config.memories_enabled).then(|| {
+        let memory_extraction = config.memories_enabled.then(|| {
             let extraction_llm = config
                 .memory_extraction_model
                 .as_deref()
@@ -1034,16 +904,7 @@ impl Provider for LocalAgentProvider {
                     .and_then(crate::memory::global_memory_dir_for_scope),
             }
         });
-        let turn_system_prompt = if scout_turn {
-            let session = self.session.lock().await;
-            Some(
-                crate::provider::configuration_runtime::without_memory_section(
-                    &session.system_prompt,
-                ),
-            )
-        } else {
-            None
-        };
+        let turn_system_prompt = None;
 
         let tc = TurnContext {
             llm,
@@ -1068,7 +929,6 @@ impl Provider for LocalAgentProvider {
             compaction: config.compaction,
             plan_execution_reminders: config.plan_execution_reminders,
             hidden_plan_protocol: config.hidden_plan_protocol,
-            scout_turn,
             turn_system_prompt,
             model: effective_model,
             temperature: config.temperature,
@@ -1243,15 +1103,6 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
-        let mode = if self
-            .config
-            .as_ref()
-            .is_some_and(|config| config.scout_cartography.is_some())
-        {
-            "full".to_string()
-        } else {
-            mode
-        };
         let plan_mode = self.session.lock().await.planning.plan_mode();
         if !plan_mode {
             if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
@@ -1272,15 +1123,6 @@ impl Provider for LocalAgentProvider {
         _session: &SessionId,
         mode: CollaborationMode,
     ) -> Result<()> {
-        let mode = if self
-            .config
-            .as_ref()
-            .is_some_and(|config| config.scout_cartography.is_some())
-        {
-            CollaborationMode::Default
-        } else {
-            mode
-        };
         if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
             let preset = match mode {
                 CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,

@@ -23,7 +23,6 @@ pub mod method {
     pub const FS_CANONICALIZE: &str = "fs/canonicalize";
     pub const FS_WALK: &str = "fs/walk";
     pub const ENV_HOME: &str = "environment/home";
-    pub const ENV_CAPABILITY_CENSUS: &str = "environment/capabilityCensus";
     pub const PROCESS_START: &str = "process/start";
 }
 
@@ -94,17 +93,6 @@ pub struct MetaResult {
 pub struct CanonicalizeResult {
     /// Absolute path on the target machine after resolving symlinks.
     pub path: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SystemCapabilityCensusResult {
-    pub platform: String,
-    pub architecture: String,
-    pub executable_names: Vec<String>,
-    pub environment_variable_names: Vec<String>,
-    pub credential_surfaces: Vec<String>,
-    pub executables_truncated: bool,
-    pub environment_names_truncated: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

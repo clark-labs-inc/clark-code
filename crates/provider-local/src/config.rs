@@ -81,8 +81,8 @@ pub struct LocalConfig {
     pub models: Vec<ModelCapability>,
     pub model_fallback: Option<ModelFallbackPolicy>,
     pub memory_extraction_model: Option<String>,
-    /// Product-owned execution policies for named built-in workflows such as
-    /// `scout` and `security`. Missing entries inherit the conversation model.
+    /// Product-owned execution policies for named built-in workflows. Missing
+    /// entries inherit the conversation model.
     pub skill_model_overrides: HashMap<String, ModelPolicyConfig>,
     /// Bearer credential for the configured model endpoint.
     pub api_key: Option<String>,
@@ -125,7 +125,7 @@ pub struct LocalConfig {
     /// Hidden planning-eval seam: deferred tool schemas that should be visible
     /// on the first model request. Production omits this and starts empty.
     pub(crate) planning_eval_preactivated_tools: Vec<String>,
-    /// Expose registered read-only memory, organization, and Scout schemas on
+    /// Expose registered read-only memory and organization schemas on
     /// the first Plan Mode call so the model can explore unknown unknowns
     /// without guessing a `tool_search` query. Evals can disable this to keep
     /// legacy context-delivery treatments isolated.
@@ -204,8 +204,6 @@ pub struct LocalConfig {
     /// Bounded local multi-agent orchestration. Available by default, while its
     /// model-facing policy remains explicit-request-only.
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
-    pub(crate) scout_capsules: Option<crate::orchestration::ScoutCapsulePolicyConfig>,
-    pub(crate) scout_cartography: Option<crate::orchestration::ScoutCartographyHostConfig>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -438,8 +436,6 @@ impl LocalConfig {
             .unwrap_or(false);
         let computer_use_backend = ComputerUseBackend::from_extra(extra);
         let orchestration = crate::orchestration::OrchestrationConfig::from_extra(extra);
-        let scout_capsules = crate::orchestration::ScoutCapsulePolicyConfig::from_extra(extra);
-        let scout_cartography = crate::orchestration::ScoutCartographyHostConfig::from_extra(extra);
 
         let compaction = if extra
             .get("auto_compact")
@@ -528,8 +524,6 @@ impl LocalConfig {
             computer_use_enabled,
             computer_use_backend,
             orchestration,
-            scout_capsules,
-            scout_cartography,
         }
     }
 
@@ -723,52 +717,6 @@ mod tests {
     }
 
     #[test]
-    fn scout_cartography_binding_is_exact_and_host_owned() {
-        let organization_id = uuid::Uuid::new_v4();
-        let workspace_id = uuid::Uuid::new_v4();
-        let pc = ProviderConfig {
-            auth_token: Some("product_test_token".into()),
-            extra: json!({
-                "scout_cartography": {
-                    "organization_id": organization_id,
-                    "workspace_id": workspace_id,
-                    "identity_root": "/host-private/agent/scout",
-                    "platform": "linux",
-                    "architecture": "x86_64",
-                    "route_prefix": "/v1/cartography"
-                }
-            }),
-            ..Default::default()
-        };
-        let binding = LocalConfig::from_provider_config(&pc)
-            .scout_cartography
-            .expect("complete host binding");
-        assert_eq!(binding.organization_id, organization_id);
-        assert_eq!(binding.workspace_id, workspace_id);
-        assert_eq!(
-            binding.identity_root,
-            std::path::PathBuf::from("/host-private/agent/scout")
-        );
-
-        let relative = ProviderConfig {
-            extra: json!({
-                "scout_cartography": {
-                    "organization_id": organization_id,
-                    "workspace_id": workspace_id,
-                    "identity_root": ".agent/scout",
-                    "platform": "linux",
-                    "architecture": "x86_64",
-                    "route_prefix": "/v1/cartography"
-                }
-            }),
-            ..Default::default()
-        };
-        assert!(LocalConfig::from_provider_config(&relative)
-            .scout_cartography
-            .is_none());
-    }
-
-    #[test]
     fn parses_compaction_overrides() {
         let pc = ProviderConfig {
             extra: json!({
@@ -827,15 +775,14 @@ mod tests {
                 "planning_research_autoactivate": false,
                 "planning_eval_preactivated_tools": [
                     "memory",
-                    "organization_knowledge",
-                    "scout_enterprise_query"
+                    "organization_knowledge"
                 ]
             }),
             ..Default::default()
         };
         assert_eq!(
             LocalConfig::from_provider_config(&pc).planning_eval_preactivated_tools,
-            ["memory", "organization_knowledge", "scout_enterprise_query"]
+            ["memory", "organization_knowledge"]
         );
         assert!(!LocalConfig::from_provider_config(&pc).planning_research_autoactivate);
     }

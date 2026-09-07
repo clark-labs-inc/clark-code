@@ -98,7 +98,6 @@ describe("account-owned desktop state", () => {
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/shared/project" },
       undefined,
       undefined,
-      undefined,
       accountTwo,
     );
     expect(config.extra).toMatchObject({

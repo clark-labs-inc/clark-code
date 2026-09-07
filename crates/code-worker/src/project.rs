@@ -11,11 +11,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use base64::Engine;
 use code_host::{HeadlessPlugin, PluginContext, PluginError, PluginManifest};
-use exec_core::{collect_system_capabilities, Executor, LocalExecutor};
+use exec_core::{Executor, LocalExecutor};
 use exec_protocol::{
     method, CanonicalizeResult, MetaResult, PathParams, ProcessStartParams, ReadDirResult,
-    ReadResult, RenameParams, SystemCapabilityCensusResult, WalkParams, WalkResult, WireDirEntry,
-    WireWalkEntry, WriteNewResult, WriteParams,
+    ReadResult, RenameParams, WalkParams, WalkResult, WireDirEntry, WireWalkEntry, WriteNewResult,
+    WriteParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -91,18 +91,6 @@ async fn dispatch(
     request: ExecutorCall,
 ) -> Result<Value, PluginError> {
     match request.method.as_str() {
-        method::ENV_CAPABILITY_CENSUS => {
-            let census = collect_system_capabilities(None);
-            encode(SystemCapabilityCensusResult {
-                platform: census.platform,
-                architecture: census.architecture,
-                executable_names: census.executable_names,
-                environment_variable_names: census.environment_variable_names,
-                credential_surfaces: census.credential_surfaces,
-                executables_truncated: census.executables_truncated,
-                environment_names_truncated: census.environment_names_truncated,
-            })
-        }
         method::ENV_HOME => encode(CanonicalizeResult {
             path: root.to_string_lossy().into_owned(),
         }),

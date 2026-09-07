@@ -2,15 +2,10 @@ import { useId, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Activity,
-  ArrowRight,
   ChartColumn,
-  FileText,
+  ArrowRight,
   FlaskConical,
-  Gauge,
-  GitBranch,
   GitCompare,
-  Map,
   Radar,
   Repeat2,
   ShieldCheck,
@@ -44,16 +39,6 @@ export interface SpecialistStarter {
 }
 
 const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
-  spec: [
-    {
-      title: "Draft a complete specification",
-      detail: "Turn the idea into a living document with clear decisions and open questions.",
-      prompt: "Draft a complete specification for this idea. Start with the user problem, goals, non-goals, requirements, constraints, open questions, and a concrete acceptance checklist.",
-      tab: "document",
-      workflow: "spec:spec",
-      icon: FileText,
-    },
-  ],
   security: [
     {
       title: "Deep scan this repository",
@@ -78,32 +63,6 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
       tab: "posture",
       workflow: "security:security-scan",
       icon: ShieldCheck,
-    },
-  ],
-  scout: [
-    {
-      title: "Map this company",
-      detail: "Census authorized sources, repositories, systems, and dependencies.",
-      prompt: "Map the selected company. Begin with an adapter and authenticated-context census across authorized Git, cloud, data, identity, delivery, and observability systems; reconcile remote repositories with local checkouts; and show evidence and coverage gaps for the company graph.",
-      tab: "map",
-      workflow: "scout:scout",
-      icon: Map,
-    },
-    {
-      title: "Assess a proposed change",
-      detail: "Trace impact through the selected enterprise graph before implementation.",
-      prompt: "Assess the downstream impact of the change I describe against the company-wide Scout map and identify uncertain, stale, or inaccessible dependencies.",
-      tab: "changes",
-      workflow: "scout:scout",
-      icon: GitBranch,
-    },
-    {
-      title: "Simulate an outage",
-      detail: "Explore blast radius, fallbacks, and recovery evidence.",
-      prompt: "What breaks if the identity service is unavailable?",
-      tab: "simulations",
-      workflow: "scout:scout",
-      icon: Activity,
     },
   ],
   scientist: [
@@ -132,32 +91,6 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
       icon: ChartColumn,
     },
   ],
-  rsi: [
-    {
-      title: "Improve this system",
-      detail: "Set a measurable goal and keep only safe changes.",
-      prompt: "Recursively improve this system. First state the measurable goal, editable scope, protected guardrails, and stop conditions. Then inspect, propose one bounded change, implement it, measure it independently, and keep or undo it before repeating.",
-      tab: "evaluations",
-      workflow: "rsi:research",
-      icon: Repeat2,
-    },
-    {
-      title: "Optimize within guardrails",
-      detail: "Improve one result without letting protected checks regress.",
-      prompt: "Improve the most important measurable result in this project without worsening reliability, memory use, security, or existing tests. Show the recursive loop inline and undo any unsafe change.",
-      tab: "evaluations",
-      workflow: "rsi:research",
-      icon: Gauge,
-    },
-    {
-      title: "Continue from the best version",
-      detail: "Resume the loop from the strongest verified checkpoint.",
-      prompt: "Continue recursively improving from the best verified checkpoint. Reconfirm the objective and safety guardrails, make one small change at a time, and stop when the budget or target is reached.",
-      tab: "evaluations",
-      workflow: "rsi:research",
-      icon: ArrowRight,
-    },
-  ],
 };
 
 export function specialistStarters(kind: SpecialistKind): readonly SpecialistStarter[] {
@@ -176,11 +109,8 @@ export function SpecialistWelcome({
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
   const introductionCopy = {
-    spec: "Turn a feature idea into a complete specification. Clark keeps the document living while the conversation resolves requirements, tradeoffs, and open questions.",
-    scout: "Choose the company, then explicitly start a run. Company Scout maintains one shared map across authorized source, delivery, runtime, data, identity, ownership, and observability systems without treating the open folder as the company boundary.",
     security: "Choose a repository-level investigation. Security keeps coverage, validated findings, evidence, and remediation organized in the canvas.",
     scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",
-    rsi: "Describe what should improve and what must never get worse. RSI inspects the system, proposes one bounded code change, asks Clark Engineer to implement it, measures it independently, then keeps or undoes it and repeats.",
   }[kind] ?? definition.value;
 
   return (

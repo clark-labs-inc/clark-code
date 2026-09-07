@@ -1,14 +1,13 @@
 import { capabilityAccess, type ProductAccessProjection } from "./productAccess";
 import type { ConnectConfig } from "../core-bridge/bridge";
-import type { RemoteInfo } from "./remoteWorker";
-import type { ProductSpecialistTarget, ScoutCartographyTarget } from "./localAgent";
+import type { ProductSpecialistTarget } from "./localAgent";
 import { productModule } from "../product/productModule";
 
 // The renderer owns the presentation adapters for every specialist kind that
 // a signed product catalog may register. Product-specific policy and runtime
 // ownership stay in the downstream catalog; this list only gates whether the
 // foundation can safely render the catalog entry.
-const SUPPORTED_SPECIALIST_KINDS = ["spec", "scout", "security", "scientist", "rsi"] as const;
+const SUPPORTED_SPECIALIST_KINDS = ["security", "scientist"] as const;
 const SUPPORTED_SPECIALIST_KIND_SET = new Set<string>(SUPPORTED_SPECIALIST_KINDS);
 
 export type SpecialistKind = typeof SUPPORTED_SPECIALIST_KINDS[number];
@@ -18,7 +17,6 @@ export function isSupportedSpecialistKind(value: string): value is SpecialistKin
 }
 export type SpecialistWorkflow = string;
 export type SpecialistTab = string;
-export type ScoutTab = "map" | "changes" | "simulations" | "evidence" | "runs";
 export type SecurityTab = "posture" | "findings" | "zero-days" | "campaigns" | "scans";
 export type ScientistTab = "programs" | "campaigns" | "experiments" | "evidence" | "runs";
 
@@ -35,8 +33,6 @@ export interface SpecialistContext {
   studyId?: string;
   experimentId?: string;
   runId?: string;
-  /** Host-issued idempotency binding for one explicit human Scout start. */
-  scoutRunRequestId?: string;
   targetId?: string;
 }
 
@@ -52,28 +48,16 @@ const SPECIALIST_CONTEXT_STRING_FIELDS = [
   "studyId",
   "experimentId",
   "runId",
-  "scoutRunRequestId",
   "targetId",
 ] as const satisfies ReadonlyArray<Exclude<keyof SpecialistContext, "kind">>;
 
 /** Filesystem roots a conversation-bound specialist may inspect without
  * making its document workspace writable. */
 export function specialistReadRoots(
-  context: SpecialistContext | null | undefined,
-  recentProjects: string[],
+  _context: SpecialistContext | null | undefined,
+  _recentProjects: string[],
 ): string[] {
-  return context?.kind === "scout" ? recentProjects : [];
-}
-
-export interface RsiScoutContextSnapshot {
-  schemaVersion: 1;
-  workspaceId: string;
-  entries: Array<{
-    objectKind: string;
-    objectId: string;
-    classification: string;
-    attributes: Record<string, unknown>;
-  }>;
+  return [];
 }
 
 interface SkillIdentity {
@@ -334,7 +318,7 @@ export function productSpecialistTarget(
 ): ProductSpecialistTarget | undefined {
   if (
     !context?.organizationId?.trim()
-    || (context.kind !== "scout" && context.kind !== "security")
+    || context.kind !== "security"
   ) return undefined;
   const definition = SPECIALIST_REGISTRY.get(context.kind);
   if (!definition || definition.engine !== "skill") return undefined;
@@ -346,48 +330,11 @@ export function productSpecialistTarget(
   };
 }
 
-/** Bind the Scout run to the workspace selected by the first-party canvas.
- * The native host adds the private identity root; the model never receives
- * this binding as an argument. */
-export function scoutCartographyTarget(
-  context: SpecialistContext | null | undefined,
-  remote?: Pick<RemoteInfo, "arch"> | null,
-  targetId?: string | null,
-): ScoutCartographyTarget | undefined {
-  if (
-    context?.kind !== "scout"
-    || !context.organizationId?.trim()
-    || !context.workspaceId?.trim()
-  ) return undefined;
-  const architecture = remote?.arch?.trim();
-  const separator = architecture?.indexOf("-") ?? -1;
-  return {
-    organizationId: context.organizationId,
-    workspaceId: context.workspaceId,
-    ...(context.scoutRunRequestId?.trim()
-      ? { runRequestId: context.scoutRunRequestId.trim() }
-      : {}),
-    ...(separator > 0
-      ? {
-        platform: architecture!.slice(0, separator),
-        architecture: architecture!.slice(separator + 1),
-      }
-      : {}),
-    ...(targetId?.trim() ? { targetId: targetId.trim() } : {}),
-  };
-}
-
-export function newScoutRunRequestId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return `scout-run:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
 /** Build the WebView-owned portion of the internal provider configuration.
  * Native code replaces the executable and runtime paths before spawning. */
 export function specialistConnectConfig(
   context: SpecialistContext,
   cwd: string,
-  scoutContext?: RsiScoutContextSnapshot,
   remote?: { host: string; remoteRoot: string },
   advisorTrainingEnabled = false,
 ): ConnectConfig {
@@ -408,12 +355,7 @@ export function specialistConnectConfig(
       specialist: definition.kind,
       workflow,
       ...(context.organizationId ? { organizationId: context.organizationId } : {}),
-      ...(context.workspaceId || scoutContext?.workspaceId
-        ? { workspaceId: context.workspaceId || scoutContext!.workspaceId }
-        : {}),
-      ...(definition.kind === "rsi" && scoutContext
-        ? { scoutContext }
-        : {}),
+      ...(context.workspaceId ? { workspaceId: context.workspaceId } : {}),
       modelRoute: definition.runtime.modelRoute,
       ...(advisorTrainingEnabled ? { advisorTrainingEnabled: true } : {}),
       ...(remote ? { remote } : {}),

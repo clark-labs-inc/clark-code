@@ -132,11 +132,6 @@ impl Sandbox {
     /// and, after symlink resolution, lie within an approved root.
     pub fn resolve_existing(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
-        if is_host_private(&lexically_normalize(&joined)) {
-            return Err(format!(
-                "{path}: path is reserved for host-private Clark Code state"
-            ));
-        }
         let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
         self.ensure_read_contained(&canon)?;
         self.ensure_task_contained(&canon, path)?;
@@ -149,11 +144,6 @@ impl Sandbox {
     pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
         let normalized = lexically_normalize(&joined);
-        if is_host_private(&normalized) {
-            return Err(format!(
-                "{path}: path is reserved for host-private Clark Code state"
-            ));
-        }
         // Walk up to the first existing ancestor and canonicalize it.
         let mut ancestor = normalized.as_path();
         loop {
@@ -181,37 +171,6 @@ impl Sandbox {
         }
         self.ensure_write_contained_lexical(&normalized)?;
         self.ensure_task_contained(&normalized, path)?;
-        Ok(normalized)
-    }
-
-    /// Resolve an Clark Code-owned path for an internal host tool. Model-facing file
-    /// tools must use `resolve_for_write`, which rejects this namespace.
-    pub(crate) fn resolve_host_managed(&self, path: &str) -> Result<PathBuf, String> {
-        let joined = self.join(path);
-        let normalized = lexically_normalize(&joined);
-        if !is_host_private(&normalized) {
-            return Err(format!("{path}: path is not in host-managed desktop state"));
-        }
-        let mut ancestor = normalized.as_path();
-        loop {
-            match ancestor.parent() {
-                Some(parent) if parent.exists() => {
-                    let canonical = parent
-                        .canonicalize()
-                        .map_err(|error| format!("{}: {error}", parent.display()))?;
-                    self.ensure_write_contained(&canonical)?;
-                    break;
-                }
-                Some(parent) => ancestor = parent,
-                None => return Err(format!("{path}: no existing parent directory")),
-            }
-        }
-        if std::fs::symlink_metadata(&normalized)
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-        {
-            return Err(format!("{path}: refusing a host-managed symlink"));
-        }
-        self.ensure_write_contained_lexical(&normalized)?;
         Ok(normalized)
     }
 
@@ -281,25 +240,6 @@ fn lexically_normalize(path: &Path) -> PathBuf {
     out
 }
 
-fn is_host_private(path: &Path) -> bool {
-    let components = path
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    components
-        .windows(3)
-        .any(|window| window == [".agent", "scout", "enterprises"])
-        || components
-            .windows(4)
-            .any(|window| window == [".agent", "scout", "adapters", "private"])
-        || components
-            .windows(4)
-            .any(|window| window == [".agent", "scout", "capsules", "private"])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,46 +266,6 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let err = sb.resolve_existing("../etc/passwd").unwrap_err();
         assert!(err.contains("escapes") || err.contains("No such") || err.contains("passwd"));
-    }
-
-    #[test]
-    fn host_private_scout_state_is_not_model_readable_or_writable() {
-        let dir = temp_root();
-        let private = dir.path().join(".agent/scout/enterprises/v3-test/private");
-        std::fs::create_dir_all(&private).unwrap();
-        std::fs::write(private.join("signing-bootstrap"), b"secret").unwrap();
-        let trust = dir.path().join(".agent/scout/enterprises/v3-test/trust");
-        std::fs::create_dir_all(&trust).unwrap();
-        std::fs::write(trust.join("chain.json"), b"{}").unwrap();
-        let adapter_private = dir.path().join(".agent/scout/adapters/private");
-        std::fs::create_dir_all(&adapter_private).unwrap();
-        std::fs::write(adapter_private.join("vault.key"), b"secret").unwrap();
-        let capsule_private = dir.path().join(".agent/scout/capsules/private");
-        std::fs::create_dir_all(&capsule_private).unwrap();
-        std::fs::write(capsule_private.join("registry-v1.json"), b"secret").unwrap();
-        let sandbox = Sandbox::new(dir.path()).unwrap();
-
-        assert!(sandbox
-            .resolve_existing(".agent/scout/enterprises/v3-test/private/signing-bootstrap")
-            .is_err());
-        assert!(sandbox
-            .resolve_for_write(".agent/scout/enterprises/v3-test/private/replacement")
-            .is_err());
-        assert!(sandbox
-            .resolve_existing(".agent/scout/enterprises/v3-test/trust/chain.json")
-            .is_err());
-        assert!(sandbox
-            .resolve_for_write(".agent/scout/enterprises/v3-test/batches/forged.json")
-            .is_err());
-        assert!(sandbox
-            .resolve_existing(".agent/scout/adapters/private/vault.key")
-            .is_err());
-        assert!(sandbox
-            .resolve_existing(".agent/scout/capsules/private/registry-v1.json")
-            .is_err());
-        assert!(sandbox
-            .resolve_for_write(".agent/scout/capsules/private/replacement")
-            .is_err());
     }
 
     #[test]
@@ -475,14 +375,11 @@ mod tests {
     }
 
     #[test]
-    fn full_access_host_trust_lifts_containment_but_keeps_clark_private_guard() {
+    fn full_access_host_trust_lifts_containment() {
         let project = temp_root();
         let outside = tempfile::tempdir().unwrap();
         let outside_file = outside.path().join("notes.txt");
         std::fs::write(&outside_file, "host file").unwrap();
-        let private_dir = project.path().join(".agent/scout/enterprises/e1/private");
-        std::fs::create_dir_all(&private_dir).unwrap();
-
         let trusted = Sandbox::new(project.path()).unwrap().with_host_trust();
         assert!(trusted.host_trusted());
 
@@ -495,11 +392,6 @@ mod tests {
             .resolve_for_write(outside.path().join("new.txt").to_str().unwrap())
             .is_ok());
         assert!(trusted.resolve_for_write("src/new.rs").is_ok());
-
-        // Clark's own signing/identity material stays refused even here.
-        assert!(trusted
-            .resolve_existing(private_dir.join("signing-bootstrap").to_str().unwrap())
-            .is_err());
 
         // The default sandbox keeps every wall.
         let contained = Sandbox::new(project.path()).unwrap();

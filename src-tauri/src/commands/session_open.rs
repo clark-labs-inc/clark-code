@@ -1,5 +1,5 @@
 use agent_core::{Provider, ProviderConfig, SessionId, SessionOptions};
-use code_host::{CodingSessionExtensionRecipe, CodingSessionRecipe, ScoutCartographyRecipe};
+use code_host::{CodingSessionExtensionRecipe, CodingSessionRecipe};
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
@@ -33,49 +33,14 @@ fn remote_session_recipe(
         .transpose()
         .map_err(|error| format!("prepared coding hard constraints are invalid: {error}"))?
         .unwrap_or_default();
-    let scout_cartography = config
-        .extra
-        .get("scout_cartography")
-        .map(|value| {
-            let mut object = value
-                .as_object()
-                .cloned()
-                .ok_or("prepared Scout cartography recipe is invalid")?;
-            let identity_name = object
-                .get("identity_root")
-                .and_then(Value::as_str)
-                .and_then(|path| std::path::Path::new(path).file_name())
-                .and_then(|name| name.to_str())
-                .filter(|name| !name.is_empty())
-                .ok_or("prepared Scout identity scope is invalid")?;
-            let remote_identity_root = project_root
-                .join(".clark")
-                .join("scout")
-                .join("identity")
-                .join(identity_name);
-            object.insert(
-                "identity_root".into(),
-                Value::String(remote_identity_root.to_string_lossy().into_owned()),
-            );
-            // target_id is consumed by the product when deriving the private
-            // identity scope. The worker receives no SSH destination or local
-            // app-data path in its session recipe.
-            object.remove("target_id");
-            serde_json::from_value::<ScoutCartographyRecipe>(Value::Object(object))
-                .map_err(|error| format!("prepared Scout cartography recipe is invalid: {error}"))
-        })
-        .transpose()?;
     if specialist_kind.is_none()
         && hard_constraints.is_empty()
-        && scout_cartography.is_none()
         && extensions.is_empty()
     {
         return Ok(None);
     }
     let recipe = CodingSessionRecipe {
-        specialist_kind: specialist_kind
-            .or_else(|| scout_cartography.as_ref().map(|_| "scout".into())),
-        scout_cartography,
+        specialist_kind,
         hard_constraints,
         extensions,
     };
@@ -108,10 +73,7 @@ fn split_remote_renderer_extra(extra: Value) -> Result<(Value, Value), String> {
     let mut foundation = serde_json::Map::new();
     let mut product = serde_json::Map::new();
     for (key, value) in object {
-        if matches!(
-            key.as_str(),
-            "specialist_kind" | "scout_cartography" | "hard_constraints"
-        ) {
+        if matches!(key.as_str(), "specialist_kind" | "hard_constraints") {
             foundation.insert(key.clone(), value.clone());
         } else {
             product.insert(key.clone(), value.clone());
@@ -221,27 +183,6 @@ pub enum SessionOpenRequest {
     },
 }
 
-fn specialist_requires_full_access(config: &ProviderConfig) -> bool {
-    config.extra.get("scout_cartography").is_some()
-        || config
-            .extra
-            .get("specialist_kind")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "scout")
-        || config
-            .extra
-            .get("specialist")
-            .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "scout")
-        || config
-            .extra
-            .get("specialist")
-            .and_then(Value::as_object)
-            .and_then(|specialist| specialist.get("kind"))
-            .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "scout")
-}
-
 /// One native transaction that constructs, configures, connects, and binds a
 /// provider to exactly one session. No unbound provider is ever published in
 /// shared state, so concurrent opens cannot consume or overwrite each other.
@@ -256,10 +197,6 @@ pub async fn session_open(
     tracing::info!(provider = %provider_id, "session_open");
     let _account_lifecycle = state.account_lifecycle.read().await;
     let config = config.into_provider_config(&provider_id)?;
-    // Uninterrupted specialists own a native Full-access contract rather than
-    // a mutable WebView preference. Their hard constraints remain enforced by
-    // the provider before any permission mode is consulted.
-    let protected_full_access = specialist_requires_full_access(&config);
     let (mut provider, account, integration_pack) =
         open_provider(&provider_id, &app, state.inner(), config).await?;
     let account = match account {
@@ -287,10 +224,6 @@ pub async fn session_open(
                 return Err("session identity cannot be used as a workspace name".into());
             }
             options.session_id = Some(session_id.clone());
-            if protected_full_access {
-                options.mode = Some("full".into());
-                options.collaboration_mode = Some(agent_core::CollaborationMode::Default);
-            }
             let mut session = provider
                 .new_session(options)
                 .await
@@ -345,7 +278,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        remote_session_recipe, specialist_requires_full_access, split_remote_renderer_extra,
+        remote_session_recipe, split_remote_renderer_extra,
         unsupported_remote_renderer_field, SessionOpenRequest,
     };
 
@@ -367,52 +300,18 @@ mod tests {
     }
 
     #[test]
-    fn prepared_scout_recipe_moves_identity_into_the_remote_project() {
-        let config = ProviderConfig {
-            extra: json!({
-                "specialist_kind": "scout",
-                "scout_cartography": {
-                    "organization_id": "59b8fe20-6072-4c16-9dae-9d7cbbf2533c",
-                    "workspace_id": "2fac2db5-20d6-499c-b691-47ad19fc0ca8",
-                    "identity_root": "/Users/test/Library/Application Support/Clark/scout/binding-1",
-                    "platform": "linux",
-                    "architecture": "x86_64",
-                    "route_prefix": "/v1/system-cartography",
-                    "human_run_request_id": format!("scout-run:{}", "a".repeat(64)),
-                    "target_id": "client-neon"
-                }
-            }),
-            ..ProviderConfig::default()
-        };
-        let project_root = if cfg!(windows) {
-            std::path::PathBuf::from(r"C:\srv\neon")
-        } else {
-            std::path::PathBuf::from("/srv/neon")
-        };
-        let recipe = remote_session_recipe(&config, &project_root, Vec::new())
-            .unwrap()
-            .unwrap();
-        assert_eq!(recipe.specialist_kind.as_deref(), Some("scout"));
-        assert_eq!(
-            recipe.scout_cartography.unwrap().identity_root,
-            project_root.join(".clark/scout/identity/binding-1")
-        );
-    }
-
-    #[test]
     fn remote_renderer_config_splits_product_metadata_from_the_typed_recipe() {
         let config = ProviderConfig {
             extra: json!({
-                "specialist_kind": "scout",
+                "specialist_kind": "security",
                 "hard_constraints": ["no_delete", "no_github_push"],
-                "scout_cartography": { "workspace_id": "workspace-1" },
                 "cloud_advisor": { "organization_id": "org-1" }
             }),
             ..ProviderConfig::default()
         };
         assert_eq!(unsupported_remote_renderer_field(&config), None);
         let (foundation, product) = split_remote_renderer_extra(config.extra).unwrap();
-        assert_eq!(foundation["specialist_kind"], "scout");
+        assert_eq!(foundation["specialist_kind"], "security");
         assert_eq!(foundation["hard_constraints"][0], "no_delete");
         assert!(foundation.get("cloud_advisor").is_none());
         assert_eq!(product["cloud_advisor"]["organization_id"], "org-1");
@@ -452,21 +351,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn protected_specialist_bindings_require_full_access() {
-        for extra in [
-            json!({ "scout_cartography": { "workspace_id": "workspace-1" } }),
-            json!({ "specialist": "scout" }),
-            json!({ "specialist": { "kind": "scout" } }),
-        ] {
-            assert!(specialist_requires_full_access(&ProviderConfig {
-                extra,
-                ..ProviderConfig::default()
-            }));
-        }
-        assert!(!specialist_requires_full_access(&ProviderConfig {
-            extra: json!({ "specialist": { "kind": "security" } }),
-            ..ProviderConfig::default()
-        }));
-    }
 }

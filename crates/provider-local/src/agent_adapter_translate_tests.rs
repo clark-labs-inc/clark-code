@@ -263,7 +263,7 @@ fn model_tool_result_preserves_large_text_byte_for_byte() {
 #[test]
 fn model_visible_typed_details_survive_tool_result_translation() {
     let run_id = "019c9a79-72ba-7192-bd1b-8a2d3ad24dc1";
-    let outcome = crate::tools::ToolOutcome::ok("Started Scout.")
+    let outcome = crate::tools::ToolOutcome::ok("Started scan.")
         .with_model_visible_details(serde_json::json!({"run_id": run_id}));
     let result = tool_result_from_outcome(outcome, false, false);
 
@@ -274,10 +274,10 @@ fn model_visible_typed_details_survive_tool_result_translation() {
     assert_eq!(result.details["run_id"], run_id);
 
     let messages = [
-        assistant_call("scout-start"),
+        assistant_call("scan-start"),
         ca::AgentMessage::ToolResult {
-            tool_call_id: "scout-start".into(),
-            tool_name: "scout_enterprise".into(),
+            tool_call_id: "scan-start".into(),
+            tool_name: "security_scan_contract".into(),
             content: ca::ToolResultContent {
                 blocks: result.content,
             },

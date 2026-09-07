@@ -132,20 +132,6 @@ test("the design system has one token vocabulary", () => {
   );
 });
 
-test("legacy Scout wire identifiers stay in protocol crates", () => {
-  const lines = matchingLines(
-    /clark(?:\.scout|\.system-cartography|\/github|\/gitlab|\/aws|\/gcp|-scout-key)/i,
-    ["crates"],
-  );
-  assert.ok(lines.length > 0);
-  for (const line of lines) {
-    assert.match(
-      line,
-      /crates\/(?:scout-|agent-orchestration\/src\/scout\/|provider-local\/examples\/scout_benchmark\/)/,
-    );
-  }
-});
-
 test("the README is a clean Clark Code introduction", () => {
   const readme = readFileSync(resolve(root, "README.md"), "utf8");
   assert.match(readme, /^# Clark Code$/m);

@@ -227,7 +227,7 @@ describe("sidebar conversation mutations", () => {
   });
 
   it("deletes an opening specialist conversation and closes its lens", async () => {
-    useSpecialistStore.getState().open("scout");
+    useSpecialistStore.getState().open("security");
     useSessionStore.setState({
       connecting: true,
       opening: {
@@ -239,7 +239,7 @@ describe("sidebar conversation mutations", () => {
       conversations: [{
         ...conversation("opening"),
         provider: "specialist",
-        specialist: { kind: "scout" },
+        specialist: { kind: "security" },
       }],
       composerPrefill: { text: "stale retry" },
       sideQuestion: {

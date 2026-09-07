@@ -132,13 +132,6 @@ impl PlanningState {
         plan
     }
 
-    pub fn set_context_revisions(
-        &mut self,
-        revisions: Vec<agent_core::domain::PlanContextRevision>,
-    ) {
-        self.context_revisions = revisions;
-    }
-
     /// Record Clark Code's hidden Plan Mode artifact. The model-facing protocol is
     /// deliberately just Markdown; durable typed execution contracts remain a
     /// compatibility path for older transcripts and explicit structured
@@ -360,7 +353,7 @@ pub(crate) fn plan_mode_instruction_for(
              The plan must leave the implementer no design decisions hidden behind vague verbs.\n\
              {}\
              5. Audit coverage before proposing. Privately inventory every atomic obligation from the \n\
-             user, repository evidence, scout findings, and supplied memory. Preserve exact identifiers, \n\
+             user, repository evidence, organization knowledge, and supplied memory. Preserve exact identifiers, \n\
              repetitions, ordering constraints, negative paths, rollback requirements, and metrics. Map \n\
              every obligation to a typed step and observable completion evidence; revise the contract if \n\
              any obligation is uncovered. Do not expose private chain-of-thought or a research diary.\n\
@@ -368,7 +361,7 @@ pub(crate) fn plan_mode_instruction_for(
              When decision-complete, emit exactly one `<proposed_plan>` block containing a concise Markdown \n\
              rendering of the implementation plan. Include exact files and interfaces, dependencies and \n\
              ordering, edge cases and rollback, and observable verification. Preserve every obligation from \n\
-             the user, repository evidence, scout findings, and supplied memory, but do not expose a private \n\
+             the user, repository evidence, organization knowledge, and supplied memory, but do not expose a private \n\
              chain-of-thought or research diary. End the planning turn after the block and wait for the user's \n\
              decision. Otherwise end with the smallest necessary user question. Never emit a plan merely to \n\
              report research, and never begin implementation yourself.",
@@ -398,15 +391,15 @@ pub(crate) fn plan_mode_instruction_for(
          2. Intent: ask only questions that materially change behavior, scope, or trade-offs; batch them and recommend a default.\n\
          3. Implementation: identify exact files and interfaces, reuse or deletion, data flow, edge cases, migration, and verification.\n\
          {}\
-         5. Coverage audit: privately inventory every atomic obligation from the user, repository, scout \n\
-         findings, and supplied memory. Preserve exact names, repetitions, ordering, negative paths, rollback, \n\
+         5. Coverage audit: privately inventory every atomic obligation from the user, repository, organization \n\
+         knowledge, and supplied memory. Preserve exact names, repetitions, ordering, negative paths, rollback, \n\
          and metrics. Map each obligation to a typed step and observable evidence; revise before proposing if \n\
          anything is uncovered. Do not expose private chain-of-thought or a research diary.\n\
          \n\
          When no design decision remains, emit exactly one hidden `<proposed_plan>` block. The block must be \n\
          concise Markdown with ordered implementation steps, exact files and interfaces, dependencies, edge \n\
          cases, rollback or compatibility behavior, and observable verification. Preserve every atomic user, \n\
-         repository, scout, and memory obligation in those steps. Do not expose private chain-of-thought, a \n\
+         repository, organization knowledge, and memory obligation in those steps. Do not expose private chain-of-thought, a \n\
          research diary, alternatives, or out-of-scope sections. The host removes the block from the visible \n\
          transcript and stores it as a first-class proposal. End the turn after the block and wait for approval. \n\
          Otherwise ask the smallest necessary question. Never implement in Plan Mode.\n</collaboration_mode>",
@@ -1255,25 +1248,6 @@ mod tests {
         assert!(note.contains("plan-1"));
         assert!(note.contains("Change the boundary"));
         assert!(!note.contains("plan.md"));
-    }
-
-    #[test]
-    fn proposal_pins_host_fetched_context_revision() {
-        let mut state = PlanningState::default();
-        let revision = agent_core::domain::PlanContextRevision {
-            context_kind: "enterprise_feature_context".into(),
-            organization_id: Some("org-1".into()),
-            workspace_id: Some("workspace-1".into()),
-            query: "change checkout".into(),
-            effective_at_ms: 10,
-            known_at_ms: 11,
-            selector_sha256: "a".repeat(64),
-        };
-        state.set_context_revisions(vec![revision.clone()]);
-
-        let proposal = state.next_markdown_proposal("Implement checkout".into());
-
-        assert_eq!(proposal.context_revisions, vec![revision]);
     }
 
     #[test]

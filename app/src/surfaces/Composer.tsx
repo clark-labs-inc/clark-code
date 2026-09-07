@@ -221,7 +221,6 @@ function ScopedComposer() {
     activeSpecialist
     && productModule().specialistWorkspace?.isConversationBound(activeSpecialist),
   );
-  const startsScoutRun = activeSpecialist === "scout" && !session;
   const [sandboxObservation, setSandboxObservation] =
     useState<LocalSandboxObservation | null>(null);
   const sandboxStatus = sandboxStatusForCwd(sandboxObservation, cwd);
@@ -1096,7 +1095,7 @@ function ScopedComposer() {
               onFiles={(files) => void addFiles(files)}
             />
             <ComposerPermissionPill />
-            {activeSpecialist !== "scout" && <ComposerCollaborationPill />}
+            <ComposerCollaborationPill />
           </div>
 
           <div className="flex shrink-0 items-center gap-2.5">
@@ -1120,7 +1119,6 @@ function ScopedComposer() {
               hasContent={hasContent}
               canSend={canSend}
               shouldPickProjectFolder={submission.shouldPickProjectFolder}
-              startsScoutRun={startsScoutRun}
               queuedTitle={branding.queuedTitle}
               onCancel={() => void cancelActive()}
               onSubmit={() => void submit()}

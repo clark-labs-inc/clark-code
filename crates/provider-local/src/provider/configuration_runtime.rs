@@ -242,12 +242,6 @@ fn replace_memory_section(prompt: &mut String, section: Option<&str>) {
     }
 }
 
-pub(super) fn without_memory_section(prompt: &str) -> String {
-    prompt
-        .find(MEMORY_SECTION_MARKER)
-        .map_or_else(|| prompt.to_string(), |index| prompt[..index].to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,13 +255,4 @@ mod tests {
         assert_eq!(prompt, "base");
     }
 
-    #[test]
-    fn scout_turn_prompt_excludes_the_complete_memory_section() {
-        let prompt =
-            "base instructions\n# Skills\nscout catalog\n# Memory\nguidance\npersonal facts";
-        assert_eq!(
-            without_memory_section(prompt),
-            "base instructions\n# Skills\nscout catalog"
-        );
-    }
 }

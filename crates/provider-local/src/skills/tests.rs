@@ -281,72 +281,6 @@ async fn bundled_sentry_skill_is_read_only_and_resolves_through_its_alias() {
 }
 
 #[tokio::test]
-async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
-    let temp = tempfile::tempdir().unwrap();
-    let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
-    catalog.resolve_capabilities(&HashSet::from(["bash".to_string()]), &[]);
-    assert!(catalog.resolve_name("scout").is_err());
-
-    catalog.resolve_capabilities(
-        &HashSet::from([
-            "scout_capabilities".to_string(),
-            "scout_repository_census".to_string(),
-            "scout_adapter".to_string(),
-            "scout_enterprise".to_string(),
-            "scout_enterprise_query".to_string(),
-        ]),
-        &[],
-    );
-    let scout = catalog.resolve_name("scout").unwrap();
-    assert_eq!(scout.name, "scout:scout");
-    assert!(
-        !scout.allow_implicit_invocation,
-        "Scout must be explicitly selected so its host-pinned model applies before the first turn"
-    );
-    assert!(invokes_skill(
-        &catalog,
-        &[ContentBlock::text("$scout:scout map AWS")],
-        "$scout:scout map AWS",
-        "scout:scout",
-    ));
-    assert!(invokes_skill(
-        &catalog,
-        &[ContentBlock::skill_reference(
-            &scout.id,
-            &scout.revision,
-            "Scout",
-        )],
-        "map AWS",
-        "scout:scout",
-    ));
-    assert!(!invokes_skill(
-        &catalog,
-        &[ContentBlock::text("$github:github inspect AWS")],
-        "$github:github inspect AWS",
-        "scout:scout",
-    ));
-    let body = catalog.read(&LocalExecutor, scout).await.unwrap();
-    assert!(body.contains("Scout's model is not user-configurable"));
-    assert!(body.contains("Never print, return, hash, or persist secret values"));
-    assert!(body.contains("Call `scout_capabilities`"));
-    assert!(body.contains("Call `scout_enterprise\n   enroll`"));
-    assert!(body.contains("`scout_enterprise submit_adapter_receipt`"));
-    assert!(body.contains("with only that retained `task_id`\n   and `receipt_id`"));
-    assert!(body.contains("Concurrent collectors share nothing directly"));
-    assert!(body.contains("Private key bytes never enter tool"));
-    assert!(body.contains("Use `scout_enterprise_query snapshot`"));
-    assert!(body.contains("Collectors observe"));
-    assert!(body.contains("There is exactly one run id"));
-    assert!(body.contains("scout_repository_census collect"));
-    assert!(!body.contains("scout_ledger"));
-    assert!(!body.contains("scout_probe"));
-    assert!(!body.contains("scout_measure"));
-    assert!(body.contains("Exhaust the declared business-system graph, not the host filesystem"));
-    assert!(body.contains("Stop only when every frontier row is terminal"));
-    assert!(body.contains("The simulation model must name business actors"));
-}
-
-#[tokio::test]
 async fn bundled_security_skill_requires_its_contract_tool_and_explicit_selection() {
     let temp = tempfile::tempdir().unwrap();
     let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
@@ -415,28 +349,6 @@ fn bundled_security_diff_openai_metadata_matches_runtime_dependency() {
     assert_eq!(
         metadata["policy"]["allow_implicit_invocation"].as_bool(),
         Some(false)
-    );
-}
-
-#[test]
-fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
-    let metadata: serde_yaml::Value =
-        serde_yaml::from_str(include_str!("../../skills/scout/agents/openai.yaml")).unwrap();
-    let tools = metadata["dependencies"]["tools"]
-        .as_sequence()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["value"].as_str().unwrap())
-        .collect::<HashSet<_>>();
-    assert_eq!(
-        tools,
-        HashSet::from([
-            "scout_capabilities",
-            "scout_repository_census",
-            "scout_adapter",
-            "scout_enterprise",
-            "scout_enterprise_query",
-        ])
     );
 }
 

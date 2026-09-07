@@ -5,12 +5,12 @@ import { SpecialistConversationRow } from "./SpecialistNavigation";
 import navigationSource from "./SpecialistNavigation.tsx?raw";
 
 const conversation = {
-  id: "scout-1",
+  id: "security-1",
   title: "Customer segmentation",
   provider: "specialist" as const,
   createdAt: 1,
   updatedAt: 2,
-  specialist: { kind: "scout" as const },
+  specialist: { kind: "security" as const },
 };
 
 describe("SpecialistConversationRow", () => {

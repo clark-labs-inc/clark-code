@@ -13,31 +13,6 @@ const specialistCatalog = {
   },
   manifests: [
     {
-      kind: "scout",
-      version: "1.0.0",
-      label: "Scout",
-      headline: "Map how your systems really work",
-      value: "Evidence-backed system maps and change impact.",
-      engine: "skill",
-      entitlement: "subscription",
-      modelPolicy: "specialist",
-      defaultTab: "map",
-      defaultWorkflow: "scout:scout",
-      skillBindings: { "scout:scout": "scout:scout" },
-      tabs: [
-        { id: "map", label: "System map" },
-        { id: "changes", label: "Changes" },
-        { id: "simulations", label: "Simulations" },
-        { id: "evidence", label: "Evidence" },
-        { id: "runs", label: "Runs" },
-      ],
-      slashCommands: [{
-        prefixes: ["/scout", "$scout:scout"],
-        tab: "map",
-        workflow: "scout:scout",
-      }],
-    },
-    {
       kind: "security",
       version: "1.0.0",
       label: "Security",
@@ -80,39 +55,6 @@ const specialistCatalog = {
         },
       ],
     },
-    {
-      kind: "rsi",
-      version: "1.0.0",
-      label: "RSI",
-      headline: "Turn requests into verified engineering actions",
-      value: "An RSI controller grounds the request, Clark Engineer acts, and typed receipts preserve authority and evidence.",
-      engine: "research_runtime",
-      runtime: { modelRoute: "clark_free" },
-      entitlement: "subscription",
-      modelPolicy: "specialist",
-      defaultTab: "evaluations",
-      defaultWorkflow: "rsi:research",
-      skillBindings: {},
-      tabs: [
-        { id: "worlds", label: "Worlds" },
-        { id: "evaluations", label: "Evaluations" },
-        { id: "runs", label: "Runs" },
-        { id: "frontier", label: "Frontier" },
-        { id: "evidence", label: "Evidence" },
-      ],
-      slashCommands: [
-        { prefixes: ["/rsi", "/eval-research"], tab: "evaluations", workflow: "rsi:research" },
-        { prefixes: ["/create-evals"], tab: "evaluations", workflow: "rsi:create-evals" },
-        { prefixes: ["/build-world"], tab: "worlds", workflow: "rsi:build-world" },
-        { prefixes: ["/stress-test", "/simulate", "/simulator"], tab: "frontier", workflow: "rsi:stress-test" },
-        {
-          prefixes: ["/regression-sim"],
-          tab: "frontier",
-          workflow: "rsi:regression",
-          promptPrefix: "Build a deterministic regression evaluation world. ",
-        },
-      ],
-    },
   ],
 };
 
@@ -123,8 +65,7 @@ installProductModule({
   specialistCatalog,
   localAgent: {
     ...neutralProduct.localAgent,
-    providerExtra: ({ specialist }) => specialist
-      && (specialist.kind === "scout" || specialist.kind === "security")
+    providerExtra: ({ specialist }) => specialist?.kind === "security"
       ? {
           cloud_advisor: {
             organization_id: specialist.organizationId,
@@ -135,8 +76,5 @@ installProductModule({
           },
         }
       : {},
-  },
-  specialistWorkspace: {
-    isConversationBound: (kind) => kind === "scout",
   },
 });

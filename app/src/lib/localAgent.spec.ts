@@ -106,52 +106,28 @@ describe("product-supplied model settings", () => {
 describe("product specialist extension binding", () => {
   it("passes the conversation recipe to native product capability composition", () => {
     const config = localConnectConfig(
-      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/scout-document" },
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/security-document" },
       undefined,
-      undefined,
-      "scout",
+      "security",
       "id:account",
     );
 
     expect(config.extra).toMatchObject({
-      specialist_kind: "scout",
+      specialist_kind: "security",
     });
     expect(config.extra).not.toHaveProperty("hard_constraints");
-  });
-
-  it("exposes account-scoped recent checkouts to Scout as read-only census roots", () => {
-    const config = localConnectConfig(
-      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/scout-conversation" },
-      undefined,
-      {
-        organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        workspaceId: "028f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-      },
-      "scout",
-      "id:account",
-      undefined,
-      undefined,
-      ["/repos/payments", "/repos/identity", "/repos/payments", ""],
-    );
-
-    expect(config.extra?.sandbox_read_roots).toEqual([
-      "/repos/payments",
-      "/repos/identity",
-    ]);
-    expect(config.cwd).toBe("/managed/scout-conversation");
   });
 
   it("keeps product provider extras empty in the neutral composition", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/project" },
       undefined,
-      undefined,
-      "scout",
+      "security",
       "id:account",
       {
         organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        kind: "scout",
-        workflow: "scout:map",
+        kind: "security",
+        workflow: "security:security-scan",
       },
     );
     expect(config.extra).toMatchObject({ model: "local-model" });
@@ -161,7 +137,6 @@ describe("product specialist extension binding", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/local" },
       { worker_handle: "worker-remote", cwd: "/remote/project" },
-      undefined,
       "security",
       "id:account",
       {

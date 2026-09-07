@@ -19,25 +19,8 @@ const outDir = process.env.SPECIALIST_E2E_OUTPUT_DIR
 const desktopViewport = { width: 1440, height: 1000 };
 const mobileViewport = { width: 375, height: 812 };
 const orgId = "11111111-1111-4111-8111-111111111111";
-const workspaceId = "22222222-2222-4222-8222-222222222222";
 
 const specialists = [
-  {
-    kind: "scout",
-    label: "Scout",
-    starter: "Simulate an outage",
-    promptIncludes: "identity service",
-    workflow: "scout:scout",
-    provider: "local",
-    skill: "scout:scout",
-    tabs: [
-      ["map", "Observed system"],
-      ["changes", "Observed changes"],
-      ["simulations", "Impact simulations"],
-      ["evidence", "Evidence ledger"],
-      ["runs", "Latest recorded activity"],
-    ],
-  },
   {
     kind: "security",
     label: "Security",
@@ -53,16 +36,6 @@ const specialists = [
       ["campaigns", "Remediation campaigns"],
       ["scans", "Scan history"],
     ],
-  },
-  {
-    kind: "rsi",
-    label: "RSI",
-    starter: "Improve this system",
-    promptIncludes: "Recursively improve",
-    workflow: "rsi:research",
-    provider: "specialist",
-    skill: null,
-    tabs: [],
   },
 ];
 
@@ -205,16 +178,10 @@ async function installProbe(page) {
 }
 
 async function presentation(page, specialist) {
-  return specialist.kind === "rsi"
-    ? page.getByRole("region", { name: "RSI recursive improvement loop" })
-    : page.getByRole("region", { name: `${specialist.kind} specialist analysis` });
+  return page.getByRole("region", { name: `${specialist.kind} specialist analysis` });
 }
 
 async function verifyCanvas(page, specialist) {
-  if (specialist.tabs.length === 0) {
-    check(await page.getByLabel("Show RSI sidebar").count() === 0, "RSI exposed a parallel canvas");
-    return;
-  }
   await page.getByLabel(`Show ${specialist.label} sidebar`).click();
   const canvas = page.getByRole("region", { name: `${specialist.label} canvas` });
   await canvas.waitFor({ state: "visible" });
@@ -227,21 +194,14 @@ async function verifyCanvas(page, specialist) {
 
 async function verifyExample(page, specialist) {
   await page.locator(`[data-qa="specialist-intro-${specialist.kind}-example"]`).click();
-  if (specialist.kind === "rsi") {
-    const example = page.getByRole("region", { name: "RSI recursive improvement loop" });
-    await example.waitFor();
-    await example.getByLabel("Show RSI loop details").click();
-    await example.getByLabel("Hide RSI loop details").waitFor();
-  } else {
-    const example = page.getByRole("region", { name: `${specialist.kind} example analysis` });
-    await example.waitFor();
-    for (const view of ["Evidence", "Run"]) {
-      await example.getByRole("tab", { name: view, exact: true }).click();
-      check(
-        await example.getByRole("tab", { name: view, exact: true }).getAttribute("aria-selected") === "true",
-        `${specialist.label} example did not select ${view}`,
-      );
-    }
+  const example = page.getByRole("region", { name: `${specialist.kind} example analysis` });
+  await example.waitFor();
+  for (const view of ["Evidence", "Run"]) {
+    await example.getByRole("tab", { name: view, exact: true }).click();
+    check(
+      await example.getByRole("tab", { name: view, exact: true }).getAttribute("aria-selected") === "true",
+      `${specialist.label} example did not select ${view}`,
+    );
   }
   await page.locator(`[data-qa="specialist-intro-${specialist.kind}-start"]`).click();
 }
@@ -275,7 +235,7 @@ try {
     const catalogKinds = await page.evaluate(
       () => window.__specialistMatrixProbe.catalog.manifests.map((manifest) => manifest.kind),
     );
-    check(JSON.stringify(catalogKinds) === JSON.stringify(["scout", "security", "rsi"]), "Catalog kinds drifted from the product contract");
+    check(JSON.stringify(catalogKinds) === JSON.stringify(["security"]), "Catalog kinds drifted from the product contract");
     checks.push(`${specialist.kind}_catalog_and_ready_state`);
 
     await verifyCanvas(page, specialist);
@@ -300,23 +260,14 @@ try {
       window.__agentDesktopProfiling.store.getState().snapshot.runs,
     ).some((run) => run.status === "running"));
     checks.push(`${specialist.kind}_optimistic_start_and_running_state`);
-    const commentary = specialist.kind === "rsi"
-      ? "I’m improving the system now. I’ll keep a change only when the objective improves and every safety guardrail still passes."
-      : "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.";
+    const commentary = "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.";
     await page.getByText(commentary, { exact: true }).waitFor({ timeout: 10_000 });
     const livePresentation = await presentation(page, specialist);
     await livePresentation.waitFor({ timeout: 10_000 });
-    if (specialist.kind === "rsi") {
-      await livePresentation.getByLabel("Show RSI loop details").click();
-      await livePresentation.getByLabel("Hide RSI loop details").waitFor();
-    } else {
-      for (const view of ["Evidence", "Run"]) {
-        await livePresentation.getByRole("tab", { name: view, exact: true }).click();
-      }
+    for (const view of ["Evidence", "Run"]) {
+      await livePresentation.getByRole("tab", { name: view, exact: true }).click();
     }
-    const finalText = specialist.kind === "rsi"
-      ? "This improvement run is complete. The best safe version and its receipts are retained in the inline loop above."
-      : "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.";
+    const finalText = "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.";
     await page.getByText(finalText, { exact: true }).waitFor({ timeout: 10_000 });
     await page.screenshot({ path: screenshotPath(specialist.kind, "complete"), animations: "disabled" });
 
@@ -349,20 +300,8 @@ try {
     check(deliveredSkill === specialist.skill, `${specialist.label} delivered the wrong skill/runtime prompt contract`);
     check(blocks.find((block) => block.type === "text")?.text === submittedPrompt, `${specialist.label} changed the human prompt at the provider boundary`);
     check(boundary.probe.promptCalls[0].attachmentCount === 0, `${specialist.label} attached unexpected files`);
-    if (specialist.kind === "scout") {
-      check(boundary.conversation.specialist.workspaceId === workspaceId, "Scout lost the selected company map");
-      check(boundary.conversation.specialist.scoutRunRequestId?.startsWith("scout-run:"), "Scout did not mint a human run request id");
-      check(successfulOpen.config.extra.scout_cartography.workspace_id === workspaceId, "Scout cartography authority missed the provider config");
-      check(successfulOpen.config.extra.cloud_advisor.workflow === specialist.workflow, "Scout advisor workflow drifted");
-    } else if (specialist.kind === "security") {
-      check(boundary.conversation.specialist.repositoryId === "repository-1", "Security lost repository authority");
-      check(successfulOpen.config.extra.cloud_advisor.workflow === specialist.workflow, "Security advisor workflow drifted");
-    } else {
-      check(successfulOpen.config.extra.specialist === "rsi", "RSI did not cross the research runtime boundary");
-      check(successfulOpen.config.extra.workflow === "rsi:research", "RSI research workflow drifted");
-      check(successfulOpen.config.extra.modelRoute === "clark_free", "RSI model route drifted");
-      check(!("scoutContext" in successfulOpen.config.extra), "RSI invented cloud evidence for a local-only preview account");
-    }
+    check(boundary.conversation.specialist.repositoryId === "repository-1", "Security lost repository authority");
+    check(successfulOpen.config.extra.cloud_advisor.workflow === specialist.workflow, "Security advisor workflow drifted");
     checks.push(`${specialist.kind}_provider_authority_projection_and_terminal_state`);
 
     await page.getByRole("button", { name: "New session", exact: true }).click();
@@ -424,7 +363,7 @@ try {
   await freePage.getByRole("button", { name: "New session", exact: true }).click();
   const specialistDisclosure = freePage.getByRole("button", { name: "Specialist lenses", exact: true });
   check(await specialistDisclosure.getAttribute("aria-expanded") === "false", "ordinary chat should collapse specialist navigation");
-  check(await freePage.locator('[data-qa="specialist-nav-scout"]').count() === 0, "collapsed specialist navigation should hide lens rows");
+  check(await freePage.locator('[data-qa^="specialist-nav-"]').count() === 0, "collapsed specialist navigation should hide lens rows");
   await freePage.screenshot({ path: path.join(outDir, "ordinary-chat-sidebar.png"), animations: "disabled" });
   checks.push("ordinary_chat_collapses_specialist_navigation");
   await freeContext.close();
@@ -441,7 +380,7 @@ try {
     product_entry: productEntry,
     source_revision: sourceRevision,
     source_dirty: sourceDirty,
-    catalog_kinds: ["scout", "security", "rsi"],
+    catalog_kinds: ["security"],
     provider: { kind: "mock", model: null, paid_calls: 0 },
     viewports: { desktop: desktopViewport, mobile: mobileViewport },
     results,

@@ -510,35 +510,4 @@ mod tests {
         assert_eq!(request.roots, ["/srv/shared/api", "/srv/shared/docs"]);
     }
 
-    #[test]
-    fn scout_recipe_enables_the_remote_enterprise_boundary() {
-        let project = std::path::Path::new("/srv/client/neon");
-        let recipe = CodingSessionRecipe {
-            specialist_kind: Some("scout".into()),
-            hard_constraints: Vec::new(),
-            scout_cartography: Some(code_host::ScoutCartographyRecipe {
-                organization_id: "59b8fe20-6072-4c16-9dae-9d7cbbf2533c".into(),
-                workspace_id: "2fac2db5-20d6-499c-b691-47ad19fc0ca8".into(),
-                identity_root: project.join(".clark/scout/identity/binding"),
-                platform: "linux".into(),
-                architecture: "x86_64".into(),
-                route_prefix: "/v1/system-cartography".into(),
-                human_run_request_id: Some(format!("scout-run:{}", "a".repeat(64))),
-            }),
-            extensions: Vec::new(),
-        };
-        let mut config =
-            ProviderProfile::default().provider_config(ExecutionResidency::RemoteWorker);
-
-        recipe.validate(project).unwrap();
-        apply_session_recipe(&mut config, &recipe).unwrap();
-
-        assert_eq!(config.extra["specialist_kind"], "scout");
-        assert_eq!(
-            config.extra["scout_cartography"]["workspace_id"],
-            "2fac2db5-20d6-499c-b691-47ad19fc0ca8"
-        );
-        assert_eq!(config.extra["orchestration"]["enabled"], true);
-        assert!(config.extra.get("system_prompt_override").is_none());
-    }
 }

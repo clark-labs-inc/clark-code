@@ -72,13 +72,13 @@ describe("composer drafts", () => {
     expect(loadComposerDraft(owner, "created-security-session")).toBe("");
   });
 
-  it("keeps Scout and Security pre-conversation drafts cloud-key isolated", () => {
-    const scout = specialistStartComposerDraftId("scout");
+  it("keeps Scientist and Security pre-conversation drafts cloud-key isolated", () => {
+    const scientist = specialistStartComposerDraftId("scientist");
     const security = specialistStartComposerDraftId("security");
-    saveComposerDraft(owner, scout, "map the production edge");
+    saveComposerDraft(owner, scientist, "design a replication");
     saveComposerDraft(owner, security, "deep scan auth");
 
-    expect(loadComposerDraft(owner, scout)).toBe("map the production edge");
+    expect(loadComposerDraft(owner, scientist)).toBe("design a replication");
     expect(loadComposerDraft(owner, security)).toBe("deep scan auth");
     expect(loadComposerDraft(owner, null)).toBe("");
   });
@@ -90,7 +90,7 @@ describe("composer drafts", () => {
     );
 
     expect(loadComposerDraft(owner, null)).toBe("");
-    expect(specialistStartComposerDraftId("rsi")).toBe("specialist:rsi:new.v3");
+    expect(specialistStartComposerDraftId("scientist")).toBe("specialist:scientist:new.v3");
   });
 
   it("uses stable account identity precedence", () => {

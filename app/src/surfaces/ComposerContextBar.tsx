@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Folder, GitBranch, GitFork, Laptop, Network, Server } from "lucide-react";
+import { AlertTriangle, ChevronDown, Folder, GitBranch, GitFork, Laptop, Server } from "lucide-react";
 import type { ProjectContext, RemoteWorkerTarget } from "../core-bridge/bridge";
 import { projectDisplayName } from "../lib/projectSidebar";
 import { loadProjectContext } from "../lib/projectContext";
@@ -20,9 +20,8 @@ const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
 
 export function composerContextKind(
-  activeSpecialist: string | null,
-): "checkout" | "enterprise" {
-  if (activeSpecialist === "scout") return "enterprise";
+  _activeSpecialist: string | null,
+): "checkout" {
   return "checkout";
 }
 
@@ -53,7 +52,7 @@ export function hasSessionContextAuthority({
 }
 
 export function shouldInspectProjectContext({
-  activeSpecialist,
+  activeSpecialist: _activeSpecialist,
   activeProvider,
   cwd,
   hasSession,
@@ -69,7 +68,7 @@ export function shouldInspectProjectContext({
   remoteReady: boolean;
   authorizedLocalRoot: string | null;
 }): boolean {
-  if (activeSpecialist === "scout" || activeProvider !== "local" || !cwd.trim()) return false;
+  if (activeProvider !== "local" || !cwd.trim()) return false;
   if (hasSession) return true;
   if (projectMode === "remote") return remoteReady;
   return authorizedLocalRoot === cwd.trim();
@@ -83,7 +82,6 @@ export function ComposerContextBar() {
   const specialistContext = useSpecialistStore((state) =>
     state.active ? state.contexts[state.active] : undefined,
   );
-  const setScoutScopeOpen = useSpecialistStore((state) => state.setScoutScopeOpen);
   const session = useSessionStore((state) => state.session);
   const activeProvider = useSessionStore((state) => state.activeProvider);
   const projectMode = useSessionStore((state) => state.projectMode);
@@ -280,58 +278,6 @@ export function ComposerContextBar() {
       : undefined;
   const canSwitchBranch = !session && (projectMode === "local" || Boolean(remote));
 
-  const contextKind = composerContextKind(activeSpecialist);
-  if (contextKind === "enterprise") {
-    const authorityReady = Boolean(
-      specialistContext?.organizationId?.trim() && specialistContext.workspaceId?.trim(),
-    );
-    return (
-      <div
-        className="conversation-column-width relative mx-auto mb-1.5 flex w-full flex-wrap items-center gap-1.5"
-        data-testid="scout-enterprise-context"
-        aria-label="Scout enterprise context"
-      >
-        <span
-          className={`${ITEM} text-accent`}
-          title="Company Scout maps the organization's connected systems, not the open checkout."
-        >
-          <Network className="size-3 shrink-0" aria-hidden="true" />
-          <span>Company Scout</span>
-        </span>
-        {session ? (
-          <span className={`${ITEM} text-ink-secondary`}>
-            Company-wide map
-          </span>
-        ) : (
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            onClick={() => setScoutScopeOpen(true)}
-            className={`${ITEM} text-ink-secondary transition hover:bg-bg-hover hover:text-ink`}
-          >
-            {authorityReady ? "Company-wide map" : "Choose company"}
-            <ChevronDown className="size-3 shrink-0 text-ink-faint" aria-hidden="true" />
-          </button>
-        )}
-        {!session && (
-          <EnvironmentPicker
-            compact
-            allowCloud={false}
-            showLocalFolder={false}
-          />
-        )}
-        {session && (
-          <span
-            className={`${ITEM} text-ink-secondary`}
-            title={isRemoteSession ? `Remote execution: ${locationLabel}` : "Runs on this Mac"}
-          >
-            <LocationIcon className="size-3 shrink-0" />
-            <span className="max-w-36 truncate">{locationLabel}</span>
-          </span>
-        )}
-      </div>
-    );
-  }
   if (session && !hasSessionContextAuthority({
     activeProvider,
     checkoutRoot,

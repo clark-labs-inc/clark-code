@@ -7,13 +7,11 @@ import {
   CheckCircle2,
   CircleDashed,
   Database,
-  FileText,
   FlaskConical,
   GitBranch,
   Network,
   ShieldCheck,
   TriangleAlert,
-  Waypoints,
 } from "lucide-react";
 
 import {
@@ -35,7 +33,6 @@ import {
   staggeredTransition,
 } from "../../lib/motion";
 import { Mermaid } from "../work/Mermaid";
-import { RsiLoopPulseCard } from "./RsiLoopPulse";
 
 type PresentationView = "map" | "evidence" | "run";
 
@@ -67,11 +64,8 @@ function toneFill(tone: SpecialistPresentationTone): string {
 
 function SpecialistIcon({ kind }: { kind: SpecialistKind }) {
   const Icon = {
-    spec: FileText,
-    scout: Network,
     security: ShieldCheck,
     scientist: FlaskConical,
-    rsi: Waypoints,
   }[kind] ?? Network;
   return <Icon className="size-4" />;
 }
@@ -362,23 +356,11 @@ export function SpecialistConversationPresentationCard({
   presentation,
   variant = "conversation",
   onUsePrompt,
-  onPause,
 }: {
   presentation: NonNullable<ReturnType<typeof specialistConversationPresentation>>;
   variant?: "example" | "conversation";
   onUsePrompt?: (prompt: string) => void;
-  onPause?: () => void;
 }) {
-  if (presentation.kind === "rsi") {
-    return (
-      <RsiLoopPulseCard
-        presentation={presentation}
-        variant={variant}
-        onUsePrompt={onUsePrompt}
-        onPause={onPause}
-      />
-    );
-  }
   return (
     <DefaultSpecialistConversationPresentationCard
       presentation={presentation}

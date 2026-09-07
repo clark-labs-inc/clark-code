@@ -41,8 +41,8 @@ import {
 import { PDF_ARTIFACT_DATA_URL } from "./mockArtifacts";
 
 // Mirrors the shipped app: Clark Code is the only environment choice, while
-// the product can route Scientist/RSI conversations through an internal
-// native provider.
+// the product can route Scientist conversations through an internal native
+// provider.
 const PROVIDERS: ProviderInfo[] = [
   {
     id: "local",
@@ -74,7 +74,6 @@ const PROVIDERS: ProviderInfo[] = [
 ];
 
 const SPECIALIST_SKILLS: SkillCatalogEntry[] = [
-  ["scout:scout", "Map systems from bounded, evidence-backed investigation."],
   ["security:security-scan", "Assess repository security posture and validate findings."],
   ["security:security-diff", "Review a change set for security regressions."],
   ["security:security-deep", "Run a deep, multi-pass repository security scan."],
@@ -101,14 +100,9 @@ function specialistPresentationForPrompt(userText: string) {
   const lower = userText.toLowerCase();
   const kind = lower.includes("archive-handling") || lower.includes("exploitable path") || lower.includes("deep scan")
     ? "security"
-    : lower.includes("identity service") || lower.includes("blast radius")
-      ? "scout"
-      : lower.includes("latency") || lower.includes("replication") || lower.includes("falsification")
-        ? "scientist"
-        : lower.includes("counterexample") || lower.includes("evaluation world") || lower.includes("identity-loss")
-          || lower.includes("improv") || lower.includes("planning reliability")
-          ? "rsi"
-          : null;
+    : lower.includes("latency") || lower.includes("replication") || lower.includes("falsification")
+      ? "scientist"
+      : null;
   const presentation = kind ? specialistConversationPresentation(kind) : null;
   return presentation ? specialistPresentationPayload(presentation) : null;
 }
@@ -915,7 +909,6 @@ export class MockBridge implements CoreBridge {
     run: string,
     presentation: ReturnType<typeof specialistPresentationPayload>,
   ) {
-    const rsi = presentation.kind === "rsi";
     this.snapshot.timeline.push({
       item: "message",
       run,
@@ -923,9 +916,7 @@ export class MockBridge implements CoreBridge {
       phase: "commentary",
       blocks: [{
         type: "text",
-        text: rsi
-          ? "I’m improving the system now. I’ll keep a change only when the objective improves and every safety guardrail still passes."
-          : "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.",
+        text: "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.",
       }],
     });
     this.emit();
@@ -944,9 +935,7 @@ export class MockBridge implements CoreBridge {
       phase: "final_answer",
       blocks: [{
         type: "text",
-        text: rsi
-          ? "This improvement run is complete. The best safe version and its receipts are retained in the inline loop above."
-          : "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.",
+        text: "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.",
       }],
     });
     this.snapshot.runs[run] = {

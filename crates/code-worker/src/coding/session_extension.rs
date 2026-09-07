@@ -5,7 +5,7 @@ use std::sync::Arc;
 use agent_core::ProviderConfig;
 use code_host::{CodingSessionRecipe, PluginError};
 use provider_local::LocalAgentProvider;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// Compile-time extension point for product-owned capabilities attached to a
 /// single remote coding session. The recipe contains no credential; the
@@ -62,14 +62,6 @@ pub(super) fn apply_session_recipe(
                 .map_err(|error| PluginError::InvalidInput(error.to_string()))?,
         );
     }
-    if let Some(scout) = recipe.scout_cartography.as_ref() {
-        extra.insert(
-            "scout_cartography".into(),
-            serde_json::to_value(scout)
-                .map_err(|error| PluginError::InvalidInput(error.to_string()))?,
-        );
-        extra.insert("orchestration".into(), json!({ "enabled": true }));
-    }
     Ok(())
 }
 
@@ -103,7 +95,7 @@ mod tests {
         let recipe = CodingSessionRecipe {
             extensions: vec![CodingSessionExtensionRecipe {
                 id: "clark_cloud_advisor".into(),
-                config: json!({ "organization_id": "org-1" }),
+                config: serde_json::json!({ "organization_id": "org-1" }),
             }],
             ..CodingSessionRecipe::default()
         };

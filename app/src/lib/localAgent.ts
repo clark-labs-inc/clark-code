@@ -23,15 +23,6 @@ export {
   removeRecentProject,
 } from "./accountProjectStorage";
 
-export interface ScoutCartographyTarget {
-  organizationId: string;
-  workspaceId: string;
-  platform?: string;
-  architecture?: string;
-  targetId?: string;
-  runRequestId?: string;
-}
-
 export interface ProductSpecialistTarget {
   organizationId: string;
   kind: string;
@@ -378,7 +369,6 @@ export function saveOrchestrationEnabled(on: boolean, scope?: string | null): vo
 export function localConnectConfig(
   s: LocalAgentSettings,
   remote?: RemoteTargetConfig,
-  scout?: ScoutCartographyTarget,
   specialistKind?: string,
   scope?: string | null,
   productSpecialist?: ProductSpecialistTarget,
@@ -413,16 +403,6 @@ export function localConnectConfig(
         ...(specialistKind?.trim()
           ? { specialist_kind: specialistKind.trim() }
           : {}),
-        ...(scout ? {
-          scout_cartography: {
-            organization_id: scout.organizationId,
-            workspace_id: scout.workspaceId,
-            ...(scout.runRequestId ? { human_run_request_id: scout.runRequestId } : {}),
-            ...(scout.platform ? { platform: scout.platform } : {}),
-            ...(scout.architecture ? { architecture: scout.architecture } : {}),
-            ...(scout.targetId ? { target_id: scout.targetId } : {}),
-          },
-        } : {}),
       },
     };
   }
@@ -464,16 +444,6 @@ export function localConnectConfig(
       ...(sandboxReadRoots.length > 0
         ? { sandbox_read_roots: [...new Set(sandboxReadRoots.filter((root) => root.trim()))] }
         : {}),
-      ...(scout ? {
-        scout_cartography: {
-          organization_id: scout.organizationId,
-          workspace_id: scout.workspaceId,
-          ...(scout.runRequestId ? { human_run_request_id: scout.runRequestId } : {}),
-          ...(scout.platform ? { platform: scout.platform } : {}),
-          ...(scout.architecture ? { architecture: scout.architecture } : {}),
-          ...(scout.targetId ? { target_id: scout.targetId } : {}),
-        },
-      } : {}),
       ...productExtra,
       // Native product composition may use the canonical conversation recipe
       // to expose read-only capabilities, but never as entitlement authority.

@@ -10,13 +10,11 @@ use async_trait::async_trait;
 use code_host::{Request, RequestCommand, Response, PROTOCOL_VERSION};
 use code_remote::RemoteWorkerSlot;
 use exec_core::{
-    DirEntry, ExecOutput, ExecResult, ExecutionContainment, Executor, FileMeta,
-    SystemCapabilityCensus, WalkEntry,
+    DirEntry, ExecOutput, ExecResult, ExecutionContainment, Executor, FileMeta, WalkEntry,
 };
 use exec_protocol::{
     b64_decode, b64_encode, method, CanonicalizeResult, MetaResult, PathParams, ProcessStartParams,
-    ReadDirResult, ReadResult, RenameParams, SystemCapabilityCensusResult, WalkResult,
-    WriteNewResult, WriteParams,
+    ReadDirResult, ReadResult, RenameParams, WalkResult, WriteNewResult, WriteParams,
 };
 use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
@@ -109,22 +107,6 @@ impl RemoteWorkerExecutor {
 
 #[async_trait]
 impl Executor for RemoteWorkerExecutor {
-    async fn system_capability_census(&self) -> ExecResult<SystemCapabilityCensus> {
-        let value: SystemCapabilityCensusResult = decode(
-            self.call(method::ENV_CAPABILITY_CENSUS, serde_json::json!({}))
-                .await?,
-        )?;
-        Ok(SystemCapabilityCensus {
-            platform: value.platform,
-            architecture: value.architecture,
-            executable_names: value.executable_names,
-            environment_variable_names: value.environment_variable_names,
-            credential_surfaces: value.credential_surfaces,
-            executables_truncated: value.executables_truncated,
-            environment_names_truncated: value.environment_names_truncated,
-        })
-    }
-
     fn containment(&self) -> ExecutionContainment {
         ExecutionContainment::External
     }

@@ -20,7 +20,7 @@ describe("specialist access gate actions", () => {
     expect(handlers.setupWorkspace).not.toHaveBeenCalled();
   });
 
-  it("routes workspace setup to the product's explicit Scout setup flow", () => {
+  it("routes workspace setup to the product's explicit setup flow", () => {
     const handlers = {
       signIn: vi.fn(),
       retry: vi.fn(),

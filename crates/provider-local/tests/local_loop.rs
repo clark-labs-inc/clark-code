@@ -20,7 +20,6 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-const TEST_SCOUT_MODEL: &str = "scout-model";
 const TEST_SECURITY_MODEL: &str = "security-model";
 
 /// SSE body for the first model call: ask to read `hello.txt`.
@@ -176,95 +175,6 @@ fn find_headers_end(buf: &[u8]) -> Option<usize> {
 fn request_json(raw: &[u8]) -> serde_json::Value {
     let headers_end = find_headers_end(raw).expect("captured request has header terminator");
     serde_json::from_slice(&raw[headers_end + 4..]).expect("request body is valid JSON")
-}
-
-#[tokio::test]
-async fn scout_uses_its_host_route_when_the_conversation_uses_the_included_lane() {
-    let dir = tempfile::tempdir().unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let captured = tokio::spawn(serve(listener, vec![final_body()]));
-
-    let mut provider = provider_local::LocalAgentProvider::new();
-    provider
-        .connect(ProviderConfig {
-            auth_token: Some("test-key".into()),
-            extra: json!({
-                "base_url": format!("http://{addr}/v1"),
-                "model": provider_local::DEFAULT_MODEL,
-                "reasoning_effort": "max",
-                "skill_model_overrides": {
-                    "scout": {"model": TEST_SCOUT_MODEL, "reasoning_effort": "max"}
-                },
-                "sandbox_mode": "disabled"
-            }),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    let session = provider
-        .new_session(SessionOptions {
-            cwd: Some(dir.path().to_string_lossy().to_string()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-
-    let mut stream = provider
-        .prompt(
-            &session.id,
-            PromptInput::text("$scout:scout map this business system"),
-        )
-        .await
-        .unwrap();
-    while let Some(event) = stream.next().await {
-        if matches!(event, AgentEvent::RunFinished { .. }) {
-            break;
-        }
-    }
-
-    let requests = captured.await.unwrap();
-    assert_eq!(requests.len(), 1);
-    let request = request_json(&requests[0]);
-    assert_eq!(request["model"], TEST_SCOUT_MODEL);
-    assert_eq!(
-        request.get("reasoning_effort").and_then(Value::as_str),
-        Some("max"),
-        "Scout must use its host-pinned reasoning configuration"
-    );
-    let tools = request["tools"].as_array().expect("Scout request tools");
-    let has_tool = |name: &str| tools.iter().any(|tool| tool["function"]["name"] == name);
-    for name in [
-        "scout_capabilities",
-        "scout_repository_census",
-        "scout_adapter",
-        "scout_enterprise",
-        "scout_enterprise_query",
-        "update_plan",
-        "final_answer",
-    ] {
-        assert!(has_tool(name), "Scout must expose {name} on its first turn");
-    }
-    for name in [
-        "read_file",
-        "list_dir",
-        "grep",
-        "bash",
-        "tool_search",
-        "memory",
-        "memory_recall",
-        "write_file",
-    ] {
-        assert!(
-            !has_tool(name),
-            "Scout must not expose {name}, even with Full access"
-        );
-    }
-    let serialized = request.to_string();
-    assert!(
-        !serialized.contains("You have durable memory") && !serialized.contains("Personal memory"),
-        "Scout's model context must not contain session-global memory"
-    );
 }
 
 #[tokio::test]

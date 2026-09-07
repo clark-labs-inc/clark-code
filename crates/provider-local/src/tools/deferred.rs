@@ -337,28 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn search_ignores_connective_words_in_multi_capability_queries() {
-        let catalog = DeferredToolCatalog::default();
-        catalog.register(
-            "scout_enterprise_query",
-            "Read organization system cartography",
-            ToolExposure::Deferred,
-        );
-        catalog.register(
-            "android_tap",
-            "Tap a device and interact with its screen",
-            ToolExposure::Deferred,
-        );
-
-        let names = catalog
-            .search("organization knowledge and enterprise cartography")
-            .into_iter()
-            .map(|entry| entry.name)
-            .collect::<Vec<_>>();
-        assert_eq!(names, ["scout_enterprise_query"]);
-    }
-
-    #[test]
     fn search_result_preserves_the_complete_tool_description() {
         let sentinel = "final capability requirement";
         let entry = CatalogEntry {

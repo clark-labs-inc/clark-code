@@ -14,10 +14,6 @@ portable-pty = "0.9"
 tokio = { workspace = true }
 tokio-util = { version = "0.7", default-features = false }
 ignore = "0.4"
-scout-capability-census = { path = "../scout-capability-census" }
-scout-store = { path = "../scout-store" }
-scout-adapter-runtime = { path = "../scout-adapter-runtime" }
-scout-capsule-host = { path = "../scout-capsule-host" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }

@@ -8,7 +8,6 @@ export function ComposerSendAction({
   hasContent,
   canSend,
   shouldPickProjectFolder,
-  startsScoutRun,
   queuedTitle,
   onCancel,
   onSubmit,
@@ -19,7 +18,6 @@ export function ComposerSendAction({
   hasContent: boolean;
   canSend: boolean;
   shouldPickProjectFolder: boolean;
-  startsScoutRun: boolean;
   queuedTitle: string;
   onCancel: () => void;
   onSubmit: () => void;
@@ -60,16 +58,12 @@ export function ComposerSendAction({
     ? "Choose project folder and send"
     : busy
       ? "Queue message"
-      : startsScoutRun
-        ? "Start Scout run"
-        : "Send";
+      : "Send";
   const title = shouldPickProjectFolder
     ? "Choose project folder and send"
     : busy
       ? queuedTitle
-      : startsScoutRun
-        ? "Start Scout run · human initiated"
-        : "Send · ⇧↵ newline";
+      : "Send · ⇧↵ newline";
 
   return (
     <button
@@ -80,16 +74,12 @@ export function ComposerSendAction({
       title={title}
       className={cn(
         "shrink-0 bg-accent text-on-accent shadow-soft transition duration-base ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none",
-        startsScoutRun
-          ? "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold"
-          : "grid size-8 place-items-center rounded-full",
+        "grid size-8 place-items-center rounded-full",
       )}
     >
       {busy
         ? <CornerDownRight aria-hidden="true" className="size-4" />
-        : startsScoutRun
-          ? <><ArrowUp aria-hidden="true" className="size-3.5" /><span>Start run</span></>
-          : <ArrowUp aria-hidden="true" className="size-4" />}
+        : <ArrowUp aria-hidden="true" className="size-4" />}
     </button>
   );
 }

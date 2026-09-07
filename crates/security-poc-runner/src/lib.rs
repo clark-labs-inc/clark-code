@@ -27,7 +27,7 @@ pub use types::{
 use std::path::Path;
 
 /// Target-service entry point. The PoC runner awaits subprocess output, so it
-/// is dispatched asynchronously (like `scout_adapter_runtime`), not through the
+/// is dispatched asynchronously, not through the
 /// blocking lane used by the pure CPU-bound services.
 pub async fn dispatch(service: &str, root: &Path, request: &[u8]) -> Result<Vec<u8>, String> {
     if service != SERVICE_NAME {

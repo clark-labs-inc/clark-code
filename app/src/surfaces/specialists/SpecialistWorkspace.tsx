@@ -7,7 +7,6 @@ import {
   Moon,
   PanelRightClose,
   PanelRightOpen,
-  Plus,
   Settings,
   Sun,
 } from "lucide-react";
@@ -24,22 +23,14 @@ import {
   specialistAccessAfterLoadFailure,
   specialistAccessBadge,
   specialistNeedsEntitlementVerification,
-  type ScoutTab,
   type SecurityTab,
   type ScientistTab,
 } from "../../lib/specialists";
 import {
   specialistEntitlement,
   specialistOrganizations,
-  specialistCreateOrganization,
   specialistQuery,
-  specialistSetupCompanyScout,
   specialistCreateSecurityCampaign,
-  companyScoutMap,
-  type ScoutChange,
-  type ScoutSimulation,
-  type ScoutSnapshotEntry,
-  type CompanyScoutMap,
   type SecurityFinding,
   type SecurityCampaign,
   type SecurityPosture,
@@ -56,25 +47,13 @@ import type { SecurityScanRecord } from "../../core-bridge/types";
 import { cn } from "../../lib/cn";
 import { codeKeyAccountBinding } from "../../lib/account";
 import { UpdatePill } from "../TopBar";
-import { ScoutCanvas } from "./ScoutCanvas";
 import { SecurityCanvas } from "./SecurityCanvas";
 import { ScientistCanvas } from "./ScientistCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
-import { ScoutOrganizationDialog } from "./ScoutOrganizationDialog";
-import { ScoutScopeDialog } from "./ScoutScopeDialog";
 import { ContextualConversation } from "./ContextualConversation";
-import {
-  CompanyScoutSetupControl,
-  CompanyScoutSetupNotice,
-  type CompanyScoutSetupNoticeValue,
-} from "./ScoutCompanySetup";
 
 interface SpecialistData {
-  companyMap: CompanyScoutMap | null;
-  entries: ScoutSnapshotEntry[];
-  changes: ScoutChange[];
-  simulations: ScoutSimulation[];
   posture: SecurityPosture | null;
   repositories: SecurityRepository[];
   findings: SecurityFinding[];
@@ -87,10 +66,6 @@ interface SpecialistData {
 }
 
 const EMPTY_DATA: SpecialistData = {
-  companyMap: null,
-  entries: [],
-  changes: [],
-  simulations: [],
   posture: null,
   repositories: [],
   findings: [],
@@ -119,14 +94,11 @@ export function SpecialistWorkspace({
   dark: boolean;
   onToggleTheme: () => void;
 }) {
-  const active = useSpecialistStore((state) => state.active) ?? "scout";
+  const active = useSpecialistStore((state) => state.active) ?? "security";
   const tabs = useSpecialistStore((state) => state.tabs);
   const contexts = useSpecialistStore((state) => state.contexts);
   const setTab = useSpecialistStore((state) => state.setTab);
   const setContext = useSpecialistStore((state) => state.setContext);
-  const scoutScopeOpen = useSpecialistStore((state) => state.scoutScopeOpen);
-  const setScoutScopeOpen = useSpecialistStore((state) => state.setScoutScopeOpen);
-  const openSpecialist = useSpecialistStore((state) => state.open);
   const auth = useSessionStore((state) => state.auth);
   const bridge = useSessionStore((state) => state.bridge);
   const securityCompletionKey = useSessionStore((state) => active === "security"
@@ -156,14 +128,7 @@ export function SpecialistWorkspace({
   const [serverAccess, setServerAccess] = useState<"unknown" | "ready" | "free" | "action_needed" | "organization_required" | "scope_lost" | "offline">("unknown");
   const [mobilePane, setMobilePane] = useState<"chat" | "canvas">("chat");
   const [canvasOpen, setCanvasOpen] = useState(false);
-  const [settingUpCompanyScout, setSettingUpCompanyScout] = useState(false);
-  const [companyScoutSetupNotice, setCompanyScoutSetupNotice] = useState<CompanyScoutSetupNoticeValue | null>(null);
-  const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
-  const [creatingOrganization, setCreatingOrganization] = useState(false);
-  const [organizationName, setOrganizationName] = useState("");
-  const [organizationDomain, setOrganizationDomain] = useState("");
   const definition = SPECIALISTS[active];
-  const supportsCanvas = active === "scout" || active === "security" || active === "scientist";
   const context = boundContext?.kind === active ? boundContext : contexts[active] ?? { kind: active };
   const preview = previewAccess();
   const productProjection = preview
@@ -188,7 +153,6 @@ export function SpecialistWorkspace({
 
   const selectOrganization = useCallback((organizationId?: string) => {
     setData(EMPTY_DATA);
-    setCompanyScoutSetupNotice(null);
     setContext({ organizationId, workspaceId: undefined, repositoryId: undefined });
   }, [setContext]);
 
@@ -221,13 +185,11 @@ export function SpecialistWorkspace({
         return;
       }
       const organization = orgs.find((item) => item.id === context.organizationId)
-        ?? (active === "scout" && orgs.length !== 1 ? undefined : orgs[0]);
+        ?? orgs[0];
       setOrganizations(orgs);
       if (!organization) {
         setData(EMPTY_DATA);
-        // Scout owns an explicit company setup/selection flow in this surface.
-        // Do not hide that human action behind the generic access gate.
-        setServerAccess(active === "scout" ? "ready" : orgs.length === 0 ? "organization_required" : "ready");
+        setServerAccess(orgs.length === 0 ? "organization_required" : "ready");
         return;
       }
       const entitlement = await specialistEntitlement(credentials, active, organization.id);
@@ -241,45 +203,7 @@ export function SpecialistWorkspace({
       if (context.organizationId !== organization.id && boundContext?.kind !== active) {
         setContext({ organizationId: organization.id });
       }
-      if (active === "scout") {
-        const maps = await specialistQuery<CompanyScoutMap[]>(
-          credentials, active, "scout_workspaces", organization.id,
-        );
-        const exactMap = maps.find((item) => item.id === context.workspaceId);
-        const map = boundContext?.kind === active
-          ? exactMap ?? null
-          : companyScoutMap(maps, context.workspaceId);
-        if (!map) {
-          if (boundContext?.kind === active && context.workspaceId) {
-            clearSensitiveData();
-            setServerAccess("scope_lost");
-            return;
-          }
-          setData({ ...EMPTY_DATA, companyMap: null });
-          return;
-        }
-        if (!exactMap && boundContext?.kind !== active) {
-          setContext({ workspaceId: map.id });
-        }
-        const [snapshot, changes, simulations] = await Promise.all([
-          specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
-            credentials, active, "scout_snapshot", organization.id, map.id,
-          ),
-          specialistQuery<{ changes: ScoutChange[] }>(
-            credentials, active, "scout_changes", organization.id, map.id,
-          ),
-          specialistQuery<ScoutSimulation[]>(
-            credentials, active, "scout_simulations", organization.id, map.id,
-          ),
-        ]);
-        setData({
-          ...EMPTY_DATA,
-          companyMap: map,
-          entries: snapshot.entries,
-          changes: changes.changes,
-          simulations,
-        });
-      } else if (active === "security") {
+      if (active === "security") {
         const sync = await syncSecurityInsights(
           credentials,
           organization.id,
@@ -370,10 +294,7 @@ export function SpecialistWorkspace({
         } else if (artifactsResult.status === "rejected") {
           setProjectionWarning("Cloud artifacts are temporarily unavailable. The latest accepted research overview remains visible.");
         }
-      } else if (active === "rsi") {
-        // RSI state is a typed live object in the conversation timeline. It
-        // does not own a parallel dashboard projection or artifact browser.
-        setData(EMPTY_DATA);
+
       } else {
         throw new Error(`No data adapter is registered for specialist ${active}`);
       }
@@ -392,7 +313,6 @@ export function SpecialistWorkspace({
     clearSensitiveData,
     context.organizationId,
     context.repositoryId,
-    context.workspaceId,
     credentials?.accountScope,
     cwd,
     definition.entitlement,
@@ -405,11 +325,6 @@ export function SpecialistWorkspace({
     void load();
   }, [load, securityCompletionKey]);
 
-  useEffect(() => {
-    if (supportsCanvas) return;
-    setCanvasOpen(false);
-    setMobilePane("chat");
-  }, [supportsCanvas]);
 
   useEffect(() => bridge?.onSpecialistProjectionPublished?.((receipt) => {
     if (
@@ -424,102 +339,17 @@ export function SpecialistWorkspace({
     if (projected !== "ready") clearSensitiveData();
   }, [clearSensitiveData, projected]);
 
-  // Company Scout setup is always a visible human action. Session startup never
-  // creates cloud authority on the user's behalf; its internal storage id is
-  // selected after the user chooses a company.
-  const setupCompanyScout = useCallback(async () => {
-    if (!credentials || !context.organizationId?.trim()) return;
-    const organization = organizations.find((item) => item.id === context.organizationId);
-    if (!organization) return;
-    setSettingUpCompanyScout(true);
-    setCompanyScoutSetupNotice(null);
-    setError(null);
-    try {
-      const created = await specialistSetupCompanyScout(
-        credentials,
-        context.organizationId,
-        organization.name,
-      );
-      setData((current) => ({
-        ...current,
-        companyMap: created,
-      }));
-      setContext({ workspaceId: created.id });
-      setCompanyScoutSetupNotice({
-        tone: "success",
-        message: "Company Scout is ready.",
-      });
-    } catch (cause) {
-      setCompanyScoutSetupNotice({
-        tone: "error",
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
-    } finally {
-      setSettingUpCompanyScout(false);
-    }
-  }, [context.organizationId, credentials, organizations, setContext]);
-
-  const createOrganization = useCallback(async () => {
-    if (!credentials || !organizationName.trim() || !organizationDomain.trim()) return;
-    setCreatingOrganization(true);
-    setError(null);
-    try {
-      const created = await specialistCreateOrganization(
-        credentials,
-        organizationName.trim(),
-        organizationDomain.trim(),
-      );
-      setOrganizations((current) => [
-        created,
-        ...current.filter((organization) => organization.id !== created.id),
-      ]);
-      selectOrganization(created.id);
-      setOrganizationDialogOpen(false);
-      setOrganizationName("");
-      setOrganizationDomain("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setCreatingOrganization(false);
-    }
-  }, [credentials, organizationDomain, organizationName, selectOrganization]);
-
   const canvas = (
     <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary/30">
-      <CanvasStatus loading={(loading || settingUpCompanyScout) && serverAccess === "ready"} error={error} onRetry={() => void load()} />
+      <CanvasStatus loading={loading && serverAccess === "ready"} error={error} onRetry={() => void load()} />
       {!loading && !error && projectionWarning && (
         <div className="mx-5 mt-4 flex items-start gap-2 border-y border-warning/25 py-3 text-xs leading-5 text-ink-muted">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
           <span>{projectionWarning}</span>
         </div>
       )}
-      {!loading && !settingUpCompanyScout && !error && serverAccess === "ready" && (
-        active === "scout" ? (
-          <ScoutCanvas
-            tab={tabs[active] as ScoutTab}
-            companyMap={data.companyMap}
-            entries={data.entries}
-            changes={data.changes}
-            simulations={data.simulations}
-            onStartSimulation={() => {
-              setContext({ workflow: "scout:scout" });
-              setComposerPrefill("Simulate an important failure in the mapped system, show the evidence-backed blast radius, and identify recovery gaps.");
-              setMobilePane("chat");
-            }}
-            onSelectEntry={(entry) => {
-              const name = entry.event.fact.attributes.name;
-              const label = typeof name === "string" && name.trim() ? name : entry.object_id;
-              setContext({
-                workspaceId: data.companyMap?.id,
-                objectKind: entry.object_kind,
-                objectId: entry.object_id,
-                workflow: "scout:scout",
-              });
-              setComposerPrefill(`Explain “${label}”, show its supporting evidence and relationships, and assess its operational impact.`);
-              setMobilePane("chat");
-            }}
-          />
-        ) : active === "security" ? (
+      {!loading && !error && serverAccess === "ready" && (
+        active === "security" ? (
           <SecurityCanvas
             tab={tabs[active] as SecurityTab}
             posture={data.posture}
@@ -594,8 +424,7 @@ export function SpecialistWorkspace({
         </div>
         <div className="ml-auto flex items-center gap-2">
           <UpdatePill />
-          {supportsCanvas && (
-            <button
+          <button
               type="button"
               data-qa={`specialist-show-insights-${active}`}
               onClick={() => setCanvasOpen((open) => !open)}
@@ -605,48 +434,24 @@ export function SpecialistWorkspace({
             >
               {canvasOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
               {canvasOpen ? "Hide insights" : "Show insights"}
-            </button>
-          )}
+          </button>
           {organizations.length > 0 && serverAccess === "ready" && (
             <label className="relative hidden md:block">
-              <span className="sr-only">{active === "scout" ? "Company" : "Organization"}</span>
+              <span className="sr-only">Organization</span>
               <Building2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <select
-                value={active === "scout" ? context.organizationId ?? "" : context.organizationId ?? organizations[0]?.id}
+                value={context.organizationId ?? organizations[0]?.id}
                 onChange={(event) => selectOrganization(event.target.value || undefined)}
                 disabled={boundContext?.kind === active}
                 title={boundContext?.kind === active ? "Start a new specialist conversation to change organization" : undefined}
                 className="h-9 appearance-none rounded-xl bg-bg-secondary pl-8 pr-8 text-xs font-medium text-ink-secondary outline-none transition focus:ring-2 focus:ring-accent/20"
               >
-                {active === "scout" && <option value="">Choose company…</option>}
                 {organizations.map((organization) => (
                   <option key={organization.id} value={organization.id}>{organization.name}</option>
                 ))}
               </select>
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
             </label>
-          )}
-          {active === "scout" && serverAccess === "ready" && boundContext?.kind !== active && (
-            <button
-              type="button"
-              onClick={() => setOrganizationDialogOpen(true)}
-              aria-label="Create company"
-              title="Create company"
-              className="grid size-9 place-items-center rounded-xl text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-            >
-              <Plus className="size-4" />
-            </button>
-          )}
-          {active === "scout" && (
-            <CompanyScoutSetupControl
-              organizationId={context.organizationId}
-              organizations={organizations}
-              companyScoutReady={Boolean(data.companyMap)}
-              serverReady={serverAccess === "ready"}
-              bound={boundContext?.kind === active}
-              settingUp={settingUpCompanyScout}
-              onSetup={() => void setupCompanyScout()}
-            />
           )}
           <span className={cn(
             "hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex",
@@ -673,42 +478,6 @@ export function SpecialistWorkspace({
         </div>
       </header>
 
-      {active === "scout" && companyScoutSetupNotice && (
-        <CompanyScoutSetupNotice
-          notice={companyScoutSetupNotice}
-          onDismiss={() => setCompanyScoutSetupNotice(null)}
-        />
-      )}
-
-      {active === "scout" && scoutScopeOpen && boundContext?.kind !== active && (
-        <ScoutScopeDialog
-          organizations={organizations}
-          companyScoutReady={Boolean(data.companyMap)}
-          organizationId={context.organizationId}
-          loading={loading}
-          settingUpCompanyScout={settingUpCompanyScout}
-          onSelectOrganization={selectOrganization}
-          onCreateOrganization={() => {
-            setScoutScopeOpen(false);
-            setOrganizationDialogOpen(true);
-          }}
-          onSetupCompanyScout={() => void setupCompanyScout()}
-          onClose={() => setScoutScopeOpen(false)}
-        />
-      )}
-
-      {organizationDialogOpen && (
-        <ScoutOrganizationDialog
-          name={organizationName}
-          domain={organizationDomain}
-          creating={creatingOrganization}
-          onNameChange={setOrganizationName}
-          onDomainChange={setOrganizationDomain}
-          onCancel={() => setOrganizationDialogOpen(false)}
-          onCreate={() => void createOrganization()}
-        />
-      )}
-
       {access !== "ready" ? (
         <SpecialistAccessGate
           key={`${active}:${access}`}
@@ -718,7 +487,7 @@ export function SpecialistWorkspace({
             if (accessCapability?.actionUrl) void openExternal(accessCapability.actionUrl);
             else setSettingsOpen(true);
           }}
-          onWorkspaceSetup={() => openSpecialist("scout")}
+          onWorkspaceSetup={() => setSettingsOpen(true)}
           onRetry={() => {
             setServerAccess("unknown");
             void productAccess.reload().catch(() => undefined);
@@ -726,7 +495,7 @@ export function SpecialistWorkspace({
         />
       ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            {supportsCanvas && <div className={cn(
+            <div className={cn(
               "flex h-10 shrink-0 items-end px-3",
               canvasOpen ? "xl:justify-end" : "xl:h-0 xl:overflow-hidden",
             )}>
@@ -778,15 +547,15 @@ export function SpecialistWorkspace({
                   </button>
                 ))}
               </div>
-            </div>}
+            </div>
             <div className={cn(
               "grid min-h-0 min-w-0 flex-1",
-              supportsCanvas && canvasOpen && "xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]",
+              canvasOpen && "xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]",
             )}>
-              <div className={cn("min-h-0 min-w-0", supportsCanvas && mobilePane !== "chat" && "hidden xl:block")}>
+              <div className={cn("min-h-0 min-w-0", mobilePane !== "chat" && "hidden xl:block")}>
                 <ContextualConversation kind={active} />
               </div>
-              {supportsCanvas && <section
+              <section
                 data-qa={`specialist-canvas-${active}`}
                 aria-label={`${definition.label} canvas`}
                 className={cn(
@@ -796,7 +565,7 @@ export function SpecialistWorkspace({
                 )}
               >
                 {canvas}
-              </section>}
+              </section>
             </div>
           </div>
       )}

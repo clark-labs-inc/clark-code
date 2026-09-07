@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { contextsAfterSpecialistOpen, useSpecialistStore } from "./specialistStore";
 
 afterEach(() => {
-  useSpecialistStore.setState({ active: null, expanded: null, scoutScopeOpen: false });
+  useSpecialistStore.setState({ active: null, expanded: null });
 });
 
 describe("specialist navigation state", () => {
@@ -59,16 +59,6 @@ describe("specialist navigation state", () => {
       active: null,
       expanded: "security",
     });
-  });
-
-  it("opens the Scout scope chooser from composer state and closes it with the lens", () => {
-    useSpecialistStore.setState({ active: "scout", expanded: "scout" });
-
-    useSpecialistStore.getState().setScoutScopeOpen(true);
-    expect(useSpecialistStore.getState().scoutScopeOpen).toBe(true);
-
-    useSpecialistStore.getState().close();
-    expect(useSpecialistStore.getState().scoutScopeOpen).toBe(false);
   });
 
 });

@@ -294,7 +294,7 @@ describe("cloud conversation index ownership", () => {
 
 describe("other-device conversation lifecycle events", () => {
   it("cancels a deleted opening target and clears state that cannot belong to the next chat", () => {
-    useSpecialistStore.getState().open("scout");
+    useSpecialistStore.getState().open("security");
     useSessionStore.setState({
       connecting: true,
       opening: {

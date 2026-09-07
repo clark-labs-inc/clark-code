@@ -15,7 +15,7 @@ mod trajectory;
 
 pub use contract::{
     CodingSessionExtensionRecipe, CodingSessionRecipe, ProjectRegistration, ProjectRegistry,
-    RegistryError, ScoutCartographyRecipe,
+    RegistryError,
 };
 pub use host::{HeadlessHost, HostError};
 pub use plugin::{

@@ -134,9 +134,9 @@ mod tests {
 
     #[test]
     fn recognizes_exact_slash_aliases_without_matching_lookalikes() {
-        assert!(slash_invocation("/scout map AWS", "scout:scout"));
-        assert!(slash_invocation("  /scout", "scout:scout"));
-        assert!(!slash_invocation("/scouting map AWS", "scout:scout"));
-        assert!(!slash_invocation("please /scout", "scout:scout"));
+        assert!(slash_invocation("/security inspect AWS", "security:security"));
+        assert!(slash_invocation("  /security", "security:security"));
+        assert!(!slash_invocation("/securities inspect AWS", "security:security"));
+        assert!(!slash_invocation("please /security", "security:security"));
     }
 }

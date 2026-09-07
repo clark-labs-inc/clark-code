@@ -651,7 +651,7 @@ fn specialist_context_from_snapshot(snapshot: &Value) -> Option<Value> {
             let Some((kind, _)) = workflow.split_once(':') else {
                 continue;
             };
-            if matches!(kind, "scout" | "security" | "scientist" | "rsi") {
+            if matches!(kind, "security" | "scientist") {
                 return Some(json!({"kind": kind, "workflow": workflow}));
             }
         }

@@ -85,29 +85,8 @@ impl Executor for LocalExecutor {
                 MAX_TARGET_SERVICE_REQUEST_BYTES
             ));
         }
-        let response = if service == scout_adapter_runtime::SERVICE_NAME {
-            scout_adapter_runtime::dispatch(service, root, request).await?
-        } else {
-            let service = service.to_owned();
-            let root = root.to_path_buf();
-            let request = request.to_vec();
-            tokio::task::spawn_blocking(move || {
-                if service == scout_capsule_host::SERVICE_NAME {
-                    scout_capsule_host::dispatch(&service, &root, &request)
-                } else {
-                    scout_store::dispatch(&service, &root, &request)
-                }
-            })
-            .await
-            .map_err(|error| format!("target service task failed: {error}"))??
-        };
-        if response.len() > MAX_TARGET_SERVICE_RESPONSE_BYTES {
-            return Err(format!(
-                "target service response exceeds the {}-byte limit",
-                MAX_TARGET_SERVICE_RESPONSE_BYTES
-            ));
-        }
-        Ok(response)
+        let _ = root;
+        return Err(format!("unknown target service: {service}"));
     }
 
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()> {
@@ -356,34 +335,6 @@ mod shell_tests {
 
         assert_eq!(tokio::fs::read(&to).await.expect("read target"), b"next");
         assert!(!from.exists());
-    }
-
-    #[tokio::test]
-    async fn local_executor_routes_the_typed_capsule_service() {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let request = br#"{
-            "action":"census",
-            "request":{
-                "policy":{
-                    "protocol_version":1,
-                    "authorized_tenant_id":"tenant-a",
-                    "trusted_admin_key_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "minimum_registry_generation":1,
-                    "target_id":"target-a",
-                    "target_identity_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                },
-                "enterprise_id":"enterprise-a"
-            }
-        }"#;
-
-        let response = LocalExecutor
-            .target_service_call(scout_capsule_host::SERVICE_NAME, temp.path(), request)
-            .await
-            .expect("typed service response");
-        let response = String::from_utf8(response).expect("JSON response");
-
-        assert!(response.contains(r#""result":"failed""#));
-        assert!(response.contains("policy_or_invocation_rejected"));
     }
 
     #[cfg(unix)]

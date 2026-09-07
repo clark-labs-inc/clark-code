@@ -46,19 +46,11 @@ export function nextApprovalPolicy(policy: ApprovalPolicy): ApprovalPolicy {
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
 export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
-/** These specialists need uninterrupted tool access to complete their core
- * workflow; that authority is not an approval prompt. */
-export function specialistUsesProtectedFullAccess(
-  specialistKind?: string | null,
-): boolean {
-  return specialistKind === "scout";
-}
-
 export function approvalPolicyForSpecialist(
   policy: ApprovalPolicy,
-  specialistKind?: string | null,
+  _specialistKind?: string | null,
 ): ApprovalPolicy {
-  return specialistUsesProtectedFullAccess(specialistKind) ? "full" : policy;
+  return policy;
 }
 
 /** The option that grants the request, preferring a one-time allow. */

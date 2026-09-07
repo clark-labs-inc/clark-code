@@ -36,46 +36,6 @@ fn provider_test_config_with_extra(mut extra: serde_json::Value) -> ProviderConf
     }
 }
 
-#[tokio::test]
-async fn scout_sessions_cannot_be_downgraded_from_full_access() {
-    let identity = tempfile::tempdir().unwrap();
-    let mut provider = LocalAgentProvider::new();
-    provider
-        .connect(provider_test_config_with_extra(serde_json::json!({
-            "scout_cartography": {
-                "organization_id": uuid::Uuid::new_v4(),
-                "workspace_id": uuid::Uuid::new_v4(),
-                "identity_root": identity.path(),
-                "platform": "macos",
-                "architecture": "aarch64",
-                "route_prefix": "/v1/cartography"
-            }
-        })))
-        .await
-        .unwrap();
-
-    let session = provider
-        .new_session(SessionOptions {
-            cwd: Some(identity.path().to_string_lossy().into_owned()),
-            mode: Some("ask".into()),
-            collaboration_mode: Some(CollaborationMode::Plan),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    assert_eq!(session.mode.as_deref(), Some("full"));
-    assert_eq!(session.collaboration_mode, CollaborationMode::Default);
-
-    provider.set_mode(&session.id, "auto".into()).await.unwrap();
-    assert_eq!(provider.session_mode.as_deref(), Some("full"));
-
-    provider
-        .set_collaboration_mode(&session.id, CollaborationMode::Plan)
-        .await
-        .unwrap();
-    assert!(!provider.session.lock().await.planning.plan_mode());
-}
-
 #[test]
 fn prompt_text_joins_blocks() {
     let input = PromptInput {
@@ -1066,7 +1026,7 @@ async fn planning_eval_preactivates_only_registered_deferred_tools() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "planning_eval_preactivated_tools": [
                 "memory",
-                "scout_enterprise_query",
+                "organization_knowledge",
                 "not_a_registered_tool"
             ]
         })))
@@ -1081,7 +1041,7 @@ async fn planning_eval_preactivates_only_registered_deferred_tools() {
         .unwrap();
     let state = provider.session.lock().await;
     assert!(state.deferred_tools.contains("memory"));
-    assert!(state.deferred_tools.contains("scout_enterprise_query"));
+    assert!(!state.deferred_tools.contains("organization_knowledge"));
     assert!(!state.deferred_tools.contains("not_a_registered_tool"));
 }
 
@@ -1152,14 +1112,6 @@ async fn orchestration_tools_are_always_available_to_the_root_agent() {
     assert!(registry.get("resolve_delegation").is_some());
     assert!(registry.get("delegate_coding_workstreams").is_some());
     assert!(registry.get("resolve_coding_workstreams").is_some());
-    assert!(registry.get("scout_capabilities").is_some());
-    assert!(registry.get("scout_repository_census").is_some());
-    assert!(registry.get("scout_adapter").is_some());
-    assert!(registry.get("scout_enterprise").is_some());
-    assert!(registry.get("scout_enterprise_query").is_some());
-    assert!(registry.get("scout_ledger").is_none());
-    assert!(registry.get("scout_probe").is_none());
-    assert!(registry.get("scout_measure").is_none());
     let mut legacy_disable_request = LocalAgentProvider::new();
     legacy_disable_request
         .connect(ProviderConfig {
@@ -1179,12 +1131,6 @@ async fn orchestration_tools_are_always_available_to_the_root_agent() {
         .as_ref()
         .unwrap()
         .get("delegate_coding_workstreams")
-        .is_some());
-    assert!(legacy_disable_request
-        .registry
-        .as_ref()
-        .unwrap()
-        .get("scout_capabilities")
         .is_some());
 }
 

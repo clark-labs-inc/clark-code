@@ -136,9 +136,6 @@ async fn prepare_provider_config(
                 .into(),
         );
     }
-    if config.extra.get("scout_cartography").is_some() {
-        return Err("this build has no Scout product integration".into());
-    }
     if config.auth_token.is_none() {
         config.auth_token = std::env::var("OPENAI_API_KEY")
             .ok()

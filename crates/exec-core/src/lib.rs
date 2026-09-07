@@ -23,7 +23,6 @@ mod process_fence;
 pub use local::LocalExecutor;
 pub use process::{run_process_streaming, run_process_streaming_pty, spawn_process, ProcessSpec};
 pub use process_fence::ProcessFence;
-pub use scout_capability_census::{collect_system_capabilities, SystemCapabilityCensus};
 
 pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
     ("PAGER", "cat"),
@@ -235,9 +234,7 @@ pub async fn terminate_process_tree(child: &mut tokio::process::Child, root_pid:
 /// Tool-facing result: the error is already a model-readable message.
 pub type ExecResult<T> = Result<T, String>;
 
-/// Upper bound for a decoded target-native service request. Scout batches are
-/// independently capped at 64 MiB; the small allowance covers their typed
-/// envelope without permitting an unbounded RPC allocation.
+/// Upper bound for a decoded target-native service request.
 pub const MAX_TARGET_SERVICE_REQUEST_BYTES: usize = 72 * 1024 * 1024;
 /// Symmetric decoded response ceiling before base64/WebSocket framing.
 pub const MAX_TARGET_SERVICE_RESPONSE_BYTES: usize = 72 * 1024 * 1024;
@@ -333,13 +330,6 @@ pub fn is_ignored(path: &Path) -> bool {
 /// local machine ([`LocalExecutor`]) or a remote host.
 #[async_trait]
 pub trait Executor: Send + Sync {
-    /// Enumerate executable names, environment-variable names, and known
-    /// credential surfaces without executing discovered programs or reading
-    /// credential values.
-    async fn system_capability_census(&self) -> ExecResult<SystemCapabilityCensus> {
-        Ok(collect_system_capabilities(None))
-    }
-
     /// Read a file's bytes.
     async fn read(&self, path: &Path) -> ExecResult<Vec<u8>>;
     /// Write bytes to a file, creating parent directories as needed.

@@ -98,8 +98,8 @@ impl LocalAgentProvider {
     }
 
     /// Names of every tool currently registered for this session. Used by tests
-    /// to assert which capabilities (e.g. the Scout toolchain) are exposed for a
-    /// given target without paying for a model call.
+    /// to assert which capabilities are exposed for a given target without
+    /// paying for a model call.
     pub fn tool_names(&self) -> Vec<String> {
         self.registry
             .as_ref()

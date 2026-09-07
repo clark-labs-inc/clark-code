@@ -14,7 +14,6 @@ mod multi_repo;
 mod policy;
 mod provider_harness;
 mod runtime;
-mod scout;
 
 pub use budget::{BudgetConfig, BudgetReservation, BudgetSnapshot, SharedBudget, UsageCharge};
 pub use contract::{
@@ -51,28 +50,4 @@ pub use provider_harness::{
 pub use runtime::{
     Coordinator, CoordinatorError, CoordinatorEvent, CoordinatorEventSink, FanOutRequest,
     FanOutResult,
-};
-pub use scout::{
-    enterprise_event_root, project_event_slice, AuthorityRef, CoverageCellId, CoverageKey,
-    CoverageObservation, CoverageStatus, DiscoveryCharterObservation, DiscoveryPassSealObservation,
-    EnterpriseAffectedProjection, EnterpriseBatch, EnterpriseBatchBundle, EnterpriseBatchId,
-    EnterpriseBatchInclusionReceipt, EnterpriseCheckpointCursor, EnterpriseCheckpointObservation,
-    EnterpriseClassification, EnterpriseCompletion, EnterpriseConflict, EnterpriseEdgeId,
-    EnterpriseEdgeKind, EnterpriseEntityId, EnterpriseEntityKind, EnterpriseEvent,
-    EnterpriseEventId, EnterpriseFact, EnterpriseGrantBundle, EnterpriseGrantScope,
-    EnterpriseGraph, EnterpriseId, EnterpriseLedgerCheckpoint, EnterpriseLedgerCommitment,
-    EnterpriseLedgerSummary, EnterpriseMergeReport, EnterpriseProjectionCursor,
-    EnterpriseProjectionSlice, EnterpriseProjectionWork, EnterpriseProvenance, EnterpriseQuery,
-    EnterpriseSignedBatch, EnterpriseSignerGrant, EnterpriseSignerProposal, EnterpriseSignerRole,
-    EnterpriseSigningKey, EnterpriseSnapshot, EnterpriseSnapshotCommitment,
-    EnterpriseSnapshotCommitmentV2, EnterpriseTrustChain, EnterpriseTrustManifest,
-    EnterpriseTrustPolicy, FrontierKey, FrontierObservation, FrontierState, FrontierTaskId,
-    GraphEdgeObservation, GraphEntityObservation, MaterializedCharter, MaterializedCoverage,
-    MaterializedDiscoveryPass, MaterializedEdge, MaterializedEntity, MaterializedFrontier,
-    MaterializedSimulationContract, QualifiedLifecycle, SimulationContractObservation,
-    VerifiedEnterpriseBatch, VerifiedEnterpriseCheckpoint, VerifiedEnterpriseInclusion,
-    ENTERPRISE_LEDGER_COMMITMENT_SCHEMA_VERSION, ENTERPRISE_SCHEMA_VERSION,
-    ENTERPRISE_SIGNED_BATCH_SCHEMA_VERSION, ENTERPRISE_SNAPSHOT_COMMITMENT_SCHEMA_VERSION,
-    ENTERPRISE_SNAPSHOT_COMMITMENT_V2_SCHEMA_VERSION, ENTERPRISE_TRUST_SCHEMA_VERSION,
-    MAX_ENTERPRISE_EVENTS_PER_BATCH,
 };

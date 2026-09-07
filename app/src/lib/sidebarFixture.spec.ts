@@ -14,8 +14,8 @@ describe("sidebar QA fixture", () => {
     expect(new Set(active.map((conversation) => conversation.project)).size).toBe(5);
     expect(active.filter((conversation) => conversation.project?.includes("/.agent/workspace/")))
       .toHaveLength(2);
-    expect(active.find((conversation) => conversation.specialist?.kind === "rsi")?.title)
-      .toBe("Create a deterministic evaluation harness");
+    expect(active.find((conversation) => conversation.specialist?.kind === "scientist")?.title)
+      .toBe("Design a deterministic replication");
   });
 
   it("requires the explicit development QA query parameter", () => {

@@ -22,7 +22,7 @@ The foundation build and deterministic desktop matrix are healthy. The real paid
 | Targeted branch/Git/SSH tests | PASS | 5 files, 17 tests: quick chat, project branches, fake Git repository, SSH settings, branch picker |
 | Product UI check/test/build | PASS | `pnpm --dir clark-ui check`; `test` (1,911 passed, 1 skipped); `build` |
 | Full GUI mock-provider journey | PASS | `target/full-gui-smoke/20260821T183237Z-11366/`; goals, slash commands, artifacts, responsive layout |
-| Specialist mock matrix | PASS | `target/specialist-matrix-smoke/20260821T183237Z-11408/`; Scout, Security, RSI catalog/access/start/settlement/detach/mobile gates |
+| Specialist mock matrix | PASS | `target/specialist-matrix-smoke/20260821T183237Z-11408/`; Security catalog/access/start/settlement/detach/mobile gates; retained receipt predates the current catalog |
 | SSH settings UI | PASS | `target/ssh-settings-smoke/20260821T183237Z-11437/` |
 | Model picker and branch/project drag-drop | PASS | `target/model-picker-smoke/20260821T183237Z-11394/`; `target/pragmatic-dnd-smoke/20260821T183237Z-11380/` |
 | Resilience, attachments, WebKit, product boundary | PASS | `target/resilience-smoke/20260821T183458Z-14052/`; `/tmp/agent-desktop-attachment-smoke.png`; `test:webkit`; `test:product-boundary` 13/13 |
@@ -36,7 +36,7 @@ The reusable paid protocol is:
 1. Run the environment preflight and save its receipt:
    `node crates/clark-desktop-product/harness/release-environment-preflight.mjs --require clark --out target/qa-20260821/preflight-clark.json`
 2. Pin the intended tier and provider in the run (`Clark Max`, `clark_max`, `clark-platform`); record the resolved model from the backend receipt rather than a product alias.
-3. Start one fresh conversation per lane and send one bounded sentinel prompt. Suggested lanes are quick chat, new project, new session, branch/worktree mutation, simulated GitHub repository, each specialist (Scout/Security/RSI), and read-only SSH `scl`.
+3. Start one fresh conversation per lane and send one bounded sentinel prompt. Suggested lanes are quick chat, new project, new session, branch/worktree mutation, simulated GitHub repository, each supported specialist, and read-only SSH `scl`.
 4. Before sending a second turn, verify the gateway receipt contains the expected provider/model, generation/run ID, usage/cost, and terminal state. Capture the conversation ID, canonical event inspection JSON, screenshot, console/network result, and provider receipt.
 5. Stop the matrix on a route mismatch, credit/admission error, or missing terminal receipt; do not retry blindly.
 
@@ -50,7 +50,6 @@ Preflight passed and recorded the expected Clark route in `crates/clark-desktop-
 | QA-SETUP-001 | Refreshing the current product checkout fails under `--locked` because `Cargo.lock` cannot be updated | Product prebuilt export during `make test-ui-setup` | `/tmp/clark-test-ui/runs/20260821-113602-16390/services-rebuild.log`; source manifests and lockfile are out of sync |
 | QA-MATRIX-001 | Offline product feature-matrix contract is stale | Capability-map validation before feature lanes | `target/qa-20260821/feature-matrix-offline`; unmapped provider commands, workspace crates, and current live-model policy |
 | QA-SEC-001 | Product security simulation invokes paths/workspaces that no longer exist | Harness setup, before security steps | `/tmp/clark-security-simulation/receipt-offline.json`; provider-local is outside the product workspace, product `app` and referenced harness paths are missing |
-| QA-SPECIALIST-001 | Product specialist preview fails at RSI welcome/example assertion | Product specialist composition/harness assertion | `crates/clark-desktop-product/target/specialist-ui-smoke/20260821T182954Z-94861/receipt.json`; Scout and Security previews pass; no paid calls |
 | QA-DOC-001 | Product EVALS command points the fake-Git test at the wrong checkout | Documentation/test routing | Foundation `app/src/lib/fakeGitRepository.spec.ts` is the live test; corrected foundation command passes |
 | QA-TOOLCHAIN-001 | Product UI commands emit Node-engine warnings | Toolchain compatibility | Current Node `v25.9.0`; product declares `^22.22.0 || ^24.0.0 || >=26.0.0` |
 
@@ -64,7 +63,7 @@ Branch management, worktree creation, quick-chat state, new-session clearing, ar
 
 1. Repair the product lockfile/manifests contract, then rerun `make test-ui-setup` against the current product HEAD.
 2. Reconcile the Clark tier's provider/model selection with the gateway route and restore a funded, explicitly scoped test credential before any new paid call.
-3. Refresh the product feature matrix, security harness paths, specialist RSI assertion, and EVALS test routing.
+3. Refresh the product feature matrix, security harness paths, specialist assertions, and EVALS test routing.
 4. Re-run the one-turn-per-lane paid protocol and record terminal receipts before claiming hosted specialists, GitHub operations, or `scl` agent work are release-ready.
 
 No repository commits, pushes, releases, account creation, or secret changes were made by this QA pass.
@@ -81,7 +80,6 @@ the authoritative post-fix status.
 | QA-SETUP-001 | Resolved for current lockfile | Product `cargo metadata --locked --no-deps --format-version 1` succeeds; the product workspace can compile the paid-eval test target under `--locked`. |
 | QA-MATRIX-001 | Resolved | Offline consolidated matrix: 9 passed, 0 failed, 1 explicitly skipped paid lane. Receipt: `crates/clark-desktop-product/target/qa-20260821/feature-matrix-after-contract-fix-v3/report.json`. |
 | QA-SEC-001 | Resolved | Security simulation now uses the product workspace for product evals and the foundation workspace for foundation lanes; offline receipt is `/tmp/clark-security-simulation/receipt-offline.json` (`passed`). |
-| QA-SPECIALIST-001 | Resolved | RSI is conversation-native and no longer incorrectly required to expose the Scout/Security insights canvas; example metadata has a stable QA selector. Receipt: `crates/clark-desktop-product/target/specialist-ui-smoke/20260821T185639Z-74566/receipt.json` (`passed`, no paid calls). |
 | QA-DOC-001 | Resolved | Product `EVALS.md` now invokes the foundation fake-Git test from the correct checkout. |
 | QA-TOOLCHAIN-001 | Open, non-blocking | Node 25 still emits the product's declared-engine warning; use the declared Node 22/24/26 lanes for release CI. |
 
