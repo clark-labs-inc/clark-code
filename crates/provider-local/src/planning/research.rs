@@ -56,10 +56,7 @@ mod tests {
         ]);
         assert_eq!(
             available_source_tools(&available),
-            [
-                "memory_recall",
-                "organization_knowledge"
-            ]
+            ["memory_recall", "organization_knowledge"]
         );
     }
 

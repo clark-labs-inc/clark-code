@@ -296,7 +296,6 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
                 organizations: Vec::new(),
             })
         }
-
     }
     let mut registry = ToolRegistry::new(None);
     assert!(registry.get("organization_knowledge").is_none());
@@ -304,7 +303,6 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
     let tool = registry.get("organization_knowledge").unwrap();
     assert!(!tool.mutating());
     assert_eq!(tool.kind(), ToolKind::Research);
-
 }
 
 #[test]

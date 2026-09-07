@@ -81,7 +81,6 @@ pub trait PlatformContextProvider: Send + Sync {
         organization_id: Option<&str>,
         limit: i64,
     ) -> Result<OrganizationKnowledgeResponse, String>;
-
 }
 
 /// A compact prompt/recall section for the user's personal memories, or `None`
@@ -222,5 +221,4 @@ mod tests {
             vec!["global", "current"]
         );
     }
-
 }

@@ -254,5 +254,4 @@ mod tests {
         replace_memory_section(&mut prompt, None);
         assert_eq!(prompt, "base");
     }
-
 }

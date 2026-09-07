@@ -33,10 +33,7 @@ fn remote_session_recipe(
         .transpose()
         .map_err(|error| format!("prepared coding hard constraints are invalid: {error}"))?
         .unwrap_or_default();
-    if specialist_kind.is_none()
-        && hard_constraints.is_empty()
-        && extensions.is_empty()
-    {
+    if specialist_kind.is_none() && hard_constraints.is_empty() && extensions.is_empty() {
         return Ok(None);
     }
     let recipe = CodingSessionRecipe {
@@ -278,8 +275,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        remote_session_recipe, split_remote_renderer_extra,
-        unsupported_remote_renderer_field, SessionOpenRequest,
+        remote_session_recipe, split_remote_renderer_extra, unsupported_remote_renderer_field,
+        SessionOpenRequest,
     };
 
     #[test]
@@ -350,5 +347,4 @@ mod tests {
             SessionOpenRequest::New { .. } => panic!("expected load request"),
         }
     }
-
 }

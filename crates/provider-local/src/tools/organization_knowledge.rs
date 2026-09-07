@@ -113,7 +113,6 @@ mod tests {
                 organizations: Vec::new(),
             })
         }
-
     }
 
     #[test]

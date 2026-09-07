@@ -134,9 +134,15 @@ mod tests {
 
     #[test]
     fn recognizes_exact_slash_aliases_without_matching_lookalikes() {
-        assert!(slash_invocation("/security inspect AWS", "security:security"));
+        assert!(slash_invocation(
+            "/security inspect AWS",
+            "security:security"
+        ));
         assert!(slash_invocation("  /security", "security:security"));
-        assert!(!slash_invocation("/securities inspect AWS", "security:security"));
+        assert!(!slash_invocation(
+            "/securities inspect AWS",
+            "security:security"
+        ));
         assert!(!slash_invocation("please /security", "security:security"));
     }
 }

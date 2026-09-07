@@ -509,5 +509,4 @@ mod tests {
         assert_eq!(request.session_id, "conversation-1");
         assert_eq!(request.roots, ["/srv/shared/api", "/srv/shared/docs"]);
     }
-
 }

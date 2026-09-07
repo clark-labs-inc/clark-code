@@ -833,11 +833,8 @@ impl Provider for LocalAgentProvider {
         // snapshot are independent read-only preflight work. Overlap them so
         // first-token latency is bounded by the slowest branch instead of
         // adding the durations together.
-        let (attachment_context, repository_context, git_snapshot) = tokio::join!(
-            attachment_context,
-            repository_context,
-            git_snapshot
-        );
+        let (attachment_context, repository_context, git_snapshot) =
+            tokio::join!(attachment_context, repository_context, git_snapshot);
         if let Some(section) = repository_context {
             context_sections.push(section);
         }
