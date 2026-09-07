@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_compaction_request_includes_oldest_history_even_when_legacy_budget_is_small() {
+    fn compaction_plan_keeps_a_bounded_latest_user_fallback() {
         let transcript = vec![
             user_message("oldest-history-marker ".repeat(80)),
             user_message("middle-history-marker ".repeat(80)),
@@ -163,11 +163,17 @@ mod tests {
             ..CompactionConfig::default()
         };
 
-        let prepared = prepare_complete_compaction(&views, &config).expect("compaction request");
-        assert_eq!(prepared.request.omitted_messages, 0);
-        assert!(prepared.request.prompt.contains("oldest-history-marker"));
-        assert!(prepared.request.prompt.contains("middle-history-marker"));
-        assert!(prepared.request.prompt.contains("newest-history-marker"));
+        let plan = prepare_compaction_plan(&views, &config).expect("compaction plan");
+        assert_eq!(plan.recent_user_messages.len(), 0);
+
+        let config = CompactionConfig {
+            recent_user_token_budget: 100,
+            ..config
+        };
+        let plan = prepare_compaction_plan(&views, &config).expect("compaction plan");
+        assert_eq!(plan.recent_user_messages.len(), 1);
+        assert!(plan.recent_user_messages[0].starts_with("newest-history-marker"));
+        assert!(!plan.recent_user_messages[0].contains("middle-history-marker"));
     }
 
     #[test]
@@ -351,7 +357,7 @@ mod usage_trigger_tests {
             llm,
             CompactionConfig {
                 auto_compact_token_limit: 200,
-                compact_request_token_limit: 1_000,
+                compact_request_token_limit: 2_000,
                 recent_user_token_budget: 100,
                 ..CompactionConfig::default()
             },

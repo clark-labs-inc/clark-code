@@ -3,7 +3,7 @@ use std::process::Stdio;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use super::{ToolCtx, ToolOutcome};
+use super::{BoundedGrepOutput, ToolCtx, ToolOutcome};
 
 /// Run the pinned ripgrep sidecar for local searches. `None` means the command
 /// is unavailable (normal in source builds) or the executor is remote, so the
@@ -78,7 +78,7 @@ pub(super) async fn search(
         bytes
     });
     let mut reader = BufReader::new(stdout);
-    let mut output = Vec::new();
+    let mut output = BoundedGrepOutput::default();
     let mut match_count = 0usize;
 
     loop {
@@ -116,7 +116,7 @@ pub(super) async fn search(
         };
         match_count = match_count.saturating_add(contribution);
         output.push(line);
-        if output.len().is_multiple_of(64) {
+        if output.total_rows().is_multiple_of(64) {
             ctx.report(format!("ripgrep found {match_count} matches\n"));
         }
     }
@@ -142,7 +142,7 @@ pub(super) async fn search(
         return Some(ToolOutcome::ok(format!("(no matches for `{pattern}`)")));
     }
 
-    Some(ToolOutcome::ok(output.join("\n")))
+    Some(ToolOutcome::ok(output.finish(match_count, mode)))
 }
 
 fn normalize_line(line: &str, mode: &str) -> String {

@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use crate::llm::LlmClient;
 use crate::loop_state::SessionState;
 
+mod hierarchical;
 mod reasoning;
 
 pub use core::CompactionConfig;
@@ -252,21 +253,40 @@ pub(crate) async fn compact_once(
 ) -> Option<Vec<ca::AgentMessage>> {
     let views = message_views(messages);
     let config = core::with_private_reasoning_summary_guidance(config);
-    let prepared = prepare_complete_compaction(&views, &config)?;
+    let plan = prepare_compaction_plan(&views, &config)?;
 
-    let mut summary = match llm.complete(None, &prepared.request.prompt, signal).await {
+    let summary = hierarchical::compact(llm, &config, messages, signal).await?;
+    finalize_compaction(&config, messages, &plan, summary)
+}
+
+async fn complete_with_retry(
+    llm: &LlmClient,
+    system: &str,
+    evidence: &str,
+    signal: &tokio_util::sync::CancellationToken,
+) -> Option<String> {
+    Some(match llm.complete(Some(system), evidence, signal).await {
         Ok(summary) => summary,
+        // Replaying a rejected prompt cannot make it smaller. Return control
+        // to the overflow recovery guard instead of paying for the identical
+        // deterministic failure twice.
+        Err(crate::llm::LlmError::ContextOverflow(_)) => return None,
         Err(_) if !signal.is_cancelled() => {
             // One retry: compaction failing means the run dies at the window
             // edge later, so a transient summarizer hiccup is worth absorbing.
             tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-            llm.complete(None, &prepared.request.prompt, signal)
-                .await
-                .ok()?
+            llm.complete(Some(system), evidence, signal).await.ok()?
         }
         Err(_) => return None,
-    };
+    })
+}
 
+fn finalize_compaction(
+    config: &CompactionConfig,
+    messages: &[ca::AgentMessage],
+    plan: &core::CompactionPlan,
+    mut summary: String,
+) -> Option<Vec<ca::AgentMessage>> {
     // The summary is a point-in-time snapshot that outlives the files it
     // describes — other agents share this tree, so beliefs formed from it
     // go stale. Stamp it the way resume-context already is.
@@ -275,7 +295,7 @@ pub(crate) async fn compact_once(
 this was written — re-read a file before relying on its described contents.]",
     );
 
-    let compacted = core::finalize_compaction(&prepared.plan, &summary);
+    let compacted = core::finalize_compaction(plan, &summary);
     let mut next = vec![user_message(compacted.summary_message)];
     let raw_tail = recent_raw_tail(messages, config.recent_user_token_budget);
     if raw_tail.is_empty() {
@@ -326,7 +346,7 @@ pub(crate) async fn force_compact(
     messages: &[ca::AgentMessage],
     signal: &tokio_util::sync::CancellationToken,
 ) -> Option<Vec<ca::AgentMessage>> {
-    compact_once(llm, &forced(config), messages, signal).await
+    compact_once(llm, &manual(config), messages, signal).await
 }
 
 /// Run an explicit, standalone compaction turn. The visible conversation is
@@ -495,21 +515,45 @@ fn message_views(messages: &[ca::AgentMessage]) -> Vec<AgentMessageView<'_>> {
     messages.iter().map(AgentMessageView).collect()
 }
 
-fn prepare_complete_compaction<'a>(
+fn prepare_compaction_plan<'a>(
     views: &[AgentMessageView<'a>],
     config: &CompactionConfig,
-) -> Option<core::PreparedCompaction> {
-    // The compaction request replaces this history. Letting the helper's
-    // independent request budget discard the oldest messages creates a
-    // plausible-looking but incomplete checkpoint. The normal compaction
-    // threshold already fires below the model's context limit, so render the
-    // entire source transcript. If the provider still rejects that request,
-    // keep the raw history and surface the context failure instead of silently
-    // installing a partial summary.
-    let mut complete = config.clone();
-    complete.compact_request_token_limit = usize::MAX;
-    let prepared = core::prepare_compaction(views, &complete, &core::CharHeuristic)?;
-    (prepared.request.omitted_messages == 0).then_some(prepared)
+) -> Option<core::CompactionPlan> {
+    core::should_compact(views, config, &core::CharHeuristic).then(|| core::CompactionPlan {
+        recent_user_messages: recent_user_messages_for_plan(views, config),
+        summary_prefix: config.summary_prefix.clone(),
+    })
+}
+
+fn recent_user_messages_for_plan(
+    views: &[AgentMessageView<'_>],
+    config: &CompactionConfig,
+) -> Vec<String> {
+    let mut selected = Vec::new();
+    let mut remaining = config.recent_user_token_budget;
+    let mut text = String::new();
+    for view in views.iter().rev() {
+        text.clear();
+        if !core::TranscriptMessage::user_text_for_compaction(view, &mut text)
+            || text.is_empty()
+            || core::TranscriptMessage::is_compaction_summary(view, &config.summary_prefix)
+        {
+            continue;
+        }
+
+        let tokens = text.len().div_ceil(4);
+        if tokens <= remaining {
+            selected.push(text.clone());
+            remaining = remaining.saturating_sub(tokens);
+            continue;
+        }
+        if remaining > 0 {
+            selected.push(core::truncate_to_token_budget(&text, remaining));
+        }
+        break;
+    }
+    selected.reverse();
+    selected
 }
 
 impl core::TranscriptMessage for AgentMessageView<'_> {

@@ -18,6 +18,114 @@ mod ripgrep;
 /// heuristic) before deciding a file is binary and skipping it whole.
 const BINARY_SNIFF_BYTES: usize = 8_000;
 
+/// Keep one broad search from consuming the model's entire context window.
+/// The complete match count is still reported so the model can narrow the
+/// query deliberately instead of mistaking the bounded prefix for completeness.
+pub(super) const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+const TRUNCATION_NOTICE_RESERVE_BYTES: usize = 512;
+
+#[derive(Default)]
+pub(super) struct BoundedGrepOutput {
+    content: String,
+    kept_rows: usize,
+    total_rows: usize,
+    truncated: bool,
+}
+
+impl BoundedGrepOutput {
+    pub(super) fn push(&mut self, line: String) {
+        self.total_rows = self.total_rows.saturating_add(1);
+        if self.truncated {
+            return;
+        }
+
+        let budget = MAX_OUTPUT_BYTES.saturating_sub(TRUNCATION_NOTICE_RESERVE_BYTES);
+        let separator = usize::from(!self.content.is_empty());
+        if self
+            .content
+            .len()
+            .saturating_add(separator)
+            .saturating_add(line.len())
+            <= budget
+        {
+            if separator > 0 {
+                self.content.push('\n');
+            }
+            self.content.push_str(&line);
+            self.kept_rows += 1;
+            return;
+        }
+
+        if self.content.is_empty() {
+            self.content.push_str(&bounded_row(&line, budget));
+            self.kept_rows = 1;
+        }
+        self.truncated = true;
+    }
+
+    pub(super) fn total_rows(&self) -> usize {
+        self.total_rows
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.total_rows == 0
+    }
+
+    pub(super) fn finish(mut self, match_count: usize, mode: &str) -> String {
+        if !self.truncated {
+            return self.content;
+        }
+
+        let omitted_rows = self.total_rows.saturating_sub(self.kept_rows);
+        let refinement = match mode {
+            "content" => {
+                "Narrow `path`/`glob` or the pattern, or use `files_with_matches`/`count`."
+            }
+            _ => "Narrow `path`/`glob` or the pattern.",
+        };
+        self.content.push_str(&format!(
+            "\n\n[grep output bounded at {MAX_OUTPUT_BYTES} bytes: showing {} of {} result rows; \
+             {omitted_rows} omitted; {match_count} total matches. {refinement}]",
+            self.kept_rows, self.total_rows,
+        ));
+        debug_assert!(self.content.len() <= MAX_OUTPUT_BYTES);
+        self.content
+    }
+}
+
+fn bounded_row(line: &str, budget: usize) -> String {
+    const MARKER: &str = "\n[matched row clipped]\n";
+    if line.len() <= budget {
+        return line.to_string();
+    }
+    if budget <= MARKER.len() {
+        return MARKER[..budget].to_string();
+    }
+
+    let content_budget = budget - MARKER.len();
+    let head_budget = content_budget / 2;
+    let tail_budget = content_budget - head_budget;
+    let head_end = floor_char_boundary(line, head_budget);
+    let tail_start = ceil_char_boundary(line, line.len().saturating_sub(tail_budget));
+    format!("{}{}{}", &line[..head_end], MARKER, &line[tail_start..])
+}
+
+fn floor_char_boundary(text: &str, mut index: usize) -> usize {
+    index = index.min(text.len());
+    while !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn ceil_char_boundary(text: &str, mut index: usize) -> usize {
+    index = index.min(text.len());
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
+}
+
 pub struct Grep;
 
 #[async_trait]
@@ -26,7 +134,7 @@ impl ToolExecutor for Grep {
         "grep"
     }
     fn description(&self) -> &str {
-        "Search project file contents with a regular expression. Returns matching lines as `path:line: text`. Scope with `path` and filter filenames with `glob`."
+        "Search project file contents with a regular expression. Returns a bounded set of matching lines as `path:line: text` plus the complete match count. Scope with `path`, filter filenames with `glob`, or use `files_with_matches`/`count` for broad searches."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -82,9 +190,7 @@ impl ToolExecutor for Grep {
             )
         };
 
-        let mut content_lines: Vec<String> = Vec::new();
-        let mut files_with_matches: Vec<String> = Vec::new();
-        let mut counts: Vec<(String, usize)> = Vec::new();
+        let mut output = BoundedGrepOutput::default();
         let mut total = 0usize;
 
         // The executor yields files only, already skipping ignored dirs — on the
@@ -147,7 +253,6 @@ impl ToolExecutor for Grep {
             }
 
             let mut file_count = 0usize;
-            let mut file_lines: Vec<String> = Vec::new();
             let search_result = searcher.search_slice(
                 &matcher,
                 &bytes,
@@ -155,7 +260,7 @@ impl ToolExecutor for Grep {
                     file_count += 1;
                     total += 1;
                     if mode == "content" {
-                        file_lines.push(format!(
+                        output.push(format!(
                             "{}:{}: {}",
                             rel(path),
                             line_number,
@@ -168,26 +273,19 @@ impl ToolExecutor for Grep {
             if search_result.is_err() {
                 continue; // treat a stream error like today's "skip unreadable"
             }
-            content_lines.extend(file_lines);
             if file_count > 0 {
-                files_with_matches.push(rel(path));
-                counts.push((rel(path), file_count));
+                match mode.as_str() {
+                    "files_with_matches" => output.push(rel(path)),
+                    "count" => output.push(format!("{}: {file_count}", rel(path))),
+                    _ => {}
+                }
             }
         }
 
         if total == 0 {
             return ToolOutcome::ok(format!("(no matches for `{pattern}`)"));
         }
-        let body = match mode.as_str() {
-            "files_with_matches" => files_with_matches.join("\n"),
-            "count" => counts
-                .iter()
-                .map(|(p, c)| format!("{p}: {c}"))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            _ => content_lines.join("\n"),
-        };
-        ToolOutcome::ok(body)
+        ToolOutcome::ok(output.finish(total, &mode))
     }
 }
 
@@ -231,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserves_all_matches_and_complete_long_lines() {
+    async fn preserves_all_matches_and_complete_long_lines_within_bound() {
         let dir = tempfile::tempdir().unwrap();
         let mut content = format!("needle {} LONG_LINE_SENTINEL\n", "x".repeat(450));
         for index in 0..205 {
@@ -246,6 +344,41 @@ mod tests {
         assert!(out.content.contains("LONG_LINE_SENTINEL"));
         assert!(out.content.contains("match-204"));
         assert!(!out.content.contains("truncated"));
+    }
+
+    #[tokio::test]
+    async fn bounds_broad_results_and_tells_the_model_how_to_refine() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = (0..2_000)
+            .map(|index| format!("needle match-{index:04} {}\n", "x".repeat(80)))
+            .collect::<String>();
+        std::fs::write(dir.path().join("many.txt"), content).unwrap();
+
+        let out = Grep
+            .invoke(json!({"pattern": "needle"}), &ctx(dir.path()))
+            .await;
+
+        assert!(!out.is_error, "{}", out.content);
+        assert!(out.content.len() <= MAX_OUTPUT_BYTES);
+        assert!(out.content.contains("needle match-0000"));
+        assert!(out.content.contains("showing"));
+        assert!(out.content.contains("2000 total matches"));
+        assert!(out.content.contains("Narrow `path`/`glob`"));
+        assert!(!out.content.contains("needle match-1999"));
+    }
+
+    #[test]
+    fn a_single_giant_utf8_row_is_clipped_inside_the_same_bound() {
+        let mut output = BoundedGrepOutput::default();
+        output.push(format!(
+            "src/data.jsonl:1: {}",
+            "é".repeat(MAX_OUTPUT_BYTES)
+        ));
+        let rendered = output.finish(1, "content");
+
+        assert!(rendered.len() <= MAX_OUTPUT_BYTES);
+        assert!(rendered.contains("[matched row clipped]"));
+        assert!(rendered.contains("1 total matches"));
     }
 
     #[tokio::test]
