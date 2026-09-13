@@ -12,8 +12,8 @@ use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
-mod diagnostics;
 mod desktop_identity;
+mod diagnostics;
 mod document_preview;
 mod file_actions;
 mod integrations;

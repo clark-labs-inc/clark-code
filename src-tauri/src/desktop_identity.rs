@@ -20,7 +20,9 @@ fn scoped_identity(machine: &str) -> Result<String, String> {
 }
 
 fn output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = std::process::Command::new(program).args(args).output()
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
         .map_err(|_| "Could not read this computer's identity".to_string())?;
     if !output.status.success() {
         return Err("Could not read this computer's identity".into());
@@ -31,8 +33,10 @@ fn output(program: &str, args: &[&str]) -> Result<String, String> {
 #[cfg(target_os = "macos")]
 fn machine_identity() -> Result<(String, String), String> {
     let info = output("/usr/sbin/ioreg", &["-rd1", "-c", "IOPlatformExpertDevice"])?;
-    let machine = info.lines().find(|line| line.contains("\"IOPlatformUUID\""))
-        .and_then(|line| line.split('=') .nth(1))
+    let machine = info
+        .lines()
+        .find(|line| line.contains("\"IOPlatformUUID\""))
+        .and_then(|line| line.split('=').nth(1))
         .map(|value| value.trim().trim_matches('"').to_string())
         .ok_or_else(|| "This computer's identity is unavailable".to_string())?;
     let name = output("/usr/sbin/scutil", &["--get", "ComputerName"])
@@ -50,11 +54,23 @@ fn machine_identity() -> Result<(String, String), String> {
 
 #[cfg(target_os = "windows")]
 fn machine_identity() -> Result<(String, String), String> {
-    let info = output("reg", &["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid"])?;
-    let machine = info.lines().find(|line| line.contains("MachineGuid"))
+    let info = output(
+        "reg",
+        &[
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Cryptography",
+            "/v",
+            "MachineGuid",
+        ],
+    )?;
+    let machine = info
+        .lines()
+        .find(|line| line.contains("MachineGuid"))
         .and_then(|line| line.split_whitespace().last())
-        .ok_or_else(|| "This computer's identity is unavailable".to_string())?.to_string();
-    let name = std::env::var("COMPUTERNAME").map_err(|_| "Computer name unavailable".to_string())?;
+        .ok_or_else(|| "This computer's identity is unavailable".to_string())?
+        .to_string();
+    let name =
+        std::env::var("COMPUTERNAME").map_err(|_| "Computer name unavailable".to_string())?;
     Ok((machine, name))
 }
 
@@ -67,8 +83,13 @@ fn machine_identity() -> Result<(String, String), String> {
 pub async fn desktop_identity() -> Result<DesktopIdentity, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let (machine, name) = machine_identity()?;
-        Ok(DesktopIdentity { id: scoped_identity(&machine)?, name })
-    }).await.map_err(|_| "Could not identify this computer".to_string())?
+        Ok(DesktopIdentity {
+            id: scoped_identity(&machine)?,
+            name,
+        })
+    })
+    .await
+    .map_err(|_| "Could not identify this computer".to_string())?
 }
 
 #[cfg(test)]
@@ -79,7 +100,10 @@ mod tests {
     fn reads_this_macs_identity_without_keychain_or_signing_access() {
         let (machine, name) = machine_identity().unwrap();
         assert!(!name.trim().is_empty());
-        assert_eq!(scoped_identity(&machine).unwrap().len(), "computer-".len() + 64);
+        assert_eq!(
+            scoped_identity(&machine).unwrap().len(),
+            "computer-".len() + 64
+        );
     }
 
     #[test]
