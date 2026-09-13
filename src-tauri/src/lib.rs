@@ -13,6 +13,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
 mod diagnostics;
+mod desktop_identity;
 mod document_preview;
 mod file_actions;
 mod integrations;
@@ -323,6 +324,7 @@ pub fn run_with_product_and_context(
         .manage(terminal::Terminals::default())
         .manage(integrations::IntegrationState::default())
         .invoke_handler(tauri::generate_handler![
+            desktop_identity::desktop_identity,
             integrations::integration_request,
             commands::provider_list,
             commands::product_request,

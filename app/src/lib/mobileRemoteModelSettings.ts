@@ -1,6 +1,6 @@
+import { productModule } from "../product/productModule";
+import { MobileRemoteFailure } from "./mobileRemoteFailure";
 import {
-  CODING_MODELS,
-  normalizeReasoningEffort,
   type ReasoningEffortId,
 } from "./localAgent";
 import type { CodeRemoteCommand } from "./mobileRemote";
@@ -30,15 +30,21 @@ export function mobileRemoteModelSettings(
 
   const rawModel = payload.model;
   if (typeof rawModel !== "string" || !rawModel.trim()) {
-    throw new Error("The selected product model is invalid.");
+    throw new MobileRemoteFailure("invalid_command", "The selected model is invalid.");
   }
   const model = rawModel.trim();
-  const config = CODING_MODELS.find((candidate) => candidate.id === model);
+  const config = productModule().localAgent.models.find((candidate) => candidate.id === model);
   if (!config) {
-    throw new Error("The selected product model is not available on this desktop.");
+    throw new MobileRemoteFailure("model_unavailable", "The selected model is no longer available on this computer. Choose a model again.");
   }
 
   // Older mobile clients may still send a user-selected effort. Ignore it so
   // every client uses the model's maximum supported reasoning level.
-  return { model, reasoningEffort: normalizeReasoningEffort(model, config.defaultReasoningEffort) };
+  return { model, reasoningEffort: config.defaultReasoningEffort };
+}
+
+export function desktopRemoteModels() {
+  return productModule().localAgent.models.map((model) => ({
+    id: model.id, label: model.label, reasoning_effort: model.defaultReasoningEffort,
+  }));
 }

@@ -307,11 +307,11 @@ export default function AuthenticatedWorkspace({
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
-      <MobileRemoteAgent />
       <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!activeSpecialist && <TopBar dark={dark} onToggleTheme={onToggleTheme} />}
         <OfflineBanner />
+        <MobileRemoteAgent />
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}

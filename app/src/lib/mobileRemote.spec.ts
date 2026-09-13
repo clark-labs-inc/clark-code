@@ -29,6 +29,7 @@ describe("registerCodeRemoteHost", () => {
         protocolVersion: CODE_REMOTE_PROTOCOL_VERSION,
         capabilities: CODE_REMOTE_CAPABILITIES,
         projects: [],
+        models: [],
       },
     );
 
@@ -51,6 +52,7 @@ describe("registerCodeRemoteHost", () => {
           "edit_and_resend",
         ],
         projects: [],
+        models: [],
       },
     });
   });

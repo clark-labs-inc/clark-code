@@ -1,3 +1,13 @@
+import { invoke } from "@tauri-apps/api/core";
+
+let identity: Promise<{ id: string; name: string }> | undefined;
+export function desktopIdentity(): Promise<{ id: string; name: string }> {
+  return identity ??= invoke<{ id: string; name: string }>("desktop_identity").catch((error) => {
+    identity = undefined;
+    throw error;
+  });
+}
+
 const HOST_ID_KEY = "agent-desktop:code-remote-host-id";
 const DESKTOP_INSTANCE_ID = (() => {
   try {

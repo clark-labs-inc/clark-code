@@ -38,6 +38,7 @@ export interface CodeRemoteHostRegistration {
   appVersion: string;
   protocolVersion: number;
   capabilities: CodeRemoteCommand["command_type"][];
+  models: { id: string; label: string; reasoning_effort: string }[];
   projects: CodeRemoteProjectRegistration[];
 }
 
@@ -106,6 +107,7 @@ export async function registerCodeRemoteHost(
     protocolVersion: registration.protocolVersion,
     capabilities: registration.capabilities,
     projects: registration.projects,
+    models: registration.models,
   });
 }
 

@@ -1,16 +1,11 @@
-import { useEffect, useRef } from "react";
-import { getVersion } from "@tauri-apps/api/app";
 import { useSessionStore } from "../store/sessionStore";
 import { isBusy, liveSessions, mergedOf } from "../store/sessionStore.runtime";
 import type { PromptReceipt } from "../core-bridge/bridge";
-import { cloudCreds, type CloudCreds } from "../lib/cloudHistory";
+import { codeKeyAccountBinding } from "../lib/account";
+import { type CloudCreds } from "../lib/cloudHistory";
 import {
-  CODE_REMOTE_CAPABILITIES,
-  CODE_REMOTE_PROTOCOL_VERSION,
   ackCodeRemoteCommand,
   downloadCodeRemoteAttachment,
-  pollCodeRemoteCommands,
-  registerCodeRemoteHost,
   type CodeRemoteCommand,
   type CodeRemoteProjectRegistration,
 } from "../lib/mobileRemote";
@@ -19,15 +14,9 @@ import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
 import {
-  discoverRepositories,
-  projectKnowledgeEnabled,
   repositoryIdentityForRoot,
   repositoriesUnderRoot,
-  syncRepositoriesUnderRoot,
 } from "../lib/repositoryKnowledge";
-import { desktopHostId, desktopInstanceId } from "../lib/desktopHost";
-import { codeKeyAccountBinding } from "../lib/account";
-import { mobileRemoteRetryDelayMs } from "../lib/mobileRemoteRetry";
 import {
   mobileRemoteModelSettings,
   type MobileRemoteModelSettings,
@@ -36,63 +25,11 @@ import {
   ensureMobileRemoteLiveTarget,
   inspectMobileRemoteTarget,
 } from "../lib/mobileRemoteLiveTarget";
-import {
-  MobileRemotePresenceLoop,
-  publishMobileRemotePresence,
-} from "../lib/mobileRemotePresence";
 import { mobileRemoteCommandWaitsForIdle } from "../lib/mobileRemoteCommandScheduling";
 
-const LOOP_INTERVAL_MS = 500;
-const COMMAND_POLL_WAIT_MS = 25_000;
 
-type MobileRemoteFailureCode =
-  | "invalid_command"
-  | "invalid_claim"
-  | "desktop_unavailable"
-  | "project_unavailable"
-  | "conversation_busy"
-  | "stale_run"
-  | "stale_edit"
-  | "stale_permission"
-  | "submission_failed"
-  | "command_failed";
-
-export class MobileRemoteFailure extends Error {
-  constructor(
-    readonly code: MobileRemoteFailureCode,
-    message: string,
-    readonly retryable = false,
-  ) {
-    super(message);
-  }
-}
-
-function remoteFailure(
-  code: MobileRemoteFailureCode,
-  message: string,
-  retryable = false,
-): never {
-  throw new MobileRemoteFailure(code, message, retryable);
-}
-
-export function remoteFailureReceipt(error: unknown): {
-  error: string;
-  error_code: MobileRemoteFailureCode;
-  retryable: boolean;
-} {
-  if (error instanceof MobileRemoteFailure) {
-    return {
-      error: error.message.slice(0, 800),
-      error_code: error.code,
-      retryable: error.retryable,
-    };
-  }
-  return {
-    error: String(error).slice(0, 800),
-    error_code: "command_failed",
-    retryable: false,
-  };
-}
+import { remoteFailure, remoteFailureReceipt } from "../lib/mobileRemoteFailure";
+export { MobileRemoteFailure, remoteFailureReceipt } from "../lib/mobileRemoteFailure";
 
 function leaf(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path || "Project";
@@ -106,7 +43,7 @@ function sshProjectId(hostId: string, root: string): string {
   return `ssh:${encodeURIComponent(hostId)}:${encodeURIComponent(root)}`;
 }
 
-function currentProjects(): CodeRemoteProjectRegistration[] {
+export function currentProjects(): CodeRemoteProjectRegistration[] {
   const state = useSessionStore.getState();
   const projects: CodeRemoteProjectRegistration[] = [];
   const cwd = state.localSettings.cwd.trim();
@@ -295,7 +232,7 @@ async function requireActiveRunDesktop(command: CodeRemoteCommand) {
   return { ...target, runId };
 }
 
-function commandWaitsForTargetIdle(command: CodeRemoteCommand): boolean {
+export function commandWaitsForTargetIdle(command: CodeRemoteCommand): boolean {
   const entry = command.desktop_id ? liveSessions.get(command.desktop_id) : null;
   return mobileRemoteCommandWaitsForIdle(
     command,
@@ -498,7 +435,7 @@ export async function editAndResend(command: CodeRemoteCommand): Promise<PromptR
   return receipt;
 }
 
-async function runCommand(
+export async function runCommand(
   creds: CloudCreds,
   hostId: string,
   instanceId: string,
@@ -579,144 +516,4 @@ async function runCommand(
   }
 }
 
-export function MobileRemoteAgent() {
-  const auth = useSessionStore((state) => state.auth);
-  const cwd = useSessionStore((state) => state.localSettings.cwd);
-  const commandBusyRef = useRef(false);
-  const repositoryBusyRef = useRef(false);
-  const consecutiveFailuresRef = useRef(0);
-  const retryAtRef = useRef(0);
-
-  useEffect(() => {
-    if (!auth) return;
-    const effectOwner = codeKeyAccountBinding(auth);
-    const hostId = desktopHostId();
-    const instanceId = desktopInstanceId();
-    let stopped = false;
-    let appVersion: Promise<string> | null = null;
-    consecutiveFailuresRef.current = 0;
-    retryAtRef.current = 0;
-
-    const accountStillCurrent = () => {
-      const current = useSessionStore.getState().auth;
-      const currentOwner = codeKeyAccountBinding(current);
-      return Boolean(effectOwner && effectOwner === currentOwner);
-    };
-
-    const refreshPresence = async () => {
-      if (stopped || !accountStillCurrent() || navigator.onLine === false) return;
-      const creds = cloudCreds(useSessionStore.getState().auth);
-      if (!creds) return;
-      const root = useSessionStore.getState().localSettings.cwd.trim();
-      const refreshRepositories = root
-        && projectKnowledgeEnabled(creds.accountScope)
-        && !repositoryBusyRef.current
-        ? async () => {
-            repositoryBusyRef.current = true;
-            try {
-              await discoverRepositories(root, creds.accountScope);
-              if (stopped || !accountStillCurrent()) return;
-              const currentCreds = cloudCreds(useSessionStore.getState().auth);
-              if (currentCreds) await syncRepositoriesUnderRoot(currentCreds, root);
-            } finally {
-              repositoryBusyRef.current = false;
-            }
-          }
-        : undefined;
-      try {
-        await publishMobileRemotePresence(
-          async () => {
-            appVersion ??= getVersion();
-            const version = await appVersion;
-            if (stopped || !accountStillCurrent()) return;
-            const currentCreds = cloudCreds(useSessionStore.getState().auth);
-            if (!currentCreds) return;
-            await registerCodeRemoteHost(currentCreds, {
-              hostId,
-              displayName: `${auth.user.name || "the agent"} desktop`,
-              os: navigator.platform || "desktop",
-              arch: "",
-              appVersion: version,
-              protocolVersion: CODE_REMOTE_PROTOCOL_VERSION,
-              capabilities: CODE_REMOTE_CAPABILITIES,
-              projects: currentProjects(),
-            });
-          },
-          refreshRepositories,
-        );
-      } catch {
-        /* Product requests own bounded credential recovery and exact replay. */
-      }
-    };
-
-    const presenceLoop = new MobileRemotePresenceLoop(refreshPresence);
-
-    const pollCommands = async () => {
-      if (stopped || !accountStillCurrent() || commandBusyRef.current) return;
-      if (navigator.onLine === false || Date.now() < retryAtRef.current) return;
-      const creds = cloudCreds(useSessionStore.getState().auth);
-      if (!creds) return;
-      commandBusyRef.current = true;
-      try {
-        const response = await pollCodeRemoteCommands(
-          creds,
-          hostId,
-          instanceId,
-          1,
-          COMMAND_POLL_WAIT_MS,
-        );
-        if (stopped || !accountStillCurrent()) return;
-        for (const command of response.commands) {
-          if (stopped) break;
-          // Leave a busy follow-up in `delivered`, where it survives a desktop
-          // restart. Acknowledging it and handing it to `send()` would put it
-          // in the process-local queue and falsely report completion to mobile.
-          if (commandWaitsForTargetIdle(command)) continue;
-          await runCommand(
-            creds,
-            hostId,
-            instanceId,
-            command,
-            () => !stopped && (
-              cloudCreds(useSessionStore.getState().auth)?.accountScope === creds.accountScope
-            ),
-          );
-        }
-        consecutiveFailuresRef.current = 0;
-        retryAtRef.current = 0;
-      } catch {
-        consecutiveFailuresRef.current += 1;
-        retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
-        /* Remote control is a background affordance; normal desktop use continues. */
-      } finally {
-        commandBusyRef.current = false;
-      }
-    };
-
-    presenceLoop.start();
-    void pollCommands();
-    const timer = window.setInterval(() => void pollCommands(), LOOP_INTERVAL_MS);
-    const resumeAfterOutage = () => {
-      consecutiveFailuresRef.current = 0;
-      retryAtRef.current = 0;
-      presenceLoop.refreshNow();
-      void pollCommands();
-    };
-    const resumeWhenVisible = () => {
-      if (document.visibilityState === "visible") resumeAfterOutage();
-    };
-    window.addEventListener("online", resumeAfterOutage);
-    window.addEventListener("focus", resumeAfterOutage);
-    document.addEventListener("visibilitychange", resumeWhenVisible);
-    return () => {
-      stopped = true;
-      presenceLoop.stop();
-      window.clearInterval(timer);
-      window.removeEventListener("online", resumeAfterOutage);
-      window.removeEventListener("focus", resumeAfterOutage);
-      document.removeEventListener("visibilitychange", resumeWhenVisible);
-    };
-  }, [auth, cwd]);
-
-  return null;
-}
+export { MobileRemoteAgent } from "./MobileRemoteConnection";

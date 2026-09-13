@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CodeRemoteCommand } from "./mobileRemote";
+import { remoteFailureReceipt } from "./mobileRemoteFailure";
 import { mobileRemoteModelSettings } from "./mobileRemoteModelSettings";
 
 function command(payload?: Record<string, unknown>): CodeRemoteCommand {
@@ -38,11 +39,20 @@ describe("mobileRemoteModelSettings", () => {
     });
   });
 
+  it("returns a typed model failure receipt for the mobile presentation", () => {
+    try {
+      mobileRemoteModelSettings(command({ model: "retired-model" }));
+      throw new Error("Expected rejection");
+    } catch (error) {
+      expect(remoteFailureReceipt(error)).toMatchObject({ error_code: "model_unavailable", retryable: false });
+    }
+  });
+
   it("rejects stale model ids but ignores old effort choices", () => {
     expect(() => mobileRemoteModelSettings(command({
       model: "retired-model",
       reasoning_effort: "",
-    }))).toThrow("not available");
+    }))).toThrow("no longer available");
     expect(mobileRemoteModelSettings(command({
       model: "local-model-large",
       reasoning_effort: "low",
