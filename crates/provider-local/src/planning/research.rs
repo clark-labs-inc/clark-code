@@ -51,10 +51,7 @@ mod tests {
             "memory_recall".to_string(),
             "write_file".to_string(),
         ]);
-        assert_eq!(
-            available_source_tools(&available),
-            ["memory_recall"]
-        );
+        assert_eq!(available_source_tools(&available), ["memory_recall"]);
     }
 
     #[test]

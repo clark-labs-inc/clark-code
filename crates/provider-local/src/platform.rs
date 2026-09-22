@@ -41,7 +41,6 @@ pub trait PlatformContextProvider: Send + Sync {
         fingerprint: &str,
         query: &str,
     ) -> Result<RepositoryContext, String>;
-
 }
 
 /// A compact prompt/recall section for the user's personal memories, or `None`

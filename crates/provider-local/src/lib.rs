@@ -96,8 +96,8 @@ pub use orchestration::{local_read_only_harness, WorkspaceDigestGuard};
 #[doc(hidden)]
 pub use planning::{complete_plan_markdown_for_eval, planning_prompt_contract_for_eval};
 pub use platform::{
-    personal_memory_section, repository_context_section, scope_personal_memories,
-    PersonalMemory, PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
+    personal_memory_section, repository_context_section, scope_personal_memories, PersonalMemory,
+    PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
 };
 pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
 pub use repository::{
