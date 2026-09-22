@@ -457,13 +457,13 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     assert!(environment.docs_root.is_none());
     assert_eq!(environment.workspace_roots.len(), 1);
     let state = provider.session.lock().await;
-    assert!(state.hooks.is_empty());
+    assert!(state.hooks.pre_tool_use.is_empty());
+    assert!(state.hooks.post_tool_use.is_empty());
     assert!(state.allow_commands.is_empty());
     assert!(state.check_command.is_none());
     drop(state);
     let registry = provider.registry.as_ref().unwrap();
     assert!(registry.get("memory").is_none());
-    assert!(registry.get("organization_knowledge").is_none());
     assert!(registry.get("browser").is_none());
     assert!(registry.get("delegate_read_only").is_none());
     assert!(registry.get("delegate_coding_workstreams").is_none());
@@ -1026,7 +1026,6 @@ async fn planning_eval_preactivates_only_registered_deferred_tools() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "planning_eval_preactivated_tools": [
                 "memory",
-                "organization_knowledge",
                 "not_a_registered_tool"
             ]
         })))
@@ -1041,7 +1040,6 @@ async fn planning_eval_preactivates_only_registered_deferred_tools() {
         .unwrap();
     let state = provider.session.lock().await;
     assert!(state.deferred_tools.contains("memory"));
-    assert!(!state.deferred_tools.contains("organization_knowledge"));
     assert!(!state.deferred_tools.contains("not_a_registered_tool"));
 }
 

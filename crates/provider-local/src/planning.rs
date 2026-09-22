@@ -353,7 +353,7 @@ pub(crate) fn plan_mode_instruction_for(
              The plan must leave the implementer no design decisions hidden behind vague verbs.\n\
              {}\
              5. Audit coverage before proposing. Privately inventory every atomic obligation from the \n\
-             user, repository evidence, organization knowledge, and supplied memory. Preserve exact identifiers, \n\
+             user, repository evidence, and supplied memory. Preserve exact identifiers, \n\
              repetitions, ordering constraints, negative paths, rollback requirements, and metrics. Map \n\
              every obligation to a typed step and observable completion evidence; revise the contract if \n\
              any obligation is uncovered. Do not expose private chain-of-thought or a research diary.\n\
@@ -361,7 +361,7 @@ pub(crate) fn plan_mode_instruction_for(
              When decision-complete, emit exactly one `<proposed_plan>` block containing a concise Markdown \n\
              rendering of the implementation plan. Include exact files and interfaces, dependencies and \n\
              ordering, edge cases and rollback, and observable verification. Preserve every obligation from \n\
-             the user, repository evidence, organization knowledge, and supplied memory, but do not expose a private \n\
+             the user, repository evidence, and supplied memory, but do not expose a private \n\
              chain-of-thought or research diary. End the planning turn after the block and wait for the user's \n\
              decision. Otherwise end with the smallest necessary user question. Never emit a plan merely to \n\
              report research, and never begin implementation yourself.",
@@ -399,7 +399,7 @@ pub(crate) fn plan_mode_instruction_for(
          When no design decision remains, emit exactly one hidden `<proposed_plan>` block. The block must be \n\
          concise Markdown with ordered implementation steps, exact files and interfaces, dependencies, edge \n\
          cases, rollback or compatibility behavior, and observable verification. Preserve every atomic user, \n\
-         repository, organization knowledge, and memory obligation in those steps. Do not expose private chain-of-thought, a \n\
+         repository and memory obligation in those steps. Do not expose private chain-of-thought, a \n\
          research diary, alternatives, or out-of-scope sections. The host removes the block from the visible \n\
          transcript and stores it as a first-class proposal. End the turn after the block and wait for approval. \n\
          Otherwise ask the smallest necessary question. Never implement in Plan Mode.\n</collaboration_mode>",

@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
-import { organizationForRepository } from "./organizationKnowledge";
 import type { RepositoryIdentity } from "./repositoryKnowledge";
 import { accountScopedKey } from "./accountProjectStorage";
 import { productRequest } from "../product/productBridge";
@@ -25,13 +24,10 @@ export interface SecurityRepositoryRegistration {
     fingerprint: string;
     canonicalRemote?: string | null;
     headOid?: string | null;
-    githubManaged: boolean;
   };
   repositoryPolicy: {
     policyId: string;
     status: "active" | "paused";
-    scheduleIntervalMinutes?: number | null;
-    nextScanAt?: string | null;
   };
 }
 
@@ -83,7 +79,6 @@ export function selectedSecurityOrganization(
       localStorage.getItem(
         `${accountScopedKey(SECURITY_ORGANIZATION_PREFIX, scope)}${fingerprint}`,
       )
-      ?? organizationForRepository(fingerprint, scope)
     );
   } catch {
     return null;

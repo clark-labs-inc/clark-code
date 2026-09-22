@@ -25,7 +25,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
 toml = "1.1"
-thiserror.workspace = true
 futures.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
@@ -40,7 +39,6 @@ tokio-util = { version = "0.7", default-features = false }
 # Browser CDP transport.
 tokio-tungstenite = "0.30"
 glob = "0.3"
-getrandom = "0.4"
 walkdir = "2"
 grep-searcher = "0.1"
 grep-regex = "0.1"
@@ -66,4 +64,3 @@ exec-sandbox-windows = { path = "../exec-sandbox-windows" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net"] }
-rusqlite = { version = "0.32", features = ["bundled"] }

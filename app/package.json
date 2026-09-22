@@ -14,7 +14,6 @@
     "@atlaskit/pragmatic-drag-and-drop": "^2.0.2",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^2.0.0",
     "@atlaskit/pragmatic-drag-and-drop-live-region": "^2.0.0",
-    "@chenglou/pretext": "^0.0.8",
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
@@ -41,7 +40,6 @@
     "sonner": "^2.0.8",
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
-    "three": "^0.185.1",
     "yaml": "^2.9.0",
     "zustand": "^5.0.14"
   },
@@ -49,7 +47,6 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.0.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",

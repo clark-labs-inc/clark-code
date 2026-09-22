@@ -61,7 +61,6 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
             Some("screenshot") => "browser screenshot".to_string(),
             _ => "browser action".to_string(),
         },
-        "organization_knowledge" => "Searched organization knowledge".to_string(),
         "propose_plan" => "Proposed a plan".to_string(),
         "enter_plan_mode" => "Entered plan mode".to_string(),
         "update_plan" => "Updated the plan".to_string(),

@@ -187,7 +187,7 @@ impl ToolExecutor for ToolSearch {
         let matches = self.catalog.search(&query);
         if matches.is_empty() {
             return ToolOutcome::ok(
-                "No deferred tools matched. Try a concrete capability such as Android, iOS, goals, web research, memory, image generation, browser, organization knowledge, delegation, or an MCP server/tool name.",
+                "No deferred tools matched. Try a concrete capability such as Android, iOS, goals, web research, memory, image generation, browser, delegation, or an MCP server/tool name.",
             );
         }
 

@@ -1,7 +1,7 @@
 import { cn } from "../../lib/cn";
 
 /** Shared layout primitives for settings surfaces (Settings dialog, MCP/SSH
- *  dialogs, organization knowledge). One set of paddings, gaps, and text sizes
+ *  dialogs). One set of paddings, gaps, and text sizes
  *  so labels, descriptions, and controls sit on the same baseline grid. */
 
 export function GroupLabel({ children }: { children: React.ReactNode }) {

@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 description = "Bounded native desktop perception and input backends for desktop agents."
 
+[package.metadata.cargo-machete]
+# Used through `#[serde(with = "serde_bytes")]`, which cargo-machete cannot see.
+ignored = ["serde_bytes"]
+
 [features]
 default = []
 helper-service = [

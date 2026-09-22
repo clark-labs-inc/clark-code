@@ -271,41 +271,6 @@ fn memory_tool_registered_only_when_enabled() {
 }
 
 #[test]
-fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
-    struct EmptyContext;
-    #[async_trait::async_trait]
-    impl crate::platform::PlatformContextProvider for EmptyContext {
-        async fn personal_memories(&self) -> Result<Vec<crate::platform::PersonalMemory>, String> {
-            Ok(Vec::new())
-        }
-        async fn repository_context(
-            &self,
-            _fingerprint: &str,
-            _query: &str,
-        ) -> Result<crate::platform::RepositoryContext, String> {
-            Err("not configured".into())
-        }
-        async fn organization_knowledge(
-            &self,
-            query: &str,
-            _organization_id: Option<&str>,
-            _limit: i64,
-        ) -> Result<crate::platform::OrganizationKnowledgeResponse, String> {
-            Ok(crate::platform::OrganizationKnowledgeResponse {
-                query: query.into(),
-                organizations: Vec::new(),
-            })
-        }
-    }
-    let mut registry = ToolRegistry::new(None);
-    assert!(registry.get("organization_knowledge").is_none());
-    registry.enable_organization_knowledge(Arc::new(EmptyContext));
-    let tool = registry.get("organization_knowledge").unwrap();
-    assert!(!tool.mutating());
-    assert_eq!(tool.kind(), ToolKind::Research);
-}
-
-#[test]
 fn mutating_tools_are_flagged() {
     let reg = ToolRegistry::new(None);
     assert!(reg.get("write_file").unwrap().mutating());

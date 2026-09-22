@@ -209,11 +209,6 @@ impl Provider for LocalAgentProvider {
                     api_key,
                 });
             }
-            if !self.isolation.disposable_writer() {
-                if let Some(provider) = self.context_provider.clone() {
-                    registry.enable_organization_knowledge(provider);
-                }
-            }
             if local.browser_enabled {
                 let browser = local.browser_binary.clone().ok_or_else(|| {
                     Error::Unsupported("browser is enabled without a host binary policy".into())

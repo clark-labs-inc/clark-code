@@ -51,7 +51,6 @@ dependencies = [
 name = "agent-core"
 version = "0.1.134"
 dependencies = [
- "async-channel",
  "async-trait",
  "futures",
  "indexmap 2.14.0",
@@ -60,8 +59,6 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "thiserror 2.0.19",
- "tokio",
- "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
@@ -71,13 +68,11 @@ name = "agent-orchestration"
 version = "0.1.134"
 dependencies = [
  "agent-core",
- "async-channel",
  "async-trait",
- "ed25519-dalek",
  "futures",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",
@@ -764,7 +759,7 @@ dependencies = [
  "hostname",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "thiserror 2.0.19",
  "tracing",
  "tracing-subscriber",
@@ -794,7 +789,7 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
@@ -808,11 +803,10 @@ dependencies = [
  "code-host",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "tokio-util",
  "uuid",
  "zeroize",
 ]
@@ -834,7 +828,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
- "tokio-util",
  "uuid",
 ]
 
@@ -870,7 +863,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tempfile",
  "thiserror 2.0.19",
  "uuid",
@@ -1129,33 +1122,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "curve25519-dalek"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
- "curve25519-dalek-derive",
- "digest 0.11.3",
- "fiat-crypto",
- "rustc_version",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1259,10 +1225,8 @@ dependencies = [
  "code-host",
  "code-remote",
  "computer-use",
- "desktop-http",
  "desktop-install-context",
  "desktop-integrations",
- "ed25519-dalek",
  "exec-core",
  "exec-private-fs",
  "exec-protocol",
@@ -1282,7 +1246,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -1342,7 +1306,6 @@ dependencies = [
  "futures",
  "provider-acp",
  "provider-local",
- "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
@@ -1602,28 +1565,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ed25519"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
-dependencies = [
- "signature",
-]
-
-[[package]]
-name = "ed25519-dalek"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
-dependencies = [
- "curve25519-dalek",
- "ed25519",
- "sha2 0.11.0",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "embed-resource"
 version = "3.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1822,7 +1763,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tempfile",
 ]
 
@@ -1865,12 +1806,6 @@ checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
 ]
-
-[[package]]
-name = "fiat-crypto"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "field-offset"
@@ -3361,7 +3296,7 @@ dependencies = [
  "nom",
  "rand 0.10.2",
  "rangemap",
- "sha2 0.10.9",
+ "sha2",
  "stringprep",
  "thiserror 2.0.19",
  "ttf-parser",
@@ -3644,7 +3579,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
- "sha2 0.10.9",
+ "sha2",
  "thiserror 1.0.69",
  "url",
 ]
@@ -4414,9 +4349,7 @@ dependencies = [
  "async-trait",
  "exec-core",
  "futures",
- "serde",
  "serde_json",
- "thiserror 2.0.19",
  "tokio",
  "tracing",
 ]
@@ -4441,7 +4374,6 @@ dependencies = [
  "exec-sandbox-windows",
  "flate2",
  "futures",
- "getrandom 0.4.3",
  "glob",
  "grep-regex",
  "grep-searcher",
@@ -4450,16 +4382,14 @@ dependencies = [
  "pdf-extract",
  "provider-acp",
  "reqwest 0.13.4",
- "rusqlite",
  "security-poc-runner",
  "serde",
  "serde_json",
  "serde_yaml",
- "sha2 0.10.9",
+ "sha2",
  "similar",
  "tar",
  "tempfile",
- "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -5187,17 +5117,15 @@ dependencies = [
 name = "security-poc-runner"
 version = "0.1.134"
 dependencies = [
- "async-trait",
  "exec-core",
  "exec-sandbox",
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
- "uuid",
 ]
 
 [[package]]
@@ -5495,17 +5423,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.0",
- "digest 0.11.3",
-]
-
-[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5577,12 +5494,6 @@ dependencies = [
  "errno",
  "libc",
 ]
-
-[[package]]
-name = "signature"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
 
 [[package]]
 name = "simd-adler32"
@@ -5985,7 +5896,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2",
  "syn 2.0.119",
  "tauri-utils",
  "thiserror 2.0.19",
@@ -7927,7 +7838,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "raw-window-handle",
- "sha2 0.10.9",
+ "sha2",
  "soup3",
  "tao-macros",
  "thiserror 2.0.19",

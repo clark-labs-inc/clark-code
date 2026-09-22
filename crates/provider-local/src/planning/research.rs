@@ -8,8 +8,8 @@
 use std::collections::HashSet;
 
 /// Read-only context sources that should be visible on the first Plan Mode
-/// model call. Order is deliberate: local memory before organization history.
-const SOURCE_TOOLS: [&str; 2] = ["memory_recall", "organization_knowledge"];
+/// model call.
+const SOURCE_TOOLS: [&str; 1] = ["memory_recall"];
 
 pub(crate) fn available_source_tools(available: &HashSet<String>) -> Vec<String> {
     SOURCE_TOOLS
@@ -33,8 +33,6 @@ coverage. Use the visible read-only source schemas as a navigable evidence map:\
    - `memory_recall`: treat an existing Memory section as the initial overview; otherwise begin \
 with an `overview` of project or all memory. Request `full` only when that overview reveals \
 material history or standing decisions.\n\
-   - `organization_knowledge`: begin with a broad natural-language question using the task's own \
-systems, decisions, people, or policy language; narrow only after the results expose a useful lead.\n\
 After each retrieval, privately update what is supported, what is still assumed, what conflicts, \
 and what would change the design. Repeat draft -> challenge -> retrieve -> revise until another \
 source read would not materially change the plan. A source may be absent, empty, or unavailable; \
@@ -50,13 +48,12 @@ mod tests {
     fn activation_is_exact_available_and_stably_ordered() {
         let available = HashSet::from([
             "memory".to_string(),
-            "organization_knowledge".to_string(),
             "memory_recall".to_string(),
             "write_file".to_string(),
         ]);
         assert_eq!(
             available_source_tools(&available),
-            ["memory_recall", "organization_knowledge"]
+            ["memory_recall"]
         );
     }
 
@@ -67,7 +64,6 @@ mod tests {
             "provisional implementation model",
             "unsupported assumptions",
             "`memory_recall`",
-            "`organization_knowledge`",
             "draft -> challenge -> retrieve -> revise",
         ]
         .map(|needle| protocol.find(needle).unwrap());

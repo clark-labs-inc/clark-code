@@ -37,14 +37,6 @@ pub struct HooksConfig {
     pub post_tool_use: Vec<HookEntry>,
 }
 
-impl HooksConfig {
-    // Exercised by the settings-parsing tests; kept as a public helper.
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.pre_tool_use.is_empty() && self.post_tool_use.is_empty()
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct PermissionsConfig {
     #[serde(default)]
@@ -297,7 +289,8 @@ mod tests {
     async fn missing_file_yields_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let settings = load(&LocalExecutor, dir.path()).await;
-        assert!(settings.hooks.is_empty());
+        assert!(settings.hooks.pre_tool_use.is_empty());
+        assert!(settings.hooks.post_tool_use.is_empty());
         assert!(settings.permissions.allow.is_empty());
         assert!(settings.check_command.is_none());
     }

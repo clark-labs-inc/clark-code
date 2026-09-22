@@ -19,12 +19,10 @@ const registration: SecurityRepositoryRegistration = {
     id: "repo-1",
     organizationId: "org-1",
     fingerprint: `git:${"a".repeat(64)}`,
-    githubManaged: false,
   },
   repositoryPolicy: {
     policyId: "policy-1",
     status: "active",
-    scheduleIntervalMinutes: 1_440,
   },
 };
 

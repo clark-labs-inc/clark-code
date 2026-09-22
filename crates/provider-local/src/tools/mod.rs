@@ -41,7 +41,6 @@ pub mod image;
 pub mod ios_simulator;
 pub mod memory;
 pub mod mobile;
-pub mod organization_knowledge;
 pub mod plan;
 pub mod security_poc_execute;
 pub mod security_scan_contract;
@@ -774,18 +773,6 @@ impl ToolRegistry {
         for tool in crate::orchestration::orchestration_tools(config) {
             self.register_deferred(tool);
         }
-    }
-
-    /// Register organization recall independently of the optional research
-    /// agent. A Platform key is sufficient; authorization is rechecked by the
-    /// service for every read.
-    pub fn enable_organization_knowledge(
-        &mut self,
-        provider: Arc<dyn crate::platform::PlatformContextProvider>,
-    ) {
-        self.register_deferred(Arc::new(
-            organization_knowledge::OrganizationKnowledgeTool::new(provider),
-        ));
     }
 
     /// Connect the configured MCP servers and register their tools. A server

@@ -415,17 +415,13 @@ function SecurityCloudStatus({
       </label>
     );
   }
-  const interval = state.registration.repositoryPolicy.scheduleIntervalMinutes;
   return (
     <div className="mb-3 rounded-lg border border-success/30 bg-success/5 px-3 py-2">
       <p className="text-xs font-medium text-success">
-        Continuous scanning active · {state.organization.name}
+        Security sync active · {state.organization.name}
       </p>
       <p className="mt-0.5 text-xs text-ink-muted">
-        {state.registration.repository.githubManaged
-          ? "GitHub access is connected; rescans run in the cloud."
-          : "Sealed local scans sync automatically while this repository is open."}
-        {interval ? ` Default cadence: every ${interval / 60} hours.` : ""}
+        Sealed local scans sync automatically while this repository is open.
       </p>
       {state.sync ? (
         <p className="mt-1 text-xs text-ink-muted">

@@ -773,16 +773,13 @@ mod tests {
         let pc = ProviderConfig {
             extra: json!({
                 "planning_research_autoactivate": false,
-                "planning_eval_preactivated_tools": [
-                    "memory",
-                    "organization_knowledge"
-                ]
+                "planning_eval_preactivated_tools": ["memory"]
             }),
             ..Default::default()
         };
         assert_eq!(
             LocalConfig::from_provider_config(&pc).planning_eval_preactivated_tools,
-            ["memory", "organization_knowledge"]
+            ["memory"]
         );
         assert!(!LocalConfig::from_provider_config(&pc).planning_research_autoactivate);
     }

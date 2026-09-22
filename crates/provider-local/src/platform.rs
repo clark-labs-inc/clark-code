@@ -1,7 +1,7 @@
 //! Product-neutral contracts for optional host-provided context recall.
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// One personal-memory fact returned by a host context provider.
 #[derive(Clone, Debug, Deserialize)]
@@ -32,39 +32,6 @@ pub struct RepositoryContext {
     pub commits: Vec<RepositoryCommitContext>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct OrganizationKnowledgeHit {
-    pub claim_id: String,
-    pub subject: String,
-    pub predicate: String,
-    pub object: String,
-    pub fact_kind: String,
-    pub confidence: f32,
-    pub status: String,
-    pub valid_from: Option<String>,
-    pub valid_to: Option<String>,
-    pub observed_at: String,
-    pub source_kind: String,
-    pub source_display_name: String,
-    pub evidence_locator: Option<String>,
-    pub evidence_excerpt: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct OrganizationKnowledgePacket {
-    pub organization_id: String,
-    pub query: String,
-    #[serde(default)]
-    pub hits: Vec<OrganizationKnowledgeHit>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct OrganizationKnowledgeResponse {
-    pub query: String,
-    #[serde(default)]
-    pub organizations: Vec<OrganizationKnowledgePacket>,
-}
-
 #[async_trait]
 pub trait PlatformContextProvider: Send + Sync {
     async fn personal_memories(&self) -> Result<Vec<PersonalMemory>, String>;
@@ -75,12 +42,6 @@ pub trait PlatformContextProvider: Send + Sync {
         query: &str,
     ) -> Result<RepositoryContext, String>;
 
-    async fn organization_knowledge(
-        &self,
-        query: &str,
-        organization_id: Option<&str>,
-        limit: i64,
-    ) -> Result<OrganizationKnowledgeResponse, String>;
 }
 
 /// A compact prompt/recall section for the user's personal memories, or `None`

@@ -7,7 +7,7 @@
 //!
 //! The crate is deliberately runtime-light: the domain model and projection are
 //! pure and compile to both native (desktop/mobile via Tauri) and `wasm32`. Only
-//! the transports and adapters pull in `tokio` (behind the `native` feature).
+//! the transports and adapters own their native runtime dependencies.
 //!
 //! Design rule mirrored from the product: **the agent decides, the client
 //! renders.** Projection turns typed events into a [`Snapshot`]; it never infers

@@ -9,7 +9,6 @@ const baseProps = {
   hasContent: true,
   canSend: true,
   shouldPickProjectFolder: false,
-  startsScoutRun: false,
   queuedTitle: "Queue message",
   onCancel: () => {},
   onSubmit: () => {},

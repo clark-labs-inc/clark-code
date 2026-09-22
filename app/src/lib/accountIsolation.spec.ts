@@ -16,7 +16,6 @@ import {
   saveOrchestrationEnabled,
 } from "./localAgent";
 import { loadMcpServers, saveMcpServers, type McpServer } from "./mcpServers";
-import { organizationForRepository, setOrganizationForRepository } from "./organizationKnowledge";
 import { loadOutputStyle, saveOutputStyle } from "./outputStyle";
 import {
   loadApprovalPolicy,
@@ -108,19 +107,17 @@ describe("account-owned desktop state", () => {
     expect(config.extra).not.toHaveProperty("memory_scope");
   });
 
-  it("does not reuse execution modes, output style, or organization choices", () => {
+  it("does not reuse execution modes, output style, or security choices", () => {
     saveApprovalPolicy("full", accountOne);
     saveCollaborationMode("plan", accountOne);
     saveCollaborationModes({ "shared-conversation-id": "plan" }, accountOne);
     saveOutputStyle("teaching", accountOne);
-    setOrganizationForRepository("repo-fingerprint", "org-one", accountOne);
     selectSecurityOrganization("repo-fingerprint", "security-org-one", accountOne);
 
     expect(loadApprovalPolicy(accountTwo)).toBe("auto");
     expect(loadCollaborationMode(accountTwo)).toBe("default");
     expect(loadCollaborationModes(accountTwo)).toEqual({});
     expect(loadOutputStyle(accountTwo)).toBe("default");
-    expect(organizationForRepository("repo-fingerprint", accountTwo)).toBeNull();
     expect(selectedSecurityOrganization("repo-fingerprint", accountTwo)).toBeNull();
   });
 });

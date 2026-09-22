@@ -22,7 +22,6 @@ import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 import { stepTextSize, TEXT_SIZES, type TextSize } from "../lib/useTextSize";
 import type { InterfaceContrast } from "../lib/useAppearance";
-import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 import { SandboxSetupCard } from "./SandboxSetupCard";
 import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
 import {
@@ -316,7 +315,6 @@ function ProjectSection() {
         </p>
       </div>
 
-      <OrganizationKnowledgeSettings />
 
       <p className="flex items-center gap-1.5 text-xs text-ink-faint">
         <Info className="size-3.5" /> Changes apply to new sessions.

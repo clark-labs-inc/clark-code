@@ -11,8 +11,8 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-# Native host (desktop/mobile via Tauri): real transports + tokio.
-native = ["dep:tokio", "dep:async-channel"]
+# Native host capability marker. Transports own their runtime dependencies.
+native = []
 # Browser build: exposes the engine to JS via wasm-bindgen.
 wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:serde-wasm-bindgen"]
 
@@ -23,11 +23,7 @@ thiserror.workspace = true
 indexmap.workspace = true
 futures.workspace = true
 async-trait.workspace = true
-tracing.workspace = true
 rmp-serde.workspace = true
-
-tokio = { workspace = true, optional = true }
-async-channel = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = { version = "0.2", optional = true }

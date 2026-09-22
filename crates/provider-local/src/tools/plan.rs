@@ -32,7 +32,7 @@ impl ToolExecutor for ProposePlan {
             "properties": {
                 "global_reminders": {
                     "type": "array",
-                    "description": "Generate first: one to five atomic, non-negotiable cross-step obligations distilled from the user, repository, organization knowledge, and supplied memory. Preserve exact literals and ordering constraints.",
+                    "description": "Generate first: one to five atomic, non-negotiable cross-step obligations distilled from the user, repository, and supplied memory. Preserve exact literals and ordering constraints.",
                     "minItems": 1,
                     "maxItems": 5,
                     "items": {"type": "string"}
@@ -156,8 +156,7 @@ impl ToolExecutor for EnterPlanMode {
         }
         drop(session);
         ToolOutcome::ok(
-            "Plan Mode entered. Read-only Project Memory and organization knowledge schemas are \
-             available when configured. Build a provisional implementation model, \
+            "Plan Mode entered. Read-only Project Memory is available when configured. Build a provisional implementation model, \
              challenge its assumptions, retrieve broad evidence before narrowing, and iterate \
              until another source read would not materially change the plan. Then emit one hidden \
              proposed_plan block and end the turn.",
@@ -348,7 +347,6 @@ mod tests {
         let session = ctx.session.lock().await;
         let activated = &session.deferred_tools;
         assert!(activated.contains("memory_recall"));
-        assert!(activated.contains("organization_knowledge"));
         assert!(!activated.contains("memory"));
     }
 

@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
-import {
-  organizationForRepository,
-  uploadOrganizationRepositoryBatch,
-} from "./organizationKnowledge";
 import { accountScopedKey } from "./accountProjectStorage";
 import { productRequest } from "../product/productBridge";
 
@@ -166,7 +162,7 @@ export async function syncRepositoryHistory(creds: CloudCreds, root: string): Pr
       complete: true,
       commits: [],
     };
-    const response = await upload(creds, heartbeat);
+    const response = await upload(heartbeat);
     if (response.reset_required) {
       cursor = freshCursor(identity);
       saveCursor(identity.fingerprint, cursor, creds.accountScope);
@@ -187,7 +183,7 @@ export async function syncRepositoryHistory(creds: CloudCreds, root: string): Pr
       cursor = freshCursor(identity);
       if (batch.offset !== 0) continue;
     }
-    const response = await upload(creds, batch);
+    const response = await upload(batch);
     if (response.reset_required) {
       cursor = freshCursor(identity);
       saveCursor(identity.fingerprint, cursor, creds.accountScope);
@@ -221,14 +217,7 @@ export async function syncRepositoriesUnderRoot(
   discoveryOffsets.set(normalized, (start + count) % repositories.length);
 }
 
-function upload(creds: CloudCreds, batch: GitHistoryBatch): Promise<SyncResponse> {
-  const organizationId = organizationForRepository(
-    batch.repository.fingerprint,
-    creds.accountScope,
-  );
-  if (organizationId) {
-    return uploadOrganizationRepositoryBatch<SyncResponse>(creds, organizationId, batch);
-  }
+function upload(batch: GitHistoryBatch): Promise<SyncResponse> {
   return productRequest<SyncResponse>("repository.sync", {
     batch,
   });
