@@ -51,17 +51,13 @@ import { createSidebarConversationActions } from "./sessionStore.sidebarConversa
 import { activeSpecialistContext, useSpecialistStore } from "./specialistStore";
 import {
   researchRuntimeSpecialist,
-  productSpecialistTarget,
-  type SpecialistContext,
   specialistConnectConfig,
-  specialistReadRoots,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { quickChatModelSettings } from "../lib/localAgent";
-import type { CoreBridge, RemoteWorkerTarget } from "../core-bridge/bridge";
 import type { Snapshot } from "../core-bridge/types";
 
 export function shouldResumeSavedProgress(snapshot: Snapshot): boolean {
@@ -73,21 +69,6 @@ export function shouldResumeSavedProgress(snapshot: Snapshot): boolean {
   return Object.values(snapshot.runs).some(
     (run) => run.outcome?.failure_kind === "runtime_interrupted",
   );
-}
-
-async function requireSecurityRepository(
-  bridge: CoreBridge,
-  specialist: SpecialistContext | null | undefined,
-  cwd: string,
-  remote: RemoteWorkerTarget | null = null,
-): Promise<void> {
-  if (specialist?.kind !== "security") return;
-  const project = await bridge.projectContext?.(cwd, remote);
-  if (!project) {
-    throw new Error(
-      "Choose a Git repository before starting Security. The selected folder is not a repository checkout.",
-    );
-  }
 }
 
 type ConversationActions = Pick<
@@ -429,40 +410,25 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         remote = await openRemote(host, specialistSettings
           ? { ...localSettings, ...specialistSettings }
           : localSettings);
-        await requireSecurityRepository(
-          bridge,
-          specialistContext,
-          remote.cwd,
-          { id: remote.id },
-        );
         remoteHost = host.host.trim();
         config = localConnectConfig(
           localSettings,
           remoteTarget(remote),
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
-          [
-            ...specialistReadRoots(specialistContext, get().recentProjects),
-            ...requestedReadRoots,
-          ],
+          requestedReadRoots,
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
         const sessionSettings = { ...executionSettings, cwd: localSessionPath };
-        await requireSecurityRepository(bridge, specialistContext, localSessionPath);
         config = localConnectConfig(
           sessionSettings,
           undefined,
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
-          [
-            ...specialistReadRoots(specialistContext, get().recentProjects),
-            ...requestedReadRoots,
-          ],
+          requestedReadRoots,
         );
         options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
@@ -928,36 +894,25 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           effSettings,
           conversationProjectRoot(openingMeta?.project, host.remoteRoot),
         );
-        await requireSecurityRepository(
-          bridge,
-          resolvedSpecialist,
-          remote.cwd,
-          { id: remote.id },
-        );
         remoteHost = host.host.trim();
         config = localConnectConfig(
           effSettings,
           remoteTarget(remote),
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
-          specialistReadRoots(resolvedSpecialist, get().recentProjects),
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
         if (!quickChat && !requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
-        await requireSecurityRepository(bridge, resolvedSpecialist, requestedProjectRoot);
         config = localConnectConfig(
           { ...effSettings, cwd: requestedProjectRoot },
           undefined,
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
-          specialistReadRoots(resolvedSpecialist, get().recentProjects),
         );
         options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {

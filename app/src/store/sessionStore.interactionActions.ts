@@ -57,8 +57,6 @@ import {
 import { activeSpecialistContext } from "./specialistStore";
 import { specialistModelSettings } from "../lib/specialistModel";
 import {
-  productSpecialistTarget,
-  specialistReadRoots,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject, projectDisplayName } from "../lib/projectSidebar";
@@ -269,18 +267,14 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           remoteTarget(activeRemote),
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
-          specialistReadRoots(activeSpecialistContext(), get().recentProjects),
         )
         : localConnectConfig(
           effSettings,
           undefined,
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
-          productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
-          specialistReadRoots(activeSpecialistContext(), get().recentProjects),
         );
       await queueModelReconfigure(session.id, () => bridge.reconfigure!(session.id, config));
       drainQueuedPromptAfterReconfigure(session.id, bridge, get, set);
@@ -432,18 +426,14 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         remoteTarget(previousEntry.remote),
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
-        productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
-        specialistReadRoots(previousMeta?.specialist, state.recentProjects),
       )
       : localConnectConfig(
         settings,
         undefined,
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
-        productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
-        specialistReadRoots(previousMeta?.specialist, state.recentProjects),
       );
     const options: SessionOptions = {
       cwd: projectRoot,

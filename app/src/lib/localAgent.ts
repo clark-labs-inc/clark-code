@@ -23,13 +23,6 @@ export {
   removeRecentProject,
 } from "./accountProjectStorage";
 
-export interface ProductSpecialistTarget {
-  organizationId: string;
-  kind: string;
-  workflow: string;
-  trainingOptIn?: boolean;
-}
-
 const KEY = "agent-desktop:local-agent";
 const env = import.meta.env as Record<string, string | undefined>;
 
@@ -371,7 +364,6 @@ export function localConnectConfig(
   remote?: RemoteTargetConfig,
   specialistKind?: string,
   scope?: string | null,
-  productSpecialist?: ProductSpecialistTarget,
   specialistModel?: { model: string; reasoningEffort: string },
   sandboxReadRoots: string[] = [],
 ): ConnectConfig {
@@ -386,19 +378,8 @@ export function localConnectConfig(
       ? SPECIALIST_REASONING_EFFORT
       : normalizeReasoningEffort(model, s.reasoningEffort));
   if (remote) {
-    const remoteSessionExtra = productModels.remoteSessionExtra?.({
-      ...(productSpecialist ? {
-        specialist: {
-          organizationId: productSpecialist.organizationId,
-          kind: productSpecialist.kind,
-          workflow: productSpecialist.workflow,
-        },
-      } : {}),
-      trainingOptIn: productSpecialist?.trainingOptIn === true,
-    }) ?? {};
     return {
       extra: {
-        ...remoteSessionExtra,
         remote_worker: remote,
         ...(specialistKind?.trim()
           ? { specialist_kind: specialistKind.trim() }
@@ -406,18 +387,6 @@ export function localConnectConfig(
       },
     };
   }
-  // Local provider extras are consumed only by the branded native provider.
-  // Remote products use the separate credential-free recipe hook above.
-  const productExtra = productModels.providerExtra?.({
-    ...(productSpecialist ? {
-      specialist: {
-        organizationId: productSpecialist.organizationId,
-        kind: productSpecialist.kind,
-        workflow: productSpecialist.workflow,
-      },
-    } : {}),
-    trainingOptIn: productSpecialist?.trainingOptIn === true,
-  }) ?? {};
   return {
     cwd: project || undefined,
     extra: {
@@ -444,10 +413,8 @@ export function localConnectConfig(
       ...(sandboxReadRoots.length > 0
         ? { sandbox_read_roots: [...new Set(sandboxReadRoots.filter((root) => root.trim()))] }
         : {}),
-      ...productExtra,
       // Native product composition may use the canonical conversation recipe
       // to expose read-only capabilities, but never as entitlement authority.
-      // Keep this after product extras so they cannot replace the active recipe.
       ...(specialistKind?.trim()
         ? { specialist_kind: specialistKind.trim() }
         : {}),

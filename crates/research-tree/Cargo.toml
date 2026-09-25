@@ -1,0 +1,19 @@
+[package]
+name = "research-tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["research", "agents", "graph", "evidence"]
+categories = ["algorithms", "data-structures"]
+description = "Pure bounded research work graph with replayable caller evidence and deterministic autoresearch ranking."
+
+[dependencies]
+clark-autoresearch = { version = "=0.2.0", default-features = false }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

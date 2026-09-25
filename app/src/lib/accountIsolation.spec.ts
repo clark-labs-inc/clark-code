@@ -25,7 +25,6 @@ import {
   saveCollaborationMode,
   saveCollaborationModes,
 } from "./permissions";
-import { selectedSecurityOrganization, selectSecurityOrganization } from "./securityCloud";
 import { loadSshHosts, saveSshHosts, type SshHost } from "./sshHosts";
 
 const accountOne = "id:account-one";
@@ -107,17 +106,15 @@ describe("account-owned desktop state", () => {
     expect(config.extra).not.toHaveProperty("memory_scope");
   });
 
-  it("does not reuse execution modes, output style, or security choices", () => {
+  it("does not reuse execution modes, output style,", () => {
     saveApprovalPolicy("full", accountOne);
     saveCollaborationMode("plan", accountOne);
     saveCollaborationModes({ "shared-conversation-id": "plan" }, accountOne);
     saveOutputStyle("teaching", accountOne);
-    selectSecurityOrganization("repo-fingerprint", "security-org-one", accountOne);
 
     expect(loadApprovalPolicy(accountTwo)).toBe("auto");
     expect(loadCollaborationMode(accountTwo)).toBe("default");
     expect(loadCollaborationModes(accountTwo)).toEqual({});
     expect(loadOutputStyle(accountTwo)).toBe("default");
-    expect(selectedSecurityOrganization("repo-fingerprint", accountTwo)).toBeNull();
   });
 });

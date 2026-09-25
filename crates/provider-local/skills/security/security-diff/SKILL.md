@@ -113,3 +113,17 @@ target id, changed reviewed/excluded counts, supporting file count, deferred
 proof gaps, limitations, and each finding's evidence, PoC receipts, and attack
 path. If the seal has no findings, say "no reportable findings were validated
 in this exact diff"; do not claim the patch or repository is secure.
+
+For several competing change-related hypotheses, optionally discover
+`research_rank` to prioritize evidence follow-ups using Autoresearch. Supply
+source references and uncertainty, then rerank after tests. Its hints do not
+validate findings or change the exact-diff coverage and sealing requirements.
+
+For branching investigations, optionally discover `research_tree` and
+`research_tree_status` to retain hypotheses, parent/crosslinks, observed evidence,
+refutations and bounded frontier selection in local `.agent/research-trees/`
+artifacts (also permitted scan bookkeeping). Use ordinary authorized tools for
+each selected branch. Read status after interruption; never replay completed
+work or reopen a branch without new evidence. Tree outcomes are caller assertions
+and do not replace any coverage, independent-pass, PoC or finalization requirement.
+The scan source inventory excludes this exact generated-artifact subtree.

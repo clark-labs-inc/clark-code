@@ -57,6 +57,7 @@ describe("MockBridge", () => {
     const catalog = await new MockBridge().listSkills("/tmp/example-desktop");
 
     expect(catalog.skills.map((skill) => skill.invocationName)).toEqual([
+      "security:assistant",
       "security:security-scan",
       "security:security-diff",
       "security:security-deep",

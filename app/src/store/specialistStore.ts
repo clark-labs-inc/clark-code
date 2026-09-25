@@ -59,6 +59,12 @@ interface SpecialistState {
   setAccountScope: (scope: string | null) => void;
 }
 
+function scopedContext(context: SpecialistContext): SpecialistContext {
+  return context.kind === "security"
+    ? { kind: "security", ...(context.workflow ? { workflow: context.workflow } : {}) }
+    : context;
+}
+
 export function contextsAfterSpecialistOpen(
   current: Partial<Record<SpecialistKind, SpecialistContext>>,
   kind: SpecialistKind,
@@ -74,7 +80,7 @@ export function contextsAfterSpecialistOpen(
     // their complete durable context, while a new lens gets only its default
     // workflow. Merging with the previous context here lets composer-local
     // composer-local authority fields leak into unrelated composers.
-    [kind]: { ...requestedContext, kind },
+    [kind]: scopedContext({ ...requestedContext, kind }),
   };
 }
 
@@ -96,7 +102,7 @@ function contextsFrom(persisted: PersistedSpecialistState) {
   return Object.fromEntries(
     Object.entries(persisted.contexts ?? {}).filter(
       ([kind, context]) => isSpecialistKind(kind) && context?.kind === kind,
-    ),
+    ).map(([kind, context]) => [kind, scopedContext(context as SpecialistContext)]),
   ) as Partial<Record<SpecialistKind, SpecialistContext>>;
 }
 
@@ -144,7 +150,7 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
     if (!kind) return;
     const contexts = {
       ...get().contexts,
-      [kind]: { ...get().contexts[kind], ...patch, kind },
+      [kind]: scopedContext({ ...get().contexts[kind], ...patch, kind }),
     };
     set({ contexts });
     savePersisted(get().accountScope, get().tabs, contexts);

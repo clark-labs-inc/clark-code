@@ -7,6 +7,8 @@ rust-version.workspace = true
 description = "Product-extensible local coding-agent provider with sandboxed tools."
 
 [dependencies]
+research-tree = { path = "../research-tree", version = "0.1.134" }
+clark-autoresearch = { version = "=0.2.0", default-features = false }
 agent-core = { path = "../agent-core", features = ["native"] }
 agent-orchestration = { path = "../agent-orchestration" }
 provider-acp = { path = "../provider-acp" }
@@ -58,6 +60,9 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 pdf-extract = "0.12"
 docx-rs = { version = "0.4", default-features = false }
 tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 exec-sandbox-windows = { path = "../exec-sandbox-windows" }

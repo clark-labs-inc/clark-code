@@ -55,8 +55,6 @@ export interface ProductLocalAgentPolicy {
   models: readonly ProductModelOption[];
   includedModel?: string;
   specialistModel?: ProductModelOption;
-  providerExtra?: (context: ProductLocalAgentExtensionContext) => Record<string, unknown>;
-  remoteSessionExtra?: (context: ProductLocalAgentExtensionContext) => Record<string, unknown>;
   gatedWorkflows?: readonly ProductGatedWorkflow[];
   workflowAccess?: ProductWorkflowAccessCopy;
 }
@@ -76,15 +74,6 @@ export interface ProductWorkflowAccessCopy {
   checking: string;
   unavailable: string;
   actionLabel: string;
-}
-
-export interface ProductLocalAgentExtensionContext {
-  specialist?: {
-    organizationId: string;
-    kind: string;
-    workflow: string;
-  };
-  trainingOptIn: boolean;
 }
 
 export interface ProductVoiceInput {

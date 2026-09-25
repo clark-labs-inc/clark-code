@@ -618,3 +618,6 @@ mod tests;
 
 #[cfg(test)]
 mod lossless_tests;
+
+#[cfg(test)]
+mod assistant_tests;

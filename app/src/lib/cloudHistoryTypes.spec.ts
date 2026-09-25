@@ -46,6 +46,9 @@ describe("cloud specialist metadata", () => {
       specialistContext: {
         kind: "security",
         workflow: "security:security-scan",
+        organizationId: "old-org",
+        repositoryId: "old-repository",
+        objectId: "old-finding",
       },
     }).specialist).toEqual({
       kind: "security",

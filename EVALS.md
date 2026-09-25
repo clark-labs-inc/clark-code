@@ -39,7 +39,7 @@ paid provider runs are opt-in and require explicit authorization.
 | Frontend | `pnpm --dir app typecheck`, `pnpm --dir app test`, `pnpm --dir app build` | deterministic TypeScript, component, and bundle contracts | Proves the checked Clark Code frontend bundle |
 | Queued follow-up steering | frontend `sessionStore.steer.spec.ts`; native host `adjacent_user_prompts_remain_distinct_after_replay` | deterministic renderer/session and durable projection contracts | Proves explicit steering cancels the current run while retaining the message in the ordinary follow-up queue, so the existing idle drain sends it once instead of hiding it in a provider-owned mid-run queue; every accepted user turn carries an explicit message boundary, so adjacent prompts remain separate through live projection and durable replay. It does not prove packaged cancellation latency or live-model behavior. |
 | Hyper-realistic recovery matrix | `pnpm --dir app test -- src/core-bridge/resilienceBenchmark.spec.ts` plus `pnpm --dir harness test:resilience` | deterministic nine-fault power set (512 combinations) plus representative Chromium product journeys | Proves typed rate-limit, timeout, upstream, duplicate-tool-id, event-stream, tool-host, provider-process, cloud-sync, and user-cancel combinations settle truthfully; recovered incidents stay out of product UI, terminal interruption offers resume, cancellation requires an explicit stop, and raw diagnostics do not leak. It does not prove a live provider or packaged WebView. |
-| Specialist runtime matrix | `pnpm --dir harness test:specialists` | deterministic Chromium integration against a product composition and mock-provider boundary, with typed receipts and transition screenshots | Discovers the public fixture's Security catalog and proves access-ready and subscription-gated states, all starter/example/canvas tabs, failed-start draft recovery, optimistic/running/commentary/typed-presentation/final settlement, exact skill routing, organization/repository authority, terminal store projection, detach/reattach continuity, and mobile chat/canvas reachability without horizontal overflow. This matrix does not prove hosted-model quality, live entitlement/cloud services, the packaged WebView, or native platform behavior. |
+| Specialist runtime matrix | `pnpm --dir harness test:specialists`; `SECURITY_E2E_WORKFLOW=deep pnpm --dir harness test:specialists` | deterministic Chromium integration against a product composition and mock provider, with typed receipts and screenshots | Proves Security has no organization selector or Insights canvas, general assistant and explicit deep-scan skill routing, paid/free access, failed-start draft recovery, terminal settlement, detach/reattach, and mobile chat without overflow. It does not prove hosted-model quality, live billing, or packaged WebView behavior. |
 | Model picker UI | `node harness/model-picker-smoke.mjs` | deterministic browser-bound UI-only interaction with screenshot and typed receipt | Proves the composer model menu is portaled above the workspace, stays inside a compact viewport, and accepts pointer selection in both directions; packaged native WebKit behavior remains a separate platform receipt |
 | SSH execution-target picker | `node harness/ssh-settings-smoke.mjs` | deterministic browser-bound UI-only interaction with SSH discovery/probe fixtures, screenshots, and a typed receipt | Proves a host can be saved before choosing its default folder, an add-host action from the composer selects that exact host as the remote execution target, and incomplete targets remain actionable without a premature Git connection; live SSH and packaged native behavior remain separate receipts |
 | Pragmatic drag and drop UI | `node harness/pragmatic-dnd-smoke.mjs` | deterministic browser-bound UI-only interaction with screenshot and typed receipt | Proves pinned-project pointer reordering, the equivalent exact-position menu with focus restoration, desktop-file drop attachment, and the equivalent file picker; packaged native WebKit/OS drag behavior remains a separate platform receipt |
@@ -53,6 +53,55 @@ paid provider runs are opt-in and require explicit authorization.
 | Memory and goals | provider-local memory and goal eval tests | deterministic fixture contracts | Live-model quality is separate and opt-in |
 Changing a foundation eval contract or authoritative result requires updating
 this file.
+
+## Local tree exploration — 2026-09-25
+
+Security's broad-investigation skill now uses optional `research_tree` /
+`research_tree_status` tools. The standalone Apache-2.0 `research-tree` crate
+contains pure typed graph transitions, semantic-key deduplication with shared
+crosslinks, prerequisites, deterministic clark-autoresearch ranking, bounded
+branch context, explicit terminal outcomes, evidence-required reassessment /
+reopening, and journal replay. The provider owns local storage and permissions;
+there is no new backend service, dashboard, model client or scanner.
+
+Local artifacts use atomic replacement, process file locks and expected
+revisions. Tests cover cancellation before persistence, competing/stale updates,
+corrupt replay, source changes/missing sources, task-scope storage, symlink/FIFO
+rejection, budget headroom for terminal outcomes, and read-only status.
+Bindings hash only explicitly listed source files; an empty list is unbound.
+All tree evidence and outcomes remain caller assertions, not security seals.
+
+The scripted provider test `tests/research_tree.rs` loads the actual Security
+assistant skill and performs tool discovery, begin, proposal, deterministic
+selection, source read, refutation, two child proposals, higher-priority child
+selection and a blocked outcome. A fresh provider/session restores revision 8,
+seven events, two spent steps, the refuted parent, blocked child and pending
+sibling without rewriting the journal. This proves local execution and restart,
+not live-model research quality.
+
+Validation:
+- `cargo nextest run -p research-tree -p agent-core -p provider-acp -p provider-local`:
+  **811 passed, 8 skipped**, run `e279bdcf-6419-47b2-8915-b22c62968828`.
+- `cargo clippy -p research-tree -p agent-core -p provider-acp -p provider-local -p devbridge --all-targets -- -D warnings`,
+  workspace format check, and agent-core WASM build passed.
+- Frontend frozen install, typecheck, **809 passed / 5 skipped**, and production
+  build passed. No renderer changes were necessary.
+- `cargo package -p research-tree --allow-dirty --offline` packaged and independently
+  verified the library against published dependencies; nothing was published.
+- Real standard and working-tree diff inventory tests prove journal/lock/temp
+  updates at root and nested task scope do not change scan identity; actual
+  source edits still invalidate both.
+- Final branch-context provider replay passed **1/1**, run
+  `a0391823-f144-4899-91bf-a8f1cff58ab2`, including selected-child and refuted-parent
+  context in the actual model continuation.
+- The unsigned native dev build passed in 22.29 seconds. The default launcher
+  encountered occupied port 1420, so the same unsigned Tauri path was built on
+  isolated port 1437 with `--no-watch`. The new process exited while an existing
+  older app instance remained; this is build evidence, not a fresh WebView smoke.
+
+The existing coverage, deep-pass, PoC and finalization suites remain intact.
+This run made no paid model calls, live target scans, commits or deployments.
+No improved vulnerability-detection rate or cost claim is established.
 
 ## Native integrations / iMessage — 2026-09-01
 
@@ -259,3 +308,57 @@ Validation on the current local source:
 
 No hosted-model calls were made. Improved live-model reliability, provider-side
 schema ordering, and behavioral effect sizes remain unmeasured.
+
+
+## Security agent simplification — 2026-09-25
+
+Security now uses `security:assistant` by default in the private composition;
+standard/diff/deep scans remain explicit skills. The foundation removes the
+mandatory Git start gate, organization-bound Insights canvas, cloud scan client,
+and implicit scan-history uploads. Local evidence history and PDF export remain.
+Saved Security context is reduced to kind/workflow. The downstream repositories
+remove the web dashboard, organization scan backend, cloud exporter and Security
+advisor while retaining ordinary access, account conversation sync and reusable
+security tools. See [architecture and ownership](docs/security-agent-simplification.md).
+
+The optional `research_rank` tool delegates ranking to published
+`clark-autoresearch =0.2.0`, accepts 1–64 caller-described opportunities, preserves
+references/rationale, rejects invalid/duplicate input and filters out-of-scope
+items. It requires no organization, network call, persistent graph or scan state.
+Four tests cover the real ranking library, input validation, registry discovery
+and wire ordering. Rankings do not verify findings or establish scan quality.
+
+Current local receipts:
+
+- Rust nextest `8be7f428-e4e3-4cf9-95ff-9da628275055`: **789 passed, 8 skipped**
+  across agent-core, provider-acp and provider-local. The new scripted-provider
+  assistant test creates and reads a real file in a non-Git directory using the
+  ordinary model, completes through `final_answer`, and creates no scan bundle.
+  Existing explicit scan, evidence seal and PoC contracts also pass.
+- Required formatting, Clippy (four foundation crates/all targets), and core
+  WASM compile checks pass. The installed nextest is the pinned 0.9.143.
+- Frozen frontend install and composed production build pass. Foundation plus
+  product frontend suite: **834 passed, 5 skipped**, across 175 passing files.
+  Includes migrated saved scope, account isolation, and local PDF invocation.
+- Foundation product-boundary contracts: **13/13 passed**.
+- Chromium matrices pass for the neutral fixture's general assistant/deep scan
+  and the actual private product entry's general assistant/deep scan. They check
+  desktop 1440×1000 and mobile 375×812, successful and failed starts, exact skill
+  delivery, no org/repository/advisor recipe, preserved transcripts, and paid/free
+  access. Browser errors and failed requests: zero. Local run directories under
+  `target/specialist-matrix-smoke` are disposable; these are the retained conclusions.
+- Unsigned `./script/build_and_run.sh` built and launched the native debug binary
+  with its WebView loaded. The task-owned watcher was stopped after startup. No
+  credentialed signing, Keychain access, hosted calls or deployment occurred.
+
+Tests use the existing local Cargo configuration and sibling source overrides;
+this is not an exact pinned-source CI, packaged release, production migration, or
+live-model scan-quality receipt. Improved live scanning quality remains unmeasured.
+
+
+Final product browser follow-up (2026-09-25): the current
+`specialist-ui-smoke.mjs` passed paid/free previews, starter prefill, explicit
+absence of Security Insights/domain controls, and mobile overflow checks.
+`security-ui-smoke.mjs` passed artifact history populated/expanded/empty/error,
+Escape close, and remote-hidden states. These are deterministic browser checks,
+not hosted-model quality measurements.

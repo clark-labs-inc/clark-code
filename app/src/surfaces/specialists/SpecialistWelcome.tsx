@@ -44,7 +44,7 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
       title: "Deep scan this repository",
       detail: "Trace exploitable paths across multiple independent passes.",
       prompt: "Deep scan the current repository and prioritize exploitable paths.",
-      tab: "scans",
+      tab: "chat",
       workflow: "security:security-deep",
       icon: Radar,
     },
@@ -52,16 +52,16 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
       title: "Review current changes",
       detail: "Check the working diff for security regressions.",
       prompt: "Review the current diff for security regressions and show the supporting evidence.",
-      tab: "scans",
+      tab: "chat",
       workflow: "security:security-diff",
       icon: GitCompare,
     },
     {
-      title: "Assess repository posture",
-      detail: "Establish coverage and prioritize validated findings.",
-      prompt: "Assess the security posture of this repository and prioritize validated findings.",
-      tab: "posture",
-      workflow: "security:security-scan",
+      title: "Investigate a security question",
+      detail: "Explore a system, trace a risk, or plan and verify a fix.",
+      prompt: "Help me investigate a security question. Establish the scope, examine evidence, and work through the next steps.",
+      tab: "chat",
+      workflow: "security:assistant",
       icon: ShieldCheck,
     },
   ],
@@ -109,7 +109,7 @@ export function SpecialistWelcome({
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
   const introductionCopy = {
-    security: "Choose a repository-level investigation. Security keeps coverage, validated findings, evidence, and remediation organized in the canvas.",
+    security: "Investigate a question, review code, test a hypothesis, or build a fix. Choose a starting point or describe any task below.",
     scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",
   }[kind] ?? definition.value;
 

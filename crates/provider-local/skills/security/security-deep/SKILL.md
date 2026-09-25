@@ -114,3 +114,20 @@ Never claim a clean or completed scan unless finalization succeeds. Report the
 sealed pass count, reviewed/excluded counts, findings, PoC receipt ids, deferred
 proof gaps, and limitations. With no findings, say "no reportable findings were
 validated after the sealed deep passes"; do not claim the repository is secure.
+
+Between discovery passes, optionally discover `research_rank` to rank the
+remaining hypotheses and evidence gaps with Autoresearch's shared opportunity
+policy. Include observed references, uncertainty, and validation needs; use the
+hints to choose a discriminating next pass. Rerank after new evidence. A rank is
+not a finding or independent pass receipt and cannot replace coverage, accepted
+passes, saturation, or the final evidence seal.
+
+For branching investigations, optionally discover `research_tree` and
+`research_tree_status` to retain hypotheses, parent/crosslinks, observed evidence,
+refutations and bounded frontier selection in local `.agent/research-trees/`
+artifacts (also permitted scan bookkeeping). The root owns tree updates; read-only
+delegates return observations to it. Use ordinary authorized tools for
+each selected branch. Read status after interruption; never replay completed
+work or reopen a branch without new evidence. Tree outcomes are caller assertions
+and do not replace any coverage, independent-pass, PoC or finalization requirement.
+The scan source inventory excludes this exact generated-artifact subtree.

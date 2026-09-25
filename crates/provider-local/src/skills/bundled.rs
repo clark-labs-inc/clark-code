@@ -6,6 +6,7 @@ const ADDRESS_COMMENTS: &str = include_str!("../../skills/github/gh-address-comm
 const FIX_CI: &str = include_str!("../../skills/github/gh-fix-ci/SKILL.md");
 const YEET: &str = include_str!("../../skills/github/yeet/SKILL.md");
 const SENTRY: &str = include_str!("../../skills/sentry/SKILL.md");
+const SECURITY_ASSISTANT: &str = include_str!("../../skills/security/assistant/SKILL.md");
 const SECURITY_SCAN: &str = include_str!("../../skills/security/security-scan/SKILL.md");
 const SECURITY_DIFF: &str = include_str!("../../skills/security/security-diff/SKILL.md");
 const SECURITY_DEEP: &str = include_str!("../../skills/security/security-deep/SKILL.md");
@@ -41,6 +42,16 @@ pub(super) fn skills() -> Vec<Skill> {
         bundled("github", "agent://skills/github/gh-fix-ci", FIX_CI, BASH),
         bundled("github", "agent://skills/github/yeet", YEET, BASH),
         bundled("sentry", "agent://skills/sentry", SENTRY, BASH),
+        {
+            let mut assistant = bundled(
+                "security",
+                "agent://skills/security/assistant",
+                SECURITY_ASSISTANT,
+                &[],
+            );
+            assistant.allow_implicit_invocation = false;
+            assistant
+        },
         {
             let mut security = bundled(
                 "security",

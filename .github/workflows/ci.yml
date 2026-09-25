@@ -67,7 +67,7 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy core and providers
-        run: cargo clippy -p agent-core -p provider-acp -p provider-local -p provider-remote-worker -p code-host -p code-worker -p code-remote -p devbridge --all-targets -- -D warnings
+        run: cargo clippy -p research-tree -p agent-core -p provider-acp -p provider-local -p provider-remote-worker -p code-host -p code-worker -p code-remote -p devbridge --all-targets -- -D warnings
       - name: Test every deterministic Rust workspace contract
         run: >-
           cargo nextest run

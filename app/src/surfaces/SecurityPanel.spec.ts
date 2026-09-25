@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SecurityScanRecord } from "../core-bridge/types";
-import type { SecurityOrganization } from "../lib/securityCloud";
 import {
-  previouslySelectedSecurityOrganization,
   summarizeSecurityScan,
 } from "./SecurityPanel";
 
@@ -44,21 +42,5 @@ describe("Security scan summaries", () => {
       excluded: 1,
       supporting: 0,
     });
-  });
-});
-
-describe("Security repository connection", () => {
-  const organizations: SecurityOrganization[] = [
-    { id: "org-one", name: "Clark Labs", role: "owner", status: "active" },
-  ];
-
-  it("requires an explicit first connection even when only one workspace exists", () => {
-    expect(previouslySelectedSecurityOrganization(organizations, null)).toBeUndefined();
-  });
-
-  it("reconnects a repository to its previously selected workspace", () => {
-    expect(previouslySelectedSecurityOrganization(organizations, "org-one")).toEqual(
-      organizations[0],
-    );
   });
 });

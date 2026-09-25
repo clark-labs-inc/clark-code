@@ -103,8 +103,8 @@ describe("product-supplied model settings", () => {
 
 });
 
-describe("product specialist extension binding", () => {
-  it("passes the conversation recipe to native product capability composition", () => {
+describe("local specialist binding", () => {
+  it("preserves the specialist identity without organization scope", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/security-document" },
       undefined,
@@ -118,33 +118,24 @@ describe("product specialist extension binding", () => {
     expect(config.extra).not.toHaveProperty("hard_constraints");
   });
 
-  it("keeps product provider extras empty in the neutral composition", () => {
+  it("keeps specialist model policy without product extension recipes", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/project" },
       undefined,
       "security",
       "id:account",
-      {
-        organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        kind: "security",
-        workflow: "security:security-scan",
-      },
     );
     expect(config.extra).toMatchObject({ model: "local-model" });
+    expect(config.extra).not.toHaveProperty("organization_id");
+    expect(config.extra).not.toHaveProperty("cloud_advisor");
   });
 
-  it("sends an opaque worker binding plus a credential-free specialist recipe", () => {
+  it("sends only the opaque worker binding and specialist identity", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/local" },
       { worker_handle: "worker-remote", cwd: "/remote/project" },
       "security",
       "id:account",
-      {
-        organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        kind: "security",
-        workflow: "security:scan",
-        trainingOptIn: true,
-      },
     );
     expect(config.cwd).toBeUndefined();
     expect(config.extra).toEqual({
@@ -269,7 +260,6 @@ describe("specialist model contract", () => {
   it("pins every specialist connect config to the product specialist policy", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo", model: "retired-specialist-model", reasoningEffort: "low" },
-      undefined,
       undefined,
       "security",
     );

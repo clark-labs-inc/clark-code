@@ -18,24 +18,18 @@ const outDir = process.env.SPECIALIST_E2E_OUTPUT_DIR
   : path.join(repoDir, "target", "specialist-matrix-smoke", `${stamp}-${process.pid}`);
 const desktopViewport = { width: 1440, height: 1000 };
 const mobileViewport = { width: 375, height: 812 };
-const orgId = "11111111-1111-4111-8111-111111111111";
 
+const deepScan = process.env.SECURITY_E2E_WORKFLOW === "deep";
 const specialists = [
   {
     kind: "security",
     label: "Security",
-    starter: "Deep scan this repository",
-    promptIncludes: "exploitable paths",
-    workflow: "security:security-deep",
+    starter: deepScan ? "Deep scan this repository" : "Investigate a security question",
+    promptIncludes: deepScan ? "exploitable paths" : "security question",
+    workflow: deepScan ? "security:security-deep" : "security:assistant",
     provider: "local",
-    skill: "security:security-deep",
-    tabs: [
-      ["posture", "Repository posture"],
-      ["findings", "Validated findings"],
-      ["zero-days", "Novel vulnerability research"],
-      ["campaigns", "Remediation campaigns"],
-      ["scans", "Scan history"],
-    ],
+    skill: deepScan ? "security:security-deep" : "security:assistant",
+    tabs: [],
   },
 ];
 
@@ -181,17 +175,6 @@ async function presentation(page, specialist) {
   return page.getByRole("region", { name: `${specialist.kind} specialist analysis` });
 }
 
-async function verifyCanvas(page, specialist) {
-  await page.getByLabel(`Show ${specialist.label} sidebar`).click();
-  const canvas = page.getByRole("region", { name: `${specialist.label} canvas` });
-  await canvas.waitFor({ state: "visible" });
-  for (const [tab, text] of specialist.tabs) {
-    await page.locator(`[data-qa="specialist-tab-${specialist.kind}-${tab}"]:visible`).click();
-    await canvas.getByText(text, { exact: true }).waitFor();
-  }
-  await page.screenshot({ path: screenshotPath(specialist.kind, "canvas-tabs"), animations: "disabled" });
-}
-
 async function verifyExample(page, specialist) {
   await page.locator(`[data-qa="specialist-intro-${specialist.kind}-example"]`).click();
   const example = page.getByRole("region", { name: `${specialist.kind} example analysis` });
@@ -238,9 +221,10 @@ try {
     check(JSON.stringify(catalogKinds) === JSON.stringify(["security"]), "Catalog kinds drifted from the product contract");
     checks.push(`${specialist.kind}_catalog_and_ready_state`);
 
-    await verifyCanvas(page, specialist);
+    check(await page.getByLabel(`Show ${specialist.label} sidebar`).count() === 0, "Security still exposes Insights");
+    check(await workspace.getByRole("combobox").count() === 0, "Security still requires an organization");
     await verifyExample(page, specialist);
-    checks.push(`${specialist.kind}_example_and_all_canvas_states`);
+    checks.push(`${specialist.kind}_example_without_insights`);
 
     await page.getByRole("button", { name: `Start ${specialist.label}: ${specialist.starter}` }).click();
     const composer = page.getByLabel("Message Clark Code");
@@ -260,15 +244,20 @@ try {
       window.__agentDesktopProfiling.store.getState().snapshot.runs,
     ).some((run) => run.status === "running"));
     checks.push(`${specialist.kind}_optimistic_start_and_running_state`);
-    const commentary = "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.";
-    await page.getByText(commentary, { exact: true }).waitFor({ timeout: 10_000 });
-    const livePresentation = await presentation(page, specialist);
-    await livePresentation.waitFor({ timeout: 10_000 });
-    for (const view of ["Evidence", "Run"]) {
-      await livePresentation.getByRole("tab", { name: view, exact: true }).click();
+    const finalText = deepScan
+      ? "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle."
+      : "I read src/main.rs. It defines a main that prints a greeting. Next I'd wire up argument parsing — want me to proceed?";
+    if (deepScan) {
+      const livePresentation = await presentation(page, specialist);
+      await livePresentation.waitFor({ timeout: 10_000 });
+      for (const view of ["Evidence", "Run"]) {
+        await livePresentation.getByRole("tab", { name: view, exact: true }).click();
+      }
     }
-    const finalText = "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.";
     await page.getByText(finalText, { exact: true }).waitFor({ timeout: 10_000 });
+    await page.waitForFunction(() => Object.values(
+      window.__agentDesktopProfiling.store.getState().snapshot.runs,
+    ).every((run) => run.status === "done"));
     await page.screenshot({ path: screenshotPath(specialist.kind, "complete"), animations: "disabled" });
 
     const boundary = await page.evaluate(() => {
@@ -290,18 +279,18 @@ try {
     check(successfulOpen.request.kind === "new", `${specialist.label} did not allocate a new session`);
     check(boundary.conversation?.specialist?.kind === specialist.kind, `${specialist.label} metadata lost its specialist kind`);
     check(boundary.conversation?.specialist?.workflow === specialist.workflow, `${specialist.label} metadata lost its workflow`);
-    check(boundary.conversation?.specialist?.organizationId === orgId, `${specialist.label} metadata lost organization authority`);
+    check(!boundary.conversation?.specialist?.organizationId, "Security retained organization binding");
     check(boundary.runs.length === 1 && boundary.runs[0].status === "done", `${specialist.label} run did not settle exactly once`);
-    check(boundary.runs[0].outcome?.stop_reason === "specialist_presentation", `${specialist.label} run lost its typed terminal outcome`);
-    check(boundary.timeline.filter((item) => item.item === "specialist_presentation").length === 1, `${specialist.label} typed presentation duplicated or disappeared`);
+    if (deepScan) check(boundary.runs[0].outcome?.stop_reason === "specialist_presentation", `${specialist.label} run lost its typed terminal outcome`);
+    check(boundary.timeline.filter((item) => item.item === "specialist_presentation").length === (deepScan ? 1 : 0), `${specialist.label} typed presentation duplicated or disappeared`);
     check(boundary.queued === 0, `${specialist.label} left queued work after completion`);
     const blocks = boundary.probe.promptCalls[0].blocks;
     const deliveredSkill = blocks.find((block) => block.type === "skill_reference")?.name ?? null;
     check(deliveredSkill === specialist.skill, `${specialist.label} delivered the wrong skill/runtime prompt contract`);
     check(blocks.find((block) => block.type === "text")?.text === submittedPrompt, `${specialist.label} changed the human prompt at the provider boundary`);
     check(boundary.probe.promptCalls[0].attachmentCount === 0, `${specialist.label} attached unexpected files`);
-    check(boundary.conversation.specialist.repositoryId === "repository-1", "Security lost repository authority");
-    check(successfulOpen.config.extra.cloud_advisor.workflow === specialist.workflow, "Security advisor workflow drifted");
+    check(!boundary.conversation.specialist.repositoryId, "Security retained repository registration");
+    check(!successfulOpen.config.extra.cloud_advisor, "Security implicitly attached a cloud advisor");
     checks.push(`${specialist.kind}_provider_authority_projection_and_terminal_state`);
 
     await page.getByRole("button", { name: "New session", exact: true }).click();
@@ -310,7 +299,7 @@ try {
     const row = page.locator(`[data-qa^="specialist-conversation-${specialist.kind}-"]`).first();
     await row.waitFor();
     await row.locator("button").first().click();
-    await (await presentation(page, specialist)).waitFor({ timeout: 10_000 });
+    if (deepScan) await (await presentation(page, specialist)).waitFor({ timeout: 10_000 });
     await page.getByText(finalText, { exact: true }).waitFor();
     const conversationSurface = page.locator(`[data-qa="specialist-conversation-${specialist.kind}"]`);
     check(await conversationSurface.getByText(submittedPrompt, { exact: true }).count() === 1, `${specialist.label} transcript did not survive detach and reattach exactly once`);

@@ -1,6 +1,5 @@
 import { capabilityAccess, type ProductAccessProjection } from "./productAccess";
 import type { ConnectConfig } from "../core-bridge/bridge";
-import type { ProductSpecialistTarget } from "./localAgent";
 import { productModule } from "../product/productModule";
 
 // The renderer owns the presentation adapters for every specialist kind that
@@ -17,7 +16,6 @@ export function isSupportedSpecialistKind(value: string): value is SpecialistKin
 }
 export type SpecialistWorkflow = string;
 export type SpecialistTab = string;
-export type SecurityTab = "posture" | "findings" | "zero-days" | "campaigns" | "scans";
 export type ScientistTab = "programs" | "campaigns" | "experiments" | "evidence" | "runs";
 
 export interface SpecialistContext {
@@ -50,15 +48,6 @@ const SPECIALIST_CONTEXT_STRING_FIELDS = [
   "runId",
   "targetId",
 ] as const satisfies ReadonlyArray<Exclude<keyof SpecialistContext, "kind">>;
-
-/** Filesystem roots a conversation-bound specialist may inspect without
- * making its document workspace writable. */
-export function specialistReadRoots(
-  _context: SpecialistContext | null | undefined,
-  _recentProjects: string[],
-): string[] {
-  return [];
-}
 
 interface SkillIdentity {
   id: string;
@@ -312,24 +301,6 @@ export function specialistWorkflowCommand(
   return command?.prefixes.find((prefix) => prefix.startsWith("/")) ?? null;
 }
 
-export function productSpecialistTarget(
-  context: SpecialistContext | null | undefined,
-  trainingEnabled = false,
-): ProductSpecialistTarget | undefined {
-  if (
-    !context?.organizationId?.trim()
-    || context.kind !== "security"
-  ) return undefined;
-  const definition = SPECIALIST_REGISTRY.get(context.kind);
-  if (!definition || definition.engine !== "skill") return undefined;
-  return {
-    organizationId: context.organizationId,
-    kind: context.kind,
-    workflow: context.workflow || definition.defaultWorkflow,
-    ...(trainingEnabled ? { trainingOptIn: true } : {}),
-  };
-}
-
 /** Build the WebView-owned portion of the internal provider configuration.
  * Native code replaces the executable and runtime paths before spawning. */
 export function specialistConnectConfig(
@@ -377,6 +348,7 @@ export function registeredSpecialistContext(value: unknown): SpecialistContext |
   if (typeof row.kind !== "string" || !isSpecialistKind(row.kind)) return undefined;
   const fields: Array<readonly [string, string]> = [];
   for (const field of SPECIALIST_CONTEXT_STRING_FIELDS) {
+    if (row.kind === "security" && field !== "workflow") continue;
     const fieldValue = row[field];
     if (fieldValue === undefined) continue;
     if (typeof fieldValue !== "string") return undefined;

@@ -21,36 +21,32 @@ const specialistCatalog = {
       engine: "skill",
       entitlement: "subscription",
       modelPolicy: "specialist",
-      defaultTab: "posture",
-      defaultWorkflow: "security:security-scan",
+      defaultTab: "chat",
+      defaultWorkflow: "security:assistant",
       skillBindings: {
+        "security:assistant": "security:assistant",
         "security:security-scan": "security:security-scan",
         "security:security-diff": "security:security-diff",
         "security:security-deep": "security:security-deep",
       },
-      tabs: [
-        { id: "posture", label: "Posture" },
-        { id: "findings", label: "Findings" },
-        { id: "zero-days", label: "Zero-day lab" },
-        { id: "campaigns", label: "Campaigns" },
-        { id: "scans", label: "Scans" },
-      ],
+      tabs: [{ id: "chat", label: "Chat" }],
       slashCommands: [
+        { prefixes: ["/security", "$security:assistant"], tab: "chat", workflow: "security:assistant" },
         {
           prefixes: ["/security-deep", "$security:security-deep"],
-          tab: "scans",
+          tab: "chat",
           workflow: "security:security-deep",
           promptPrefix: "Run a deep security scan. ",
         },
         {
           prefixes: ["/security-diff", "$security:security-diff"],
-          tab: "scans",
+          tab: "chat",
           workflow: "security:security-diff",
           promptPrefix: "Review the current diff for security regressions. ",
         },
         {
-          prefixes: ["/security", "$security:security-scan"],
-          tab: "posture",
+          prefixes: ["/security-scan", "$security:security-scan"],
+          tab: "chat",
           workflow: "security:security-scan",
         },
       ],
@@ -63,18 +59,4 @@ installProductModule({
   branding: { id: "specialist_e2e", name: "Clark Code", shortName: "Clark" },
   authRequired: true,
   specialistCatalog,
-  localAgent: {
-    ...neutralProduct.localAgent,
-    providerExtra: ({ specialist }) => specialist?.kind === "security"
-      ? {
-          cloud_advisor: {
-            organization_id: specialist.organizationId,
-            specialist: specialist.kind,
-            workflow: specialist.workflow,
-            execution_residency: "local_only",
-            training_consent: "explicit_user",
-          },
-        }
-      : {},
-  },
 });

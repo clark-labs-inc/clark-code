@@ -26,7 +26,7 @@ describe("specialist navigation state", () => {
     });
   });
 
-  it("restores only the exact context owned by an opened saved conversation", () => {
+  it("drops obsolete Insights scope when opening a saved Security conversation", () => {
     const contexts = contextsAfterSpecialistOpen(
       {
         security: {
@@ -44,7 +44,6 @@ describe("specialist navigation state", () => {
 
     expect(contexts.security).toEqual({
       kind: "security",
-      objectId: "opened-conversation-object",
     });
   });
 

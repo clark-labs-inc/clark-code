@@ -23,56 +23,32 @@ import {
   specialistAccessAfterLoadFailure,
   specialistAccessBadge,
   specialistNeedsEntitlementVerification,
-  type SecurityTab,
   type ScientistTab,
 } from "../../lib/specialists";
 import {
   specialistEntitlement,
   specialistOrganizations,
   specialistQuery,
-  specialistCreateSecurityCampaign,
-  type SecurityFinding,
-  type SecurityCampaign,
-  type SecurityPosture,
-  type SecurityRepository,
-  type SecurityScan,
   type SpecialistOrganization,
   type ScienceArtifactSegment,
   type ResearchOverview,
 } from "../../lib/specialistCloud";
 import { cloudCreds, type CloudCreds } from "../../lib/cloudHistory";
-import { syncSecurityInsights } from "../../lib/securityCloud";
-import { saveSecurityScanPdf } from "../../lib/securityReport";
-import type { SecurityScanRecord } from "../../core-bridge/types";
 import { cn } from "../../lib/cn";
 import { codeKeyAccountBinding } from "../../lib/account";
 import { UpdatePill } from "../TopBar";
-import { SecurityCanvas } from "./SecurityCanvas";
+import { SecurityButton } from "../SecurityPanel";
 import { ScientistCanvas } from "./ScientistCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
 import { ContextualConversation } from "./ContextualConversation";
 
 interface SpecialistData {
-  posture: SecurityPosture | null;
-  repositories: SecurityRepository[];
-  findings: SecurityFinding[];
-  candidates: SecurityFinding[];
-  scans: SecurityScan[];
-  campaigns: SecurityCampaign[];
-  localSecurityScans: SecurityScanRecord[];
   researchOverview: ResearchOverview | null;
   scienceArtifacts: ScienceArtifactSegment[];
 }
 
 const EMPTY_DATA: SpecialistData = {
-  posture: null,
-  repositories: [],
-  findings: [],
-  candidates: [],
-  scans: [],
-  campaigns: [],
-  localSecurityScans: [],
   researchOverview: null,
   scienceArtifacts: [],
 };
@@ -101,25 +77,13 @@ export function SpecialistWorkspace({
   const setContext = useSpecialistStore((state) => state.setContext);
   const auth = useSessionStore((state) => state.auth);
   const bridge = useSessionStore((state) => state.bridge);
-  const securityCompletionKey = useSessionStore((state) => active === "security"
-    ? Object.values(state.snapshot.runs)
-        .filter((run) => run.status === "done")
-        .map((run) => run.id)
-        .join("\u0000")
-    : "");
+  const remote = useSessionStore((state) => state.activeRemote);
   const boundConversation = useSessionStore((state) => state.session
     ? state.conversations.find((conversation) => conversation.id === state.session?.id)
     : undefined);
   const boundContext = boundConversation?.specialist;
   const productAccess = useProductAccess(Boolean(auth), codeKeyAccountBinding(auth));
-  const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const setSettingsOpen = useSessionStore((state) => state.setSettingsOpen);
-  const configuredCwd = useSessionStore(
-    (state) => state.activeProjectRoot ?? state.localSettings.cwd,
-  );
-  const cwd = boundConversation?.remoteHost
-    ? ""
-    : boundConversation?.project ?? configuredCwd;
   const [organizations, setOrganizations] = useState<SpecialistOrganization[]>([]);
   const [data, setData] = useState<SpecialistData>(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
@@ -141,7 +105,7 @@ export function SpecialistWorkspace({
     Boolean(productAccess.error) && !productAccess.loading,
   );
   const accessCapability = capabilityAccess(productAccess.access, active);
-  const access = projected === "ready"
+  const access = active !== "security" && projected === "ready"
     ? serverAccess === "unknown" ? "loading" : serverAccess
     : projected;
   const credentials = cloudCreds(auth) ?? (preview ? previewCredentials() : null);
@@ -157,6 +121,13 @@ export function SpecialistWorkspace({
   }, [setContext]);
 
   const load = useCallback(async () => {
+    // Security uses ordinary task access and tools, without a cloud projection.
+    if (active === "security") {
+      clearSensitiveData();
+      setError(null);
+      setProjectionWarning(null);
+      return;
+    }
     if (projected !== "ready" || !credentials) {
       clearSensitiveData();
       setServerAccess(projected === "action_needed" ? "action_needed" : "free");
@@ -203,70 +174,7 @@ export function SpecialistWorkspace({
       if (context.organizationId !== organization.id && boundContext?.kind !== active) {
         setContext({ organizationId: organization.id });
       }
-      if (active === "security") {
-        const sync = await syncSecurityInsights(
-          credentials,
-          organization.id,
-          cwd,
-        );
-        if (sync?.failedCount) {
-          const firstFailure = sync.scans.find((scan) => scan.status === "failed")?.message;
-          throw new Error(firstFailure
-            ? `Security scan sync failed: ${firstFailure}`
-            : `${sync.failedCount} Security scan sync attempt${sync.failedCount === 1 ? "" : "s"} failed.`);
-        }
-        const [posture, repositories, findings, candidates, campaigns, localSecurityScans] = await Promise.all([
-          specialistQuery<SecurityPosture>(credentials, active, "security_posture", organization.id),
-          specialistQuery<{ data: SecurityRepository[] }>(credentials, active, "security_repositories", organization.id),
-          specialistQuery<{ data: SecurityFinding[] }>(credentials, active, "security_findings", organization.id),
-          specialistQuery<{ data: SecurityFinding[] }>(credentials, active, "security_candidates", organization.id),
-          specialistQuery<{ data: SecurityCampaign[] }>(credentials, active, "security_campaigns", organization.id),
-          cwd && bridge?.listSecurityScans
-            ? bridge.listSecurityScans(cwd)
-            : Promise.resolve([]),
-        ]);
-        const repository = repositories.data.find((item) => item.repositoryId === context.repositoryId)
-          ?? repositories.data[0];
-        const scans = repository
-          ? await specialistQuery<{ data: SecurityScan[] }>(
-              credentials, active, "security_scans", organization.id, undefined, repository.repositoryId,
-            )
-          : { data: [] };
-        if (repository && context.repositoryId !== repository.repositoryId) {
-          setContext({ repositoryId: repository.repositoryId });
-        }
-        const localScanIdByPlatformId = new Map(
-          (sync?.scans ?? []).flatMap((item) => (
-            item.platformScanId && item.localScanId
-              ? [[item.platformScanId, item.localScanId] as const]
-              : []
-          )),
-        );
-        const localScanIdByClientId = new Map<string, string>(
-          localSecurityScans.flatMap((record) => record.seal?.bundleDigest
-            ? [[
-                `scan:desktop:${record.seal.bundleDigest.slice(0, 32)}`,
-                record.bundle.scanId,
-              ] as const]
-            : []),
-        );
-        const decoratedScans = scans.data.map((scan) => ({
-          ...scan,
-          localScanId: localScanIdByPlatformId.get(scan.id)
-            ?? (scan.clientScanId ? localScanIdByClientId.get(scan.clientScanId) : undefined)
-            ?? null,
-        }));
-        setData({
-          ...EMPTY_DATA,
-          posture,
-          repositories: repositories.data,
-          findings: findings.data,
-          candidates: candidates.data,
-          scans: decoratedScans,
-          campaigns: campaigns.data,
-          localSecurityScans,
-        });
-      } else if (active === "scientist") {
+      if (active === "scientist") {
         const [overviewResult, artifactsResult] = await Promise.allSettled([
           specialistQuery<ResearchOverview>(
             credentials,
@@ -312,9 +220,7 @@ export function SpecialistWorkspace({
     bridge,
     clearSensitiveData,
     context.organizationId,
-    context.repositoryId,
     credentials?.accountScope,
-    cwd,
     definition.entitlement,
     projected,
     setContext,
@@ -323,7 +229,7 @@ export function SpecialistWorkspace({
   useEffect(() => {
     setServerAccess("unknown");
     void load();
-  }, [load, securityCompletionKey]);
+  }, [load]);
 
 
   useEffect(() => bridge?.onSpecialistProjectionPublished?.((receipt) => {
@@ -349,60 +255,7 @@ export function SpecialistWorkspace({
         </div>
       )}
       {!loading && !error && serverAccess === "ready" && (
-        active === "security" ? (
-          <SecurityCanvas
-            tab={tabs[active] as SecurityTab}
-            posture={data.posture}
-            repositories={data.repositories}
-            findings={data.findings}
-            candidates={data.candidates}
-            scans={data.scans}
-            campaigns={data.campaigns}
-            onSaveScanPdf={(scan) => saveSecurityScanPdf(
-              scan,
-              data.localSecurityScans.find((record) => record.bundle.scanId === scan.localScanId),
-            )}
-            onSelectTab={(tab) => setTab(tab)}
-            onSelectRepository={(repository) => {
-              setContext({ repositoryId: repository.repositoryId });
-              setTab("scans");
-              setMobilePane("canvas");
-            }}
-            onSelectFinding={(finding) => {
-              setContext({
-                repositoryId: finding.repositoryId,
-                objectKind: "security_finding",
-                objectId: finding.id,
-                workflow: "security:security-scan",
-              });
-              setComposerPrefill(`Investigate the ${finding.currentSeverity} finding “${finding.title}”, show its evidence, and recommend the safest remediation.`);
-              setMobilePane("chat");
-            }}
-            onStartScan={() => {
-              setContext({ workflow: "security:security-scan" });
-              setComposerPrefill("Scan the selected repository, validate exploitable findings, and show the supporting evidence.");
-              setMobilePane("chat");
-            }}
-            onResearchCandidate={() => {
-              setContext({ workflow: "security:security-deep" });
-              setComposerPrefill("Research a novel vulnerability candidate in the selected repository and separate confirmed evidence from unresolved hypotheses.");
-              setMobilePane("chat");
-            }}
-            onCreateCampaign={async (title, description, findingIds) => {
-              if (!credentials || !context.organizationId) {
-                throw new Error("Security scanner organization context is unavailable");
-              }
-              await specialistCreateSecurityCampaign(
-                credentials,
-                context.organizationId,
-                title,
-                description,
-                findingIds,
-              );
-              await load();
-            }}
-          />
-        ) : active === "scientist" ? (
+        active === "scientist" ? (
           <ScientistCanvas
             tab={tabs[active] as ScientistTab}
             overview={data.researchOverview}
@@ -424,7 +277,8 @@ export function SpecialistWorkspace({
         </div>
         <div className="ml-auto flex items-center gap-2">
           <UpdatePill />
-          <button
+          {active === "security" && !remote && <SecurityButton />}
+          {active !== "security" && <button
               type="button"
               data-qa={`specialist-show-insights-${active}`}
               onClick={() => setCanvasOpen((open) => !open)}
@@ -434,8 +288,8 @@ export function SpecialistWorkspace({
             >
               {canvasOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
               {canvasOpen ? "Hide insights" : "Show insights"}
-          </button>
-          {organizations.length > 0 && serverAccess === "ready" && (
+          </button>}
+          {active !== "security" && organizations.length > 0 && serverAccess === "ready" && (
             <label className="relative hidden md:block">
               <span className="sr-only">Organization</span>
               <Building2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
@@ -493,6 +347,10 @@ export function SpecialistWorkspace({
             void productAccess.reload().catch(() => undefined);
           }}
         />
+      ) : active === "security" ? (
+        <div className="min-h-0 min-w-0 flex-1">
+          <ContextualConversation kind="security" />
+        </div>
       ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className={cn(

@@ -6,13 +6,13 @@ import { DEFAULT_LOCAL_SETTINGS } from "../lib/localAgent";
 import { useSessionStore } from "./sessionStore";
 import { useSpecialistStore } from "./specialistStore";
 
-describe("Security repository authority", () => {
+describe("Security task scope", () => {
   beforeEach(() => {
     localStorage.clear();
     useSpecialistStore.setState({
       active: "security",
       contexts: {
-        security: { kind: "security", workflow: "security:security-diff" },
+        security: { kind: "security", workflow: "security:assistant" },
       },
     });
     useSessionStore.setState({
@@ -35,8 +35,8 @@ describe("Security repository authority", () => {
     });
   });
 
-  it("refuses to launch a Security run from a non-repository folder", async () => {
-    const openSession = vi.fn();
+  it("launches a Security conversation from a non-repository folder", async () => {
+    const openSession = vi.fn(async () => ({ id: "security-task", title: "Security", modes: [], capabilities: {} }));
     const bridge = {
       projectContext: vi.fn(async () => null),
       openSession,
@@ -63,9 +63,8 @@ describe("Security repository authority", () => {
 
     await useSessionStore.getState().startSession();
 
-    expect(openSession).not.toHaveBeenCalled();
-    expect(useSessionStore.getState().error).toContain(
-      "Choose a Git repository before starting Security. The selected folder is not a repository checkout.",
-    );
+    expect(openSession).toHaveBeenCalledOnce();
+    expect(useSessionStore.getState().session?.id).toBe("security-task");
+    expect(useSessionStore.getState().error).toBeNull();
   });
 });

@@ -99,7 +99,7 @@ test("extension contracts remain dependency-inverted", () => {
   assert.match(integration, /prepare_provider_config/);
   assert.match(integration, /async fn request/);
 
-  const tools = readFileSync(resolve(root, "crates/provider-local/src/tools/mod.rs"), "utf8");
+  const tools = readFileSync(resolve(root, "crates/provider-local/src/tools/registry.rs"), "utf8");
   assert.match(tools, /trait ToolPack/);
   assert.match(tools, /register_extension_tool/);
 });

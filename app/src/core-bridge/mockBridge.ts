@@ -74,6 +74,7 @@ const PROVIDERS: ProviderInfo[] = [
 ];
 
 const SPECIALIST_SKILLS: SkillCatalogEntry[] = [
+  ["security:assistant", "Investigate, implement, and verify tasks with security expertise."],
   ["security:security-scan", "Assess repository security posture and validate findings."],
   ["security:security-diff", "Review a change set for security regressions."],
   ["security:security-deep", "Run a deep, multi-pass repository security scan."],

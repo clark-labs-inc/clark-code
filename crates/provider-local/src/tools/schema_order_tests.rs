@@ -123,6 +123,12 @@ fn schema_property_order_survives_serialization() {
         ["plan_step_id", "step", "status"],
         "update_plan must locate the approved obligation before emitting mutable state"
     );
+    wire_order(
+        &reg,
+        "research_tree",
+        &["action", "tree_id", "expected_revision", "event"],
+    );
+    wire_order(&reg, "research_tree_status", &["tree_id", "cursor"]);
     wire_order(&reg, "tool_search", &["query"]);
     wire_order(&reg, "grep", &["pattern", "path"]);
     wire_order(&reg, "view_image", &["path"]);

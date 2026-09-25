@@ -174,3 +174,22 @@ counterevidence, and a concise remediation direction. Separately report:
 
 If the seal contains no findings, say "no reportable findings were validated";
 do not claim that the repository is secure.
+
+## Optional investigation prioritization
+
+For a broad candidate set, discover `research_rank` and use Autoresearch's shared
+opportunity ranking to choose the next hypothesis or evidence follow-up. Supply
+observed evidence references and rationale before estimating priority, novelty,
+confidence, and impact. Mark unresolved candidates as requiring validation and
+exclude work outside the user's scope. Investigate with the ordinary tools and
+rerank after new evidence. Ranking is a planning aid: it cannot replace inventory
+coverage, validate a finding, or satisfy the evidence seal.
+
+For branching investigations, optionally discover `research_tree` and
+`research_tree_status` to retain hypotheses, parent/crosslinks, observed evidence,
+refutations and bounded frontier selection in local `.agent/research-trees/`
+artifacts (also permitted scan bookkeeping). Use ordinary authorized tools for
+each selected branch. Read status after interruption; never replay completed
+work or reopen a branch without new evidence. Tree outcomes are caller assertions
+and do not replace any coverage, independent-pass, PoC or finalization requirement.
+The scan source inventory excludes this exact generated-artifact subtree.

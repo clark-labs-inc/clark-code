@@ -311,7 +311,14 @@ fn model_path(path: &Path) -> String {
 }
 
 fn is_security_output(path: &str) -> bool {
-    path == ".agent/security-scans" || path.starts_with(".agent/security-scans/")
+    path == ".agent/security-scans"
+        || path.starts_with(".agent/security-scans/")
+        // Research journals live beside the selected task scope, which may be
+        // a nested directory. Exclude only the exact managed subtree, not
+        // similarly named source directories or all `.agent` content.
+        || path.split('/').zip(path.split('/').skip(1)).any(|(parent, child)| {
+            parent == ".agent" && child == "research-trees"
+        })
 }
 
 #[cfg(test)]
@@ -329,3 +336,7 @@ mod deep_tests;
 #[cfg(test)]
 #[path = "security_poc_tests.rs"]
 mod poc_tests;
+
+#[cfg(test)]
+#[path = "security_research_tests.rs"]
+mod security_research_tests;
