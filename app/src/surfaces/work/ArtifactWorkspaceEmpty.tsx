@@ -36,9 +36,9 @@ export function ArtifactWorkspaceEmpty({ onClose }: { onClose: () => void }) {
               </div>
             )}
           />
-          <h1 className="mt-3 font-display text-xl text-ink">No artifacts yet</h1>
+          <h1 className="mt-3 font-display text-xl text-ink">No artifacts in this session yet</h1>
           <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-            Files and other outputs created in this task will appear here.
+            Files and other outputs created in this session will appear here.
           </p>
         </div>
       </div>

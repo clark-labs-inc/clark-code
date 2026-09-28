@@ -6,9 +6,9 @@ import {
   ArrowRight,
   FlaskConical,
   GitCompare,
+  MessageCircle,
   Radar,
   Repeat2,
-  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -27,6 +27,7 @@ import {
   staggeredTransition,
 } from "../../lib/motion";
 import { cn } from "../../lib/cn";
+import { EnvironmentPicker } from "../EnvironmentPicker";
 import { SpecialistConversationShowcase } from "./SpecialistConversationShowcase";
 
 export interface SpecialistStarter {
@@ -57,12 +58,12 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
       icon: GitCompare,
     },
     {
-      title: "Investigate a security question",
-      detail: "Explore a system, trace a risk, or plan and verify a fix.",
+      title: "Ask a security question",
+      detail: "Get a clear, expert answer about your code, dependencies, or setup.",
       prompt: "Help me investigate a security question. Establish the scope, examine evidence, and work through the next steps.",
       tab: "chat",
       workflow: "security:assistant",
-      icon: ShieldCheck,
+      icon: MessageCircle,
     },
   ],
   scientist: [
@@ -97,6 +98,49 @@ export function specialistStarters(kind: SpecialistKind): readonly SpecialistSta
   return STARTERS[kind] ?? [];
 }
 
+function SecurityStart({ onStart }: { onStart: (starter: SpecialistStarter) => void }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <div data-qa="specialist-welcome-security" className="specialist-welcome security-start mx-auto w-full max-w-[54rem] pb-4 pt-12 sm:pt-[4.75rem]">
+      <h2 className="text-center font-serif text-3xl font-semibold tracking-[-0.03em] text-ink sm:text-4xl">
+        New Security session
+      </h2>
+      <div className="mx-auto mt-6 w-full max-w-[40rem] rounded-xl border border-border bg-bg-elevated px-2 shadow-soft">
+        <EnvironmentPicker targetRow allowCloud={false} />
+      </div>
+      <p className="specialist-welcome-copy mt-4 text-center text-sm text-ink-muted">
+        Security can investigate code or answer broader security questions.
+      </p>
+      <div className="specialist-welcome-starters mt-11 flex flex-col gap-4">
+        {specialistStarters("security").map((starter, index) => {
+          const StarterIcon = starter.icon;
+          return (
+            <m.button
+              key={starter.title}
+              type="button"
+              data-qa={`specialist-starter-security-${index}`}
+              aria-label={`Start Security: ${starter.title}`}
+              onClick={() => onStart(starter)}
+              {...accessibleMotion(RISE_SMALL, reduceMotion)}
+              transition={staggeredTransition(reduceMotion, index, 0.035)}
+              className="specialist-welcome-starter group flex min-h-24 w-full items-center gap-4 rounded-xl border border-border-subtle bg-bg-elevated/35 px-5 py-3 text-left transition-colors hover:border-accent/40 hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+                <StarterIcon className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-ink">{starter.title}</span>
+                <span className="specialist-welcome-starter-detail mt-1 block text-sm leading-5 text-ink-muted">{starter.detail}</span>
+              </span>
+              <ArrowRight className="size-5 shrink-0 text-ink-faint transition-transform group-hover:translate-x-1 group-hover:text-accent" />
+            </m.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SpecialistWelcome({
   kind,
   onStart,
@@ -104,14 +148,20 @@ export function SpecialistWelcome({
   kind: SpecialistKind;
   onStart: (starter: SpecialistStarter) => void;
 }) {
+  return kind === "security"
+    ? <SecurityStart onStart={onStart} />
+    : <OtherSpecialistWelcome kind={kind} onStart={onStart} />;
+}
+
+function OtherSpecialistWelcome({ kind, onStart }: {
+  kind: Exclude<SpecialistKind, "security">;
+  onStart: (starter: SpecialistStarter) => void;
+}) {
   const reduceMotion = useReducedMotion();
   const introductionId = useId();
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
-  const introductionCopy = {
-    security: "Investigate a question, review code, test a hypothesis, or build a fix. Choose a starting point or describe any task below.",
-    scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",
-  }[kind] ?? definition.value;
+  const introductionCopy = "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.";
 
   return (
     <div

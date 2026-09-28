@@ -33,6 +33,7 @@ import { cn } from "../../lib/cn";
 import {
   isPreviewableDocument,
   readDocText,
+  readJsonArtifact,
   saveDocPdf,
   saveDocText,
 } from "../../lib/docs";
@@ -47,6 +48,8 @@ import { LocalArtifactImage } from "./ArtifactCard";
 import { isMarkdownDoc } from "./MarkdownDoc";
 import { DocumentPreview } from "./DocumentPreview";
 import { ArtifactFileActions, openArtifactExternally } from "./ArtifactFileActions";
+import { ArtifactGenericPreview } from "./ArtifactGenericPreview";
+import { ArtifactJsonPreview, isJsonArtifact } from "./ArtifactJsonPreview";
 
 const KIND_ICON: Record<ArtifactKind, typeof FileBox> = {
   website: Globe,
@@ -157,40 +160,6 @@ function ArtifactTab({
   );
 }
 
-function GenericPreview({ artifact }: { artifact: Artifact }) {
-  const Icon = KIND_ICON[artifact.kind] ?? FileBox;
-  const location = readableArtifactLocation(artifact);
-  const availability = artifactAvailability(artifact);
-  return (
-    <div className="mx-auto flex min-h-full max-w-3xl items-center justify-center px-8 py-12">
-      <div className="w-full rounded-xl border border-border bg-bg-elevated px-7 py-8 text-center shadow-soft">
-        <span className="mx-auto grid size-14 place-items-center rounded-xl bg-accent-subtle text-accent">
-          <Icon className="size-6" />
-        </span>
-        <h1 className="mt-4 font-display text-2xl text-ink">{artifact.title}</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          {KIND_LABEL[artifact.kind]} · {artifactLocationLabel(artifact)}
-        </p>
-        {location && <p className="mx-auto mt-3 max-w-lg truncate font-mono text-xs text-ink-faint">{location}</p>}
-        <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed text-ink-muted">
-          {availability === "unavailable"
-            ? "This artifact does not currently have a readable file or link. Its source remains available for context."
-            : "the agent keeps this artifact in your workspace without embedding an unreliable preview. Its source and location remain visible here."}
-        </p>
-        {canOpenArtifactExternally(artifact) && (
-          <button
-            type="button"
-            onClick={() => void openArtifactExternally(artifact)}
-            className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
-          >
-            View {artifact.title} <ExternalLink className="size-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function ArtifactPreview({
   artifact,
   text,
@@ -274,6 +243,12 @@ function ArtifactPreview({
     );
   }
 
+  if (isJsonArtifact(artifact)) {
+    return <ArtifactJsonPreview text={text} loading={loading} onFallback={() =>
+      <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} />
+    } />;
+  }
+
   if (isPreviewableDocument(artifact.uri, artifact.title, artifact.mime_type)) {
     return (
       <DocumentPreview
@@ -311,7 +286,7 @@ function ArtifactPreview({
     );
   }
 
-  return <GenericPreview artifact={artifact} />;
+  return <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} />;
 }
 
 function ContextPopover({
@@ -424,6 +399,7 @@ export function ArtifactWorkspace({
   // re-render the whole workspace ~60fps while a run streams. Per-frame
   // re-renders are scoped to this panel, which is only mounted when open.
   const artifacts = useSessionStore((s) => s.snapshot.artifacts);
+  const sessionId = useSessionStore((s) => s.session?.id);
   const toolCalls = useSessionStore((s) => s.snapshot.tool_calls);
   const [openArtifactIds, setOpenArtifactIds] = useState<Set<string>>(
     () => new Set([activeArtifactId]),
@@ -452,6 +428,7 @@ export function ArtifactWorkspace({
   const activeId = active?.id;
   const activeUri = active?.uri;
   const activeIsMarkdown = active ? isMarkdownDoc(active) : false;
+  const activeIsJson = active ? !activeIsMarkdown && isJsonArtifact(active) : false;
   const sourceCall = active?.tool_call ? toolCalls[active.tool_call] : undefined;
   const byteSize = text == null ? null : new TextEncoder().encode(text).byteLength;
 
@@ -470,13 +447,13 @@ export function ArtifactWorkspace({
     setPdfSaved(false);
     setPresenting(false);
     setMarkdownReadFailed(false);
-    if (!activeId || !activeIsMarkdown) {
+    if (!activeId || (!activeIsMarkdown && !activeIsJson)) {
       setLoadingText(false);
       return;
     }
     let alive = true;
     setLoadingText(true);
-    readDocText(activeUri).then((value) => {
+    (activeIsJson ? readJsonArtifact(activeUri, sessionId) : readDocText(activeUri)).then((value) => {
       if (!alive) return;
       setText(value);
       setMarkdownReadFailed(value == null);
@@ -485,7 +462,7 @@ export function ArtifactWorkspace({
     return () => {
       alive = false;
     };
-  }, [activeId, activeIsMarkdown, activeUri, markdownReadAttempt]);
+  }, [activeId, activeIsJson, activeIsMarkdown, activeUri, markdownReadAttempt, sessionId]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -637,10 +614,10 @@ export function ArtifactWorkspace({
               ref={pickerMenuRef}
               id="artifact-picker-menu"
               role="menu"
-              aria-label="Artifacts in this task"
+              aria-label="Artifacts in this session"
               className="absolute right-1 top-9 z-30 w-72 overflow-hidden rounded-xl border border-border bg-bg-elevated p-1.5 shadow-lifted"
             >
-              <div className="px-2 py-1.5 text-xs font-medium text-ink-faint">Artifacts in this task</div>
+              <div className="px-2 py-1.5 text-xs font-medium text-ink-faint">Artifacts in this session</div>
               {artifacts.map((artifact) => {
                 const Icon = isMarkdownDoc(artifact) ? FileText : (KIND_ICON[artifact.kind] ?? FileBox);
                 return (
@@ -672,7 +649,7 @@ export function ArtifactWorkspace({
 
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border-subtle px-4">
         <FileText className="size-3.5 text-ink-faint" />
-        <span className="text-xs font-medium text-ink-secondary">Artifacts</span>
+        <span className="text-xs font-medium text-ink-secondary">Session artifacts</span>
         <span className="text-ink-faint">/</span>
         <span className="text-xs text-ink-muted">{isMarkdownDoc(active) ? "Markdown" : KIND_LABEL[active.kind]}</span>
         <span className="ml-2 hidden items-center gap-1.5 text-xs text-ink-faint xl:flex">
@@ -683,7 +660,7 @@ export function ArtifactWorkspace({
           {byteSize != null && <><span className="mx-1">·</span>{formatBytes(byteSize)}</>}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
-          {text != null && (
+          {activeIsMarkdown && text != null && (
             <button
               type="button"
               onClick={exportPdf}
@@ -702,7 +679,7 @@ export function ArtifactWorkspace({
               {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />} {copied ? "Copied" : "Copy"}
             </button>
           )}
-          {text != null && (
+          {activeIsMarkdown && text != null && (
             <button
               type="button"
               onClick={download}
@@ -712,7 +689,7 @@ export function ArtifactWorkspace({
               {downloading ? <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" /> : saved ? <Check className="size-3.5 text-success" /> : <Download className="size-3.5" />} {saved ? "Saved" : "Download"}
             </button>
           )}
-          {text != null && (
+          {activeIsMarkdown && text != null && (
             <button
               type="button"
               onClick={() => {

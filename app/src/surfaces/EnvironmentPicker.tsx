@@ -15,17 +15,22 @@ const CHIP =
   "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-base ease-agent hover:bg-accent-soft hover:text-ink";
 const COMPACT_CHIP =
   "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-base ease-agent hover:bg-bg-hover hover:text-ink";
+const TARGET_CHIP =
+  "flex min-h-16 min-w-0 items-center gap-2 rounded-lg px-3 text-sm font-medium text-ink-secondary transition duration-base ease-agent hover:bg-bg-hover hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
  *  and the project folder onto the same store state the session starts from. */
 export function EnvironmentPicker({
   compact = false,
+  targetRow = false,
   allowCloud = true,
   showLocalFolder = true,
   onEnvironmentChanged,
 }: {
   compact?: boolean;
+  /** A full-width start-screen row, using the same target and folder pickers. */
+  targetRow?: boolean;
   /** Specialist workflows backed by the native worker can run locally or over
    * SSH, but cannot be redirected into an unrelated cloud provider. */
   allowCloud?: boolean;
@@ -88,11 +93,12 @@ export function EnvironmentPicker({
   const targetPicker = (
     <Popover
       popupLabel="Execution targets"
+      placement={targetRow ? "bottom" : "top"}
       trigger={
-        <span className={compact ? COMPACT_CHIP : CHIP}>
-          <TargetIcon className={compact ? "size-3" : "size-4"} />
+        <span className={targetRow ? TARGET_CHIP : compact ? COMPACT_CHIP : CHIP}>
+          <TargetIcon className={compact && !targetRow ? "size-3" : "size-4"} />
           <span className="max-w-[10rem] truncate">{label}</span>
-          {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
+          {!compact && !targetRow && <ChevronDown className="size-3.5 text-ink-faint" />}
         </span>
       }
     >
@@ -169,12 +175,14 @@ export function EnvironmentPicker({
     <FolderChip
       cwd={cwd}
       compact={compact}
+      targetRow={targetRow}
       onFolderSelected={onEnvironmentChanged}
     />
   ) : isRemote && selectedHost ? (
     <RemoteFolderChip
       host={selectedHost}
       compact={compact}
+      targetRow={targetRow}
       onSelect={(path) => updateRemoteRoot(selectedHost, path)}
       onManage={() => setSshOpen(true)}
     />
@@ -182,10 +190,11 @@ export function EnvironmentPicker({
 
   return (
     <div
-      className={cn("flex items-center", compact ? "min-w-0 gap-1.5" : "flex-wrap gap-2")}
+      className={cn("flex items-center", targetRow ? "w-full gap-0" : compact ? "min-w-0 gap-1.5" : "flex-wrap gap-2")}
     >
       {/* Target machine */}
       {targetPicker}
+      {targetRow && folderPicker && <span className="mx-1 h-6 w-px shrink-0 bg-border-subtle" aria-hidden="true" />}
 
       {/* Project folder — only meaningful when coding on this machine */}
       {folderPicker}
@@ -197,11 +206,13 @@ export function EnvironmentPicker({
 function RemoteFolderChip({
   host,
   compact,
+  targetRow = false,
   onSelect,
   onManage,
 }: {
   host: SshHost;
   compact: boolean;
+  targetRow?: boolean;
   onSelect: (path: string) => void;
   onManage: () => void;
 }) {
@@ -209,13 +220,15 @@ function RemoteFolderChip({
   return (
     <Popover
       popupLabel={`Remote folders on ${hostLabel(host)}`}
+      placement={targetRow ? "bottom" : "top"}
+      className={targetRow ? "min-w-0 flex-1" : undefined}
       trigger={
-        <span className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}>
-          <Folder className={compact ? "size-3" : "size-4"} />
+        <span className={cn(targetRow ? `${TARGET_CHIP} w-full` : compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}>
+          <Folder className={compact && !targetRow ? "size-3" : "size-4"} />
           <span className="max-w-[12rem] truncate">
             {has ? projectName(host.remoteRoot) : "Select remote folder…"}
           </span>
-          {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
+          {targetRow ? <span className="ml-auto whitespace-nowrap text-xs font-normal text-ink-muted">Change folder <ChevronDown className="ml-1 inline size-3" /></span> : !compact && <ChevronDown className="size-3.5 text-ink-faint" />}
         </span>
       }
     >
@@ -378,10 +391,12 @@ export function RemoteFolderBrowser({
 function FolderChip({
   cwd,
   compact = false,
+  targetRow = false,
   onFolderSelected,
 }: {
   cwd: string;
   compact?: boolean;
+  targetRow?: boolean;
   onFolderSelected?: (path: string) => void;
 }) {
   const pick = useSessionStore((s) => s.pickProjectFolder);
@@ -394,15 +409,17 @@ function FolderChip({
   return (
     <Popover
       popupLabel="Project folder"
+      placement={targetRow ? "bottom" : "top"}
+      className={targetRow ? "min-w-0 flex-1" : undefined}
       trigger={
         <span
-          className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}
+          className={cn(targetRow ? `${TARGET_CHIP} w-full` : compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}
         >
-          <Folder className={compact ? "size-3" : "size-4"} />
+          <Folder className={compact && !targetRow ? "size-3" : "size-4"} />
           <span className="max-w-[12rem] truncate">
             {has ? projectName(cwd) : "Select folder…"}
           </span>
-          {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
+          {targetRow ? <span className="ml-auto whitespace-nowrap text-xs font-normal text-ink-muted">Change folder <ChevronDown className="ml-1 inline size-3" /></span> : !compact && <ChevronDown className="size-3.5 text-ink-faint" />}
         </span>
       }
     >
@@ -508,10 +525,14 @@ function Popover({
   trigger,
   popupLabel,
   children,
+  placement = "top",
+  className,
 }: {
   trigger: React.ReactNode;
   popupLabel: string;
   children: (close: () => void) => React.ReactNode;
+  placement?: "top" | "bottom";
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -540,10 +561,11 @@ function Popover({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={cn("relative", className)}>
       <button
         ref={triggerRef}
         type="button"
+        className={className ? "w-full" : undefined}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? popupId : undefined}
@@ -556,7 +578,7 @@ function Popover({
           id={popupId}
           role="dialog"
           aria-label={popupLabel}
-          className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+          className={cn("popover-surface absolute left-0 z-30 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle", placement === "bottom" ? "top-full mt-2" : "bottom-full mb-2")}
         >
           {children(close)}
         </div>

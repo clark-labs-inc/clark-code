@@ -173,6 +173,10 @@
   max-width: var(--conversation-column-max-width);
 }
 
+.security-start-composer .conversation-column-width {
+  max-width: min(62rem, 100%);
+}
+
 /* Sonner owns notification behavior; Clark owns the visual and motion system.
    Keep these selectors more specific than Sonner's injected defaults so its
    queue/focus/swipe mechanics remain intact while every visible value comes

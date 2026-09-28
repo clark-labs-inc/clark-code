@@ -1,5 +1,7 @@
 import { useSessionStore } from "../../store/sessionStore";
 import { projectDisplayName } from "../../lib/projectSidebar";
+import { useSpecialistStore } from "../../store/specialistStore";
+import type { SpecialistKind } from "../../lib/specialists";
 
 /** Detach from ongoing work and put keyboard input in the new task composer. */
 export function newConversation(nextProjectLabel?: string) {
@@ -24,4 +26,10 @@ export function newConversation(nextProjectLabel?: string) {
   requestAnimationFrame(() => {
     document.querySelector<HTMLTextAreaElement>("textarea.composer-input")?.focus();
   });
+}
+
+/** Start a fresh conversation in the chosen lens, without carrying its old workflow or draft. */
+export function newSpecialistConversation(kind: SpecialistKind) {
+  newConversation();
+  useSpecialistStore.getState().open(kind);
 }

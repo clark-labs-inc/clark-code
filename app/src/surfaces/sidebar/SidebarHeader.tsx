@@ -1,23 +1,17 @@
 import type { RefObject } from "react";
-import { Library, MessageSquare, PanelLeft, PanelLeftClose, Plus, Search, X } from "lucide-react";
+import { MessageSquare, PanelLeft, PanelLeftClose, Plus, Search, X } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
 import { productName } from "../../product/productModule";
 
-export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef, artifactCount, onOpenArtifacts }: {
+export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef }: {
   rail: boolean;
   onToggle: () => void;
   filter: string;
   onFilter: (value: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
-  artifactCount: number;
-  onOpenArtifacts?: () => void;
 }) {
-  // Keep the primary action useful in both states: while a session is open,
-  // "New session" means detach to the composer; from the start screen it
-  // opens the folder/remote chooser for a new project.
-  const specialistActive = useSpecialistStore((s) => s.active !== null);
-  const chooseProject = useSessionStore((s) => s.session || s.opening || specialistActive
+  const chooseProject = useSessionStore((s) => s.session || s.opening
     ? s.endSession
     : s.setNewProjectOpen);
   const quickChat = useSessionStore((s) => s.startQuickChat);
@@ -34,7 +28,7 @@ export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef, art
           {rail ? <PanelLeft className="size-4" /> : <PanelLeftClose className="size-4" />}
         </button>
       </div>
-      <button type="button" onClick={() => chooseProject(true)} aria-label="New session" title="New session — choose a folder or remote host"
+      <button type="button" onClick={() => { useSpecialistStore.getState().close(); chooseProject(true); }} aria-label="New session" title="New session — choose a folder or remote host"
         className={rail ? action : "flex min-h-10 w-full items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-on-accent hover:bg-accent-hover"}>
         <Plus className="size-4" />{!rail && "New session…"}
       </button>
@@ -44,9 +38,6 @@ export function SidebarHeader({ rail, onToggle, filter, onFilter, searchRef, art
       }} aria-label="New quick chat" title="New quick chat — no project required" className={action}>
         <MessageSquare className="size-4" />{!rail && "New quick chat"}
       </button>
-      {onOpenArtifacts && <button type="button" onClick={onOpenArtifacts} aria-label={`Artifacts, ${artifactCount}`} title="Artifacts from the current session" className={action}>
-        <Library className="size-4" />{!rail && <><span className="flex-1 text-left">Artifacts</span><span className="text-ink-muted">{artifactCount}</span></>}
-      </button>}
       {!rail && <div className="mt-3 flex min-h-9 items-center gap-2 rounded-lg bg-bg px-2.5 ring-1 ring-border-subtle focus-within:ring-accent">
         <Search className="size-3.5 shrink-0 text-ink-muted" />
         <input ref={searchRef} value={filter} onChange={(e) => onFilter(e.target.value)}

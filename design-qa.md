@@ -210,3 +210,41 @@ final result: passed
 - Frontend verification: 166 test files and 737 tests passed; typecheck, production build, and `git diff --check` passed.
 
 final result: passed
+
+---
+
+# Security session start: option 2 design QA
+
+**Visual evidence**
+
+- Source visual truth: `/Users/stan/.codex/generated_images/01a0d962-09b3-7e32-8906-a9b49d9f35ca/exec-7c1114cd-fecf-4c6f-bb51-12da6d7f2470.png` (1487 × 1058 px generated desktop mockup).
+- Rendered implementation: `http://127.0.0.1:5173/?specialist=security&specialistPreview=paid`, captured in the Codex in-app browser at a 1440 × 1024 CSS viewport (1440 × 1024 screenshot px, 1× density). The browser capture was displayed beside the source in the same comparison input in this task. A filesystem screenshot path is unavailable because browser policy blocked exporting the capture through a data URL; the visual comparison itself was completed in-browser.
+- State: dark theme, Security start screen, Local target, `clark-desktop` project selected, paid specialist preview. The fixture displays a phone-connection banner and a local test account that were absent from the mockup.
+- Normalization: source and implementation have nearly the same aspect ratio and pixel scale; compared the full views at native dimensions. No focused crop was needed because the headings, target picker, starter copy, icons, and composer controls were legible in the full-view comparison.
+
+**Findings**
+
+No actionable P0, P1, or P2 visual differences remain. The serif heading and compact sans-serif controls preserve the source hierarchy and wrapping; the selected purple, dark surfaces, borders, icon treatment, target-row height, starter-card dimensions, spacing, and pinned composer match the source's main composition. The three starter labels and detail copy match the selected design. Standard Lucide icons replace no unique illustrative asset.
+
+- [P3] The live product sidebar is narrower and has different project/session content than the generated mockup. This follows the existing app's sidebar sizing and the fixture's local state; widening the global sidebar for this screen would alter general chat.
+- [P3] The fixture's connection banner and current approval setting shift or change existing chrome. Neither belongs to the Security start-screen component.
+
+**Comparison history**
+
+1. First full-view comparison found a short target row and starter cards, an extra helper line, a specialist label on the generic sidebar action, and a shield icon/copy where the mockup used a question starter. The target row grew to 64 px; cards grew to 96 px with 16 px gaps; top spacing was aligned; the helper line was removed; the sidebar action returned to `New session…`; the question icon and copy were corrected.
+2. Second combined source/render comparison confirmed the heading, target row, starter cards, and composer now occupy the intended vertical regions. At 375 × 812 CSS px, the start screen scrolls behind a persistent composer and has no document-level horizontal overflow.
+
+**Interaction and build checks**
+
+- Chose a local folder, selected a starter, observed prompt prefill, sent it through the mock provider, opened a fresh Security session, and verified the general `New session…` action returns to the general start flow.
+- In-app browser console errors: none. The mock provider was used; no hosted model call was made.
+- Frontend typecheck, 811 frontend tests, production build, Rust formatting/Clippy/801 nextest/WASM checks passed.
+
+**Implementation checklist**
+
+- [x] Match desktop start-screen hierarchy and spacing.
+- [x] Keep target/folder controls and starter actions functional.
+- [x] Verify compact-width scrolling and persistent composer.
+- [x] Run frontend and foundation checks.
+
+final result: passed

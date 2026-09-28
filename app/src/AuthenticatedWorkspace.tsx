@@ -8,6 +8,7 @@ import type { InterfaceContrast } from "./lib/useAppearance";
 import { TopBar } from "./surfaces/TopBar";
 import { Sidebar } from "./surfaces/Sidebar";
 import { SpecialistWorkspace } from "./surfaces/specialists/SpecialistWorkspace";
+import { newSpecialistConversation } from "./surfaces/sidebar/newSession";
 import { useSpecialistStore } from "./store/specialistStore";
 import { specialistDeepLink } from "./lib/specialists";
 import { StartCard } from "./surfaces/StartCard";
@@ -120,13 +121,11 @@ export default function AuthenticatedWorkspace({
     ? "opening"
     : unavailableConversation
       ? "unavailable"
-      : artifactPanelOpen && !session
-        ? "artifacts"
-        : activeSpecialist
-          ? "specialist"
-          : session
-            ? "conversation"
-            : "start";
+      : activeSpecialist
+        ? "specialist"
+        : session
+          ? "conversation"
+          : "start";
 
   useEffect(() => {
     setArtifactPanelOpen(false);
@@ -182,12 +181,6 @@ export default function AuthenticatedWorkspace({
   }, [artifactPanelOpen, subagentsOpen]);
 
   useEffect(() => {
-    if (!activeSpecialist || !artifactPanelOpen) return;
-    setArtifactPanelOpen(false);
-    setActiveArtifactId(null);
-  }, [activeSpecialist, artifactPanelOpen]);
-
-  useEffect(() => {
     const splitPane = splitPaneRef.current;
     if (!sidePanelOpen || !splitPane || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(([entry]) => {
@@ -204,7 +197,7 @@ export default function AuthenticatedWorkspace({
     });
     observer.observe(splitPane);
     return () => observer.disconnect();
-  }, [sidePanelOpen, subagentsOpen]);
+  }, [activeSpecialist, sidePanelOpen, subagentsOpen]);
 
   useEffect(() => () => artifactResizeCleanupRef.current?.(), []);
 
@@ -268,10 +261,10 @@ export default function AuthenticatedWorkspace({
     setActiveArtifactId(artifact.id);
   };
   const openArtifacts = () => {
+    if (!useSessionStore.getState().session) return;
     const artifacts = useSessionStore.getState().snapshot.artifacts;
     const latest = artifacts.at(-1);
     closeSubagents();
-    useSpecialistStore.getState().close();
     setArtifactPanelOpen(true);
     setActiveArtifactId((current) =>
       current && artifacts.some((artifact) => artifact.id === current) ? current : (latest?.id ?? null),
@@ -289,9 +282,84 @@ export default function AuthenticatedWorkspace({
     });
   };
 
+  const detailsPanel = sidePanelOpen && (
+    <>
+      <div
+        role="separator"
+        aria-label="Resize details panel"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_ARTIFACT_PANEL_WIDTH}
+        aria-valuemax={Math.max(
+          MIN_ARTIFACT_PANEL_WIDTH,
+          splitPaneWidth - MIN_CONVERSATION_PANEL_WIDTH,
+        )}
+        aria-valuenow={sidePanelWidth}
+        tabIndex={0}
+        title="Drag to resize details panel · Double-click to reset"
+        onDoubleClick={() => {
+          const width = constrainArtifactPanelWidth(
+            DEFAULT_ARTIFACT_PANEL_WIDTH,
+            splitPaneRef.current?.clientWidth ??
+              DEFAULT_ARTIFACT_PANEL_WIDTH + MIN_CONVERSATION_PANEL_WIDTH,
+          );
+          if (subagentsOpen) setSubagentsPanelWidth(480);
+          else {
+            setArtifactPanelWidth(width);
+            saveArtifactPanelWidth(width);
+          }
+        }}
+        onKeyDown={handleSidePanelResizeKey}
+        onMouseDown={handleSidePanelResizeStart}
+        className="group relative z-20 hidden w-2 shrink-0 touch-none cursor-col-resize outline-none xl:block"
+      >
+        <span
+          className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
+            resizingArtifactPanel
+              ? "bg-accent"
+              : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent"
+          }`}
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 xl:flex-none" style={{ width: sidePanelWidth }}>
+        <PanelErrorBoundary
+          title="Details panel needs to restart"
+          resetKey={subagentsOpen ? "subagents" : activeArtifactId}
+          onDismiss={() => {
+            closeSubagents();
+            setArtifactPanelOpen(false);
+            setActiveArtifactId(null);
+          }}
+        >
+          <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
+            {subagentsOpen ? (
+              <SubagentsInspector />
+            ) : activeArtifactId ? (
+              <ArtifactWorkspace
+                activeArtifactId={activeArtifactId}
+                conversationTitle={conversationTitle ?? "Current conversation"}
+                onSelect={setActiveArtifactId}
+                onClose={() => {
+                  setArtifactPanelOpen(false);
+                  setActiveArtifactId(null);
+                }}
+                onJumpToSource={jumpToSource}
+              />
+            ) : (
+              <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
+            )}
+          </Suspense>
+        </PanelErrorBoundary>
+      </div>
+    </>
+  );
+
   useHotkeys([
     { key: "k", mod: true, allowInInput: true, run: () => useSessionStore.getState().togglePalette() },
-    { key: "n", mod: true, run: () => useSessionStore.getState().setNewProjectOpen(true) },
+    { key: "n", mod: true, run: () => {
+      const specialist = useSpecialistStore.getState().active;
+      if (specialist) newSpecialistConversation(specialist);
+      else useSessionStore.getState().setNewProjectOpen(true);
+    } },
     { key: "\\", mod: true, allowInInput: true, run: () => useSessionStore.getState().toggleSidebar() },
     {
       key: "j",
@@ -307,9 +375,9 @@ export default function AuthenticatedWorkspace({
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
-      <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
+      <Sidebar />
       <div className="relative flex min-w-0 flex-1 flex-col">
-        {!activeSpecialist && <TopBar dark={dark} onToggleTheme={onToggleTheme} />}
+        {!activeSpecialist && <TopBar dark={dark} onToggleTheme={onToggleTheme} artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />}
         <OfflineBanner />
         <MobileRemoteAgent />
         {/* Cached target content stays visible while its native runtime
@@ -323,10 +391,19 @@ export default function AuthenticatedWorkspace({
               <OpeningScreen />
             ) : unavailableConversation ? (
               <UnavailableConversation />
-            ) : artifactPanelOpen && !session ? (
-              <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
             ) : activeSpecialist ? (
-              <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme} />
+              <div
+                ref={splitPaneRef}
+                className={`flex min-h-0 min-w-0 flex-1 ${resizingArtifactPanel ? "cursor-col-resize select-none" : ""}`}
+              >
+                <div className={sidePanelOpen
+                  ? "hidden min-w-[20rem] flex-1 flex-col xl:flex"
+                  : "flex min-w-0 flex-1 flex-col"}>
+                  <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme}
+                    artifactCount={artifactCount} onOpenArtifacts={openArtifacts} onOpenArtifact={openArtifact} />
+                </div>
+                {detailsPanel}
+              </div>
             ) : session ? (
               <div
                 ref={splitPaneRef}
@@ -349,79 +426,7 @@ export default function AuthenticatedWorkspace({
                   <GoalStatusRail />
                   <Composer />
                 </div>
-                {sidePanelOpen && (
-                  <>
-                    <div
-                      role="separator"
-                      aria-label="Resize details panel"
-                      aria-orientation="vertical"
-                      aria-valuemin={MIN_ARTIFACT_PANEL_WIDTH}
-                      aria-valuemax={Math.max(
-                        MIN_ARTIFACT_PANEL_WIDTH,
-                        splitPaneWidth - MIN_CONVERSATION_PANEL_WIDTH,
-                      )}
-                      aria-valuenow={sidePanelWidth}
-                      tabIndex={0}
-                      title="Drag to resize details panel · Double-click to reset"
-                      onDoubleClick={() => {
-                        const width = constrainArtifactPanelWidth(
-                          DEFAULT_ARTIFACT_PANEL_WIDTH,
-                          splitPaneRef.current?.clientWidth ??
-                            DEFAULT_ARTIFACT_PANEL_WIDTH + MIN_CONVERSATION_PANEL_WIDTH,
-                        );
-                        if (subagentsOpen) setSubagentsPanelWidth(480);
-                        else {
-                          setArtifactPanelWidth(width);
-                          saveArtifactPanelWidth(width);
-                        }
-                      }}
-                      onKeyDown={handleSidePanelResizeKey}
-                      onMouseDown={handleSidePanelResizeStart}
-                      className="group relative z-20 hidden w-2 shrink-0 touch-none cursor-col-resize outline-none xl:block"
-                    >
-                      <span
-                        className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
-                          resizingArtifactPanel
-                            ? "bg-accent"
-                            : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent"
-                        }`}
-                      />
-                    </div>
-                    <div
-                      className="flex min-w-0 flex-1 xl:flex-none"
-                      style={{ width: sidePanelWidth }}
-                    >
-                      <PanelErrorBoundary
-                        title="Details panel needs to restart"
-                        resetKey={subagentsOpen ? "subagents" : activeArtifactId}
-                        onDismiss={() => {
-                          closeSubagents();
-                          setArtifactPanelOpen(false);
-                          setActiveArtifactId(null);
-                        }}
-                      >
-                        <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
-                          {subagentsOpen ? (
-                            <SubagentsInspector />
-                          ) : activeArtifactId ? (
-                            <ArtifactWorkspace
-                              activeArtifactId={activeArtifactId}
-                              conversationTitle={conversationTitle ?? "Current conversation"}
-                              onSelect={setActiveArtifactId}
-                              onClose={() => {
-                                setArtifactPanelOpen(false);
-                                setActiveArtifactId(null);
-                              }}
-                              onJumpToSource={jumpToSource}
-                            />
-                          ) : (
-                            <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
-                          )}
-                        </Suspense>
-                      </PanelErrorBoundary>
-                    </div>
-                  </>
-                )}
+                {detailsPanel}
               </div>
             ) : (
               <>

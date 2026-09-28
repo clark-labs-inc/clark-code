@@ -94,13 +94,7 @@ function projectMoveDestinations(
 }
 
 
-export function Sidebar({
-  artifactCount = 0,
-  onOpenArtifacts,
-}: {
-  artifactCount?: number;
-  onOpenArtifacts?: () => void;
-}) {
+export function Sidebar() {
   const collapsed = useSessionStore((s) => s.sidebarCollapsed);
   const auth = useSessionStore((s) => s.auth);
   const accountScope = codeKeyAccountBinding(auth);
@@ -673,7 +667,7 @@ export function Sidebar({
     return (
       <div className="flex w-12 shrink-0 flex-col items-center gap-1 bg-bg-secondary py-2">
         <SidebarHeader rail onToggle={() => narrow ? drawer.setOpen(true) : setCollapsed(false)} filter={filter} onFilter={setFilter}
-          searchRef={searchInputRef} artifactCount={artifactCount} onOpenArtifacts={onOpenArtifacts} />
+          searchRef={searchInputRef} />
         <SpecialistNavigation rail />
         <div className="mt-auto">
           <ProfileMenu variant="rail" />
@@ -701,7 +695,7 @@ export function Sidebar({
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-secondary">
       <SidebarHeader rail={false} onToggle={() => narrow ? drawer.setOpen(false) : setCollapsed(true)} filter={filter} onFilter={setFilter}
-        searchRef={searchInputRef} artifactCount={artifactCount} onOpenArtifacts={onOpenArtifacts} />
+        searchRef={searchInputRef} />
 
       <p id="sidebar-selection-help" className="sr-only">
         Use Shift-click or Shift+Arrow Up and Down to select a range. Command or Control-click toggles one conversation. Press Escape to clear the selection.

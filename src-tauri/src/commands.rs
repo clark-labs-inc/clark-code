@@ -1,6 +1,7 @@
 //! Tauri command surface — the IPC boundary the web UI calls via `invoke`.
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
+mod artifact_text;
 mod cloud;
 mod cloud_authority;
 mod cloud_conversations;
@@ -17,6 +18,7 @@ mod session_close;
 mod skills;
 mod stream_batch;
 mod user_message;
+pub use artifact_text::*;
 pub use cloud::*;
 pub use cloud_conversations::*;
 pub use computer_use::*;

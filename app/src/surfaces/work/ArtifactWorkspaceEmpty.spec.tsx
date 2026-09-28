@@ -8,7 +8,7 @@ describe("ArtifactWorkspaceEmpty", () => {
 
     expect(html).toContain('aria-label="Artifact workspace"');
     expect(html).toContain('aria-label="Close artifact workspace"');
-    expect(html).toContain("No artifacts yet");
-    expect(html).toContain("Files and other outputs created in this task will appear here.");
+    expect(html).toContain("No artifacts in this session yet");
+    expect(html).toContain("Files and other outputs created in this session will appear here.");
   });
 });

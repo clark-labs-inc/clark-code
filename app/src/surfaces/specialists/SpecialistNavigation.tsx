@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Loader2, MessageSquare, Network, Trash2 } from "lucide-react";
+import { ChevronRight, Loader2, MessageSquare, Network, Plus, Trash2 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
 import {
@@ -12,6 +12,7 @@ import { specialistConversationsForNavigation } from "../../lib/specialistNaviga
 import { currentActivity } from "../../lib/activity";
 import { cn } from "../../lib/cn";
 import { productModule } from "../../product/productModule";
+import { newSpecialistConversation } from "../sidebar/newSession";
 
 const product = productModule();
 
@@ -223,6 +224,16 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
                   >
                     <Icon className={cn("size-[18px] shrink-0", selected && "text-accent")} />
                     <span className="truncate">{SPECIALISTS[kind].label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-qa={`specialist-new-session-${kind}`}
+                    onClick={() => newSpecialistConversation(kind)}
+                    aria-label={`New ${SPECIALISTS[kind].label} session`}
+                    title={`New ${SPECIALISTS[kind].label} session`}
+                    className="grid size-8 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+                  >
+                    <Plus className="size-4" />
                   </button>
                 </div>
                 {expanded === kind && specialistConversations.length > 0 && (

@@ -8,7 +8,7 @@ import conversationRowSource from "./sidebar/ConversationRow.tsx?raw";
 describe("Sidebar creation actions", () => {
   it("uses one folder chooser and a separate project-free quick chat action", () => {
     expect(headerSource).toContain('aria-label="New session"');
-    expect(headerSource).toContain('onClick={() => chooseProject(true)}');
+    expect(headerSource).toContain('useSpecialistStore.getState().close(); chooseProject(true)');
     expect(headerSource).toContain('aria-label="New quick chat"');
     expect(headerSource).toContain("await quickChat()");
     expect(headerSource).not.toContain('aria-label="New project"');

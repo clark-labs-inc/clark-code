@@ -9,12 +9,16 @@ import { PanelErrorBoundary } from "../../components/PanelErrorBoundary";
 import { GoalStatusRail } from "../GoalStatusRail";
 import { Composer } from "../Composer";
 import { SpecialistWelcome, type SpecialistStarter } from "./SpecialistWelcome";
+import type { Artifact } from "../../core-bridge/types";
 
 const Conversation = lazy(() =>
   import("../Conversation").then((module) => ({ default: module.Conversation })),
 );
 
-export function ContextualConversation({ kind }: { kind: SpecialistKind }) {
+export function ContextualConversation({ kind, onOpenArtifact }: {
+  kind: SpecialistKind;
+  onOpenArtifact: (artifact: Artifact) => void;
+}) {
   const session = useSessionStore((state) => state.session);
   const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const setTab = useSpecialistStore((state) => state.setTab);
@@ -42,7 +46,7 @@ export function ContextualConversation({ kind }: { kind: SpecialistKind }) {
           >
             <PanelErrorBoundary title={`${definition.label} conversation needs to restart`} resetKey={session.id}>
               <Suspense fallback={<div className="h-full min-h-0" />}>
-                <Conversation />
+                <Conversation onOpenArtifact={onOpenArtifact} />
               </Suspense>
             </PanelErrorBoundary>
           </m.div>

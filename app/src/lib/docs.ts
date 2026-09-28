@@ -130,6 +130,24 @@ export async function readDocText(uri?: string): Promise<string | null> {
   }
 }
 
+/** Preview small JSON files only through the active native conversation's roots. */
+export async function readJsonArtifact(uri?: string, sessionId?: string): Promise<string | null> {
+  if (!uri) return null;
+  if (isCloudArtifactUri(uri) || isWorkspaceArtifactUri(uri)) {
+    const text = await readDocText(uri);
+    return text !== null && new TextEncoder().encode(text).byteLength <= 2 * 1024 * 1024 ? text : null;
+  }
+  if (!sessionId || !isTauri() || !isLocalDocUri(uri)) return null;
+  try {
+    return await invoke<string>("read_artifact_text", {
+      path: toPath(uri),
+      sessionId,
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** Read a produced image's bytes from disk as a `data:` URL. Returns null when
  *  it can't be read inline (browser preview, a remote URL, or an
  *  unreadable/oversized/unsupported file) — the caller falls back to an "Open"

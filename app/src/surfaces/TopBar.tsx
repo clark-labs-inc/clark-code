@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { productName } from "../product/productModule";
-import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2 } from "lucide-react";
+import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2, Library } from "lucide-react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { useSessionStore } from "../store/sessionStore";
@@ -134,7 +134,12 @@ function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
   );
 }
 
-export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
+export function TopBar({ dark, onToggleTheme, artifactCount, onOpenArtifacts }: {
+  dark: boolean;
+  onToggleTheme: () => void;
+  artifactCount: number;
+  onOpenArtifacts: () => void;
+}) {
   const session = useSessionStore((s) => s.session);
   const connecting = useSessionStore((s) => s.connecting);
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
@@ -181,6 +186,19 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
           {session && isLocal && !activeRemote && projectCwd && <SecurityButton />}
           {session && isLocal && projectCwd && <MemoryButton />}
         </span>
+        {session && (
+          <button
+            type="button"
+            onClick={onOpenArtifacts}
+            aria-label={`Artifacts in this session, ${artifactCount}`}
+            title="Artifacts in this session"
+            className="flex h-9 items-center gap-1.5 rounded-xl px-2 text-xs font-medium text-ink-muted transition hover:bg-accent-subtle hover:text-accent"
+          >
+            <Library className="size-4" />
+            <span className="hidden sm:inline">Artifacts</span>
+            <span className="tabular-nums">{artifactCount}</span>
+          </button>
+        )}
         <button
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"

@@ -377,6 +377,7 @@ pub fn run_with_product_and_context(
             commands::local_list_security_scans,
             commands::project_context,
             commands::read_doc_text,
+            commands::read_artifact_text,
             commands::read_image_data_url,
             document_preview::render_document_preview,
             document_preview::read_document_preview_page,

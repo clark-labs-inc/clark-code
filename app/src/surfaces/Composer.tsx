@@ -214,6 +214,7 @@ function ScopedComposer() {
   const projectInspectionReady = !isRemoteContext || Boolean(remote);
   const localTarget = session ? session.provider === "local" : activeProvider === "local";
   const specialistSession = Boolean(activeSpecialist) || session?.provider === "specialist";
+  const securityStart = activeSpecialist === "security" && !session;
   const quickChatSession = Boolean(
     session && isQuickChatProject(activeProjectRoot ?? undefined, session.id),
   );
@@ -930,6 +931,7 @@ function ScopedComposer() {
       className={cn(
         "min-w-0 bg-bg px-3 pb-4 pt-2.5 sm:px-6",
         specialistSession && "specialist-composer",
+        securityStart && "security-start-composer",
       )}
     >
       <ComposerQueuedMessages onEdit={editQueued} />
@@ -975,7 +977,7 @@ function ScopedComposer() {
           </div>
         )}
       </AnimatePresence>
-      <ComposerContextBar />
+      {!securityStart && <ComposerContextBar />}
       <div
         className={cn(
           "relative z-10 mx-auto w-full rounded-lg border px-2.5 transition duration-base ease-agent",
@@ -1078,7 +1080,7 @@ function ScopedComposer() {
           spellCheck={false}
           placeholder={
             !session
-              ? branding.initialPlaceholder
+              ? securityStart ? "Or describe what you want Security to do…" : branding.initialPlaceholder
               : busy
                 ? "Queue a follow-up…"
                 : branding.projectPlaceholder

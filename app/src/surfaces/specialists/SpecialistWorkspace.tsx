@@ -4,10 +4,13 @@ import {
   Building2,
   ChevronDown,
   MessageSquareText,
+  Library,
   Moon,
   PanelRightClose,
   PanelRightOpen,
+  Plus,
   Settings,
+  ShieldCheck,
   Sun,
 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
@@ -42,6 +45,8 @@ import { ScientistCanvas } from "./ScientistCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
 import { ContextualConversation } from "./ContextualConversation";
+import { newSpecialistConversation } from "../sidebar/newSession";
+import type { Artifact } from "../../core-bridge/types";
 
 interface SpecialistData {
   researchOverview: ResearchOverview | null;
@@ -66,9 +71,15 @@ function previewCredentials(): CloudCreds {
 export function SpecialistWorkspace({
   dark,
   onToggleTheme,
+  artifactCount,
+  onOpenArtifacts,
+  onOpenArtifact,
 }: {
   dark: boolean;
   onToggleTheme: () => void;
+  artifactCount: number;
+  onOpenArtifacts: () => void;
+  onOpenArtifact: (artifact: Artifact) => void;
 }) {
   const active = useSpecialistStore((state) => state.active) ?? "security";
   const tabs = useSpecialistStore((state) => state.tabs);
@@ -270,13 +281,39 @@ export function SpecialistWorkspace({
     <div data-qa={`specialist-workspace-${active}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg">
       <header className="flex min-h-16 shrink-0 items-center gap-4 px-5 py-2.5">
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">
-            {productModule().branding.shortName} {definition.label}
+          <h1 className="flex items-center gap-2 font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">
+            {active === "security" && <ShieldCheck className="size-5 text-accent" aria-hidden="true" />}
+            {active === "security" ? "Security" : `${productModule().branding.shortName} ${definition.label}`}
           </h1>
-          <p className="mt-0.5 line-clamp-2 max-w-2xl text-xs leading-4 text-ink-muted">{definition.value}</p>
+          <p className="mt-0.5 line-clamp-2 max-w-2xl text-xs leading-4 text-ink-muted">
+            {active === "security" ? "Find vulnerabilities, validate fixes, and strengthen your code." : definition.value}
+          </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <UpdatePill />
+          <button
+            type="button"
+            onClick={() => newSpecialistConversation(active)}
+            aria-label={`New ${definition.label} session`}
+            title={`New ${definition.label} session`}
+            className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+          >
+            <Plus className="size-4" />
+            <span className="hidden sm:inline">New {definition.label} session</span>
+          </button>
+          {boundConversation && (
+            <button
+              type="button"
+              onClick={onOpenArtifacts}
+              aria-label={`Artifacts in this session, ${artifactCount}`}
+              title="Artifacts in this session"
+              className="flex h-9 items-center gap-1.5 rounded-xl px-2 text-xs font-medium text-ink-muted transition hover:bg-accent-subtle hover:text-accent"
+            >
+              <Library className="size-4" />
+              <span className="hidden sm:inline">Artifacts</span>
+              <span className="tabular-nums">{artifactCount}</span>
+            </button>
+          )}
           {active === "security" && !remote && <SecurityButton />}
           {active !== "security" && <button
               type="button"
@@ -349,7 +386,7 @@ export function SpecialistWorkspace({
         />
       ) : active === "security" ? (
         <div className="min-h-0 min-w-0 flex-1">
-          <ContextualConversation kind="security" />
+          <ContextualConversation kind="security" onOpenArtifact={onOpenArtifact} />
         </div>
       ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -411,7 +448,7 @@ export function SpecialistWorkspace({
               canvasOpen && "xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]",
             )}>
               <div className={cn("min-h-0 min-w-0", mobilePane !== "chat" && "hidden xl:block")}>
-                <ContextualConversation kind={active} />
+                <ContextualConversation kind={active} onOpenArtifact={onOpenArtifact} />
               </div>
               <section
                 data-qa={`specialist-canvas-${active}`}

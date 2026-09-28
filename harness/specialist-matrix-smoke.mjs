@@ -24,7 +24,7 @@ const specialists = [
   {
     kind: "security",
     label: "Security",
-    starter: deepScan ? "Deep scan this repository" : "Investigate a security question",
+    starter: deepScan ? "Deep scan this repository" : "Ask a security question",
     promptIncludes: deepScan ? "exploitable paths" : "security question",
     workflow: deepScan ? "security:security-deep" : "security:assistant",
     provider: "local",
@@ -175,20 +175,6 @@ async function presentation(page, specialist) {
   return page.getByRole("region", { name: `${specialist.kind} specialist analysis` });
 }
 
-async function verifyExample(page, specialist) {
-  await page.locator(`[data-qa="specialist-intro-${specialist.kind}-example"]`).click();
-  const example = page.getByRole("region", { name: `${specialist.kind} example analysis` });
-  await example.waitFor();
-  for (const view of ["Evidence", "Run"]) {
-    await example.getByRole("tab", { name: view, exact: true }).click();
-    check(
-      await example.getByRole("tab", { name: view, exact: true }).getAttribute("aria-selected") === "true",
-      `${specialist.label} example did not select ${view}`,
-    );
-  }
-  await page.locator(`[data-qa="specialist-intro-${specialist.kind}-start"]`).click();
-}
-
 const checks = [];
 const results = {};
 const browserErrors = [];
@@ -223,8 +209,11 @@ try {
 
     check(await page.getByLabel(`Show ${specialist.label} sidebar`).count() === 0, "Security still exposes Insights");
     check(await workspace.getByRole("combobox").count() === 0, "Security still requires an organization");
-    await verifyExample(page, specialist);
-    checks.push(`${specialist.kind}_example_without_insights`);
+    await workspace.getByRole("heading", { name: "New Security session" }).waitFor();
+    check(await workspace.getByRole("button", { name: "New Security session" }).count() === 1, "Security start has no clear new-session action");
+    check(await workspace.getByRole("button", { name: /Change folder/ }).count() === 1, "Security start has no project chooser");
+    check(await page.locator('[data-qa^="specialist-starter-security-"]').count() === 3, "Security start lost its three starting points");
+    checks.push(`${specialist.kind}_session_start_controls_without_insights`);
 
     await page.getByRole("button", { name: `Start ${specialist.label}: ${specialist.starter}` }).click();
     const composer = page.getByLabel("Message Clark Code");
@@ -293,9 +282,8 @@ try {
     check(!successfulOpen.config.extra.cloud_advisor, "Security implicitly attached a cloud advisor");
     checks.push(`${specialist.kind}_provider_authority_projection_and_terminal_state`);
 
-    await page.getByRole("button", { name: "New session", exact: true }).click();
-    await page.getByRole("button", { name: "Specialist lenses", exact: true }).click();
-    await page.locator(`[data-qa="specialist-nav-${specialist.kind}"]`).click();
+    await workspace.getByRole("button", { name: "New Security session" }).click();
+    await workspace.getByRole("heading", { name: "New Security session" }).waitFor();
     const row = page.locator(`[data-qa^="specialist-conversation-${specialist.kind}-"]`).first();
     await row.waitFor();
     await row.locator("button").first().click();
@@ -349,7 +337,7 @@ try {
     check(await freePage.getByLabel("Message Clark Code").count() === 0, `${specialist.label} free gate still exposed a runnable composer`);
   }
   await freePage.screenshot({ path: path.join(outDir, "subscription-access-gates.png"), animations: "disabled" });
-  await freePage.getByRole("button", { name: "New session", exact: true }).click();
+  await freePage.getByRole("button", { name: "New quick chat", exact: true }).click();
   const specialistDisclosure = freePage.getByRole("button", { name: "Specialist lenses", exact: true });
   check(await specialistDisclosure.getAttribute("aria-expanded") === "false", "ordinary chat should collapse specialist navigation");
   check(await freePage.locator('[data-qa^="specialist-nav-"]').count() === 0, "collapsed specialist navigation should hide lens rows");
