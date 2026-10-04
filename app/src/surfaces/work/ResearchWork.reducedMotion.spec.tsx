@@ -11,21 +11,6 @@ vi.mock("motion/react", () => {
 });
 
 vi.mock("motion/react-m", () => {
-  function MotionSection({
-    initial,
-    animate: _animate,
-    exit: _exit,
-    transition: _transition,
-    ...props
-  }: ComponentPropsWithoutRef<"section"> & {
-    initial?: unknown;
-    animate?: unknown;
-    exit?: unknown;
-    transition?: unknown;
-  }) {
-    return <section data-motion-initial={String(initial)} {...props} />;
-  }
-
   function MotionDiv({
     initial,
     animate: _animate,
@@ -42,7 +27,6 @@ vi.mock("motion/react-m", () => {
   }
 
   return {
-    section: MotionSection,
     div: MotionDiv,
   };
 });
@@ -77,7 +61,7 @@ describe("ResearchWork reduced motion", () => {
 
     const markup = renderToStaticMarkup(<ResearchWork call={call} active />);
 
-    expect(markup).toContain('data-motion-initial="[object Object]"');
+    expect(markup).not.toContain("data-motion-initial");
     expect(markup).toContain("animate-[spin_1s_linear_infinite]");
     expect(markup).toContain('data-clark-work-receipt="true"');
     expect(markup).not.toContain("Verify sources");

@@ -184,6 +184,8 @@ describe("assistant message actions", () => {
     expect(user).toContain('data-chat-message-motion="enter"');
     expect(assistant).toContain('data-chat-message-role="assistant"');
     expect(assistant).toContain('data-chat-message-motion="enter"');
-    expect(assistant).toContain('data-sd-animate="true"');
+    // A complete reply enters as a row; replaying word motion hides text that
+    // is already available, especially for a long answer delivered at once.
+    expect(assistant).not.toContain('data-sd-animate="true"');
   });
 });

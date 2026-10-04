@@ -49,7 +49,8 @@ export function ReplySkeleton({
 
 /** Keeps the live answer's geometry stable while Streamdown fills it. Each
  * estimated text line consumes one skeleton row; the minimum height relaxes
- * only after streaming ends, using the shared motion policy. */
+ * once streaming ends. Do not animate that height: it relayouts every row
+ * below the answer and repeatedly retriggers bottom-follow scrolling. */
 export function StreamingReplyFrame({
   children,
   text,

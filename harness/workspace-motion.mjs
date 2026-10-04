@@ -86,7 +86,7 @@ try {
         assert.ok(await page.evaluate(() => window.__motionComposer === document.activeElement), "streaming lost composer focus");
         assert.equal(await page.getByLabel("Message Clark Code").inputValue(), "Draft for conversation B");
         assert.equal(await page.evaluate(() => window.__motionCalls.length), 1, "token update restarted navigation motion");
-        await page.getByRole("button", { name: "Settings", exact: true }).click();
+        await page.locator('button[aria-label="Settings"]').click();
         await page.getByRole("heading", { name: "General", exact: true }).waitFor();
         await page.locator("main").evaluate((element) => { element.scrollTop = element.scrollHeight; });
         await page.getByRole("button", { name: "About & updates", exact: true }).click();

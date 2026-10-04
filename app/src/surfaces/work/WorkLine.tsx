@@ -15,8 +15,6 @@ import {
   DUR,
   EASE,
   REDUCED_EXIT,
-  RISE_SMALL,
-  accessibleMotion,
 } from "../../lib/motion";
 import { useSessionStore } from "../../store/sessionStore";
 import { ResearchWork } from "./ResearchWork";
@@ -328,11 +326,10 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
   const verb = kindVerb(call);
 
   return (
-    <m.div
+    <div
       id={`tool-call-${call.id}`}
       data-tool-call-id={call.id}
       tabIndex={-1}
-      {...accessibleMotion(RISE_SMALL, reduce)}
       className={cn(
         "outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
         active && "bg-bg-hover/40",
@@ -399,7 +396,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
           </m.div>
         )}
       </AnimatePresence>
-    </m.div>
+    </div>
   );
 }
 

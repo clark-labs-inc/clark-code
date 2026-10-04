@@ -15,8 +15,6 @@ import {
   DUR,
   EASE,
   REDUCED_EXIT,
-  RISE_SMALL,
-  accessibleMotion,
 } from "../../lib/motion";
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
@@ -213,11 +211,10 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
   const canOpen = active || hasFindings || Boolean(call.progress);
 
   return (
-    <m.section
+    <section
       id={`tool-call-${call.id}`}
       data-tool-call-id={call.id}
       data-clark-work-receipt="true"
-      {...accessibleMotion(RISE_SMALL, reduce)}
       className={cn(
         "overflow-hidden rounded-md",
         open && "border border-border-subtle bg-bg-secondary/35",
@@ -295,6 +292,6 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
         )}
       </AnimatePresence>
 
-    </m.section>
+    </section>
   );
 }

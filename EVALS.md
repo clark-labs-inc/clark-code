@@ -204,6 +204,52 @@ fresh page load; subsequent interactive checks passed. Exact remote-folder and
 host-refresh contracts are deterministic checks, not live SSH acceptance.
 Final frontend typecheck/build and full suite passed: 843 passed, 5 skipped.
 
+## Transcript rendering stability — 2026-10-04
+
+`node harness/rendering-stability.mjs` (or `pnpm --dir harness test:rendering-stability`)
+drives the real UI with deterministic local snapshots.
+It covers saved execution/research receipts, disclosure scroll ownership,
+streaming while reading, returning to the live tail, code-fence identity on
+completion, and the reply reserve's height. It runs Chromium and WebKit, each
+with normal and reduced motion; no hosted providers are called.
+
+The initial Chromium reproduction found all 60 saved execution rows entering
+with opacity below 1, a 224 px upward displacement of the clicked tool header,
+a replaced code-fence DOM node on completion, and 8 intermediate height frames
+during normal-motion completion (3 with reduced motion). These are deterministic
+DOM/geometry observations, not latency benchmark results.
+
+The corrected implementation keeps one Markdown block renderer through answer
+completion, scopes row identity to its conversation, renders tool receipts
+without mount animations, and gives explicit disclosure interaction ownership
+of the viewport. The reserve collapses once on completion. Reduced-motion CSS
+limits transitions to paint properties: the previous universal duration applied
+to the default `all` property and accidentally animated otherwise static layout.
+
+All four browser configurations passed: 60 mounted receipts with zero faded
+rows; zero header, reading, or scrollback displacement; retained code-fence
+identity; zero intermediate completion-height frames; and zero page errors.
+The harness also verifies that Jump to latest restores following as output grows.
+
+Related acceptance: workspace navigation passed all four browser/motion
+configurations, highlighting replacement/growth passed both engines, and
+permission/toast exit behavior passed Chromium with both motion preferences.
+The workspace harness's Settings locator now targets the labeled toolbar
+button because the current remote-agent notice also contains a Settings button.
+Frontend frozen install, typecheck, production build, and 816 full-suite tests
+passed (3 skipped); the subsequently added Markdown settlement regression and
+updated research-motion test passed in the focused 7-test run. Rust formatting,
+strict Clippy, 802 nextest tests (8 skipped), and the agent-core WASM check passed.
+
+The local streaming profiler failed machine quiescence and used development
+instrumentation. Its timings are not a before/after performance baseline.
+Packaged-native interaction latency remains unmeasured for this change.
+
+Release-scope verification on 2026-10-04: an archive of the staged UI-only
+candidate, excluding unrelated local history/cloud changes, passed 812 frontend
+tests (5 skipped), the production build, and all four rendering-stability browser
+configurations. The working-tree counts above include other in-progress work.
+
 ## UI highlighting and motion — 2026-09-05
 
 Syntax highlighting now uses a module worker in browsers. The worker loads

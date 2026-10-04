@@ -40,6 +40,20 @@ describe("MarkdownContent", () => {
     expect(markup).toContain("<strong>partially written document</strong>");
   });
 
+  it("stops repairing incomplete syntax when the streaming renderer settles", () => {
+    const text = "A **partial answer";
+    const live = renderToStaticMarkup(
+      <MarkdownContent mode="streaming" isAnimating>{text}</MarkdownContent>,
+    );
+    const settled = renderToStaticMarkup(
+      <MarkdownContent mode="streaming">{text}</MarkdownContent>,
+    );
+
+    expect(live).toContain("<strong>partial answer</strong>");
+    expect(settled).toContain(text);
+    expect(settled).not.toContain("<strong>");
+  });
+
   it("turns a project-local Markdown image into an inline actionable preview", () => {
     useSessionStore.setState({ activeProjectRoot: "/workspace/project", activeRemote: null });
 
@@ -83,7 +97,7 @@ describe("MarkdownContent", () => {
     }
 
     const incompleteMarkup = renderToStaticMarkup(
-      <MarkdownContent mode="streaming">
+      <MarkdownContent mode="streaming" isAnimating>
         {"| Field | Value |\n| --- | --- |\n| Vendor ID | `0x17"}
       </MarkdownContent>,
     );

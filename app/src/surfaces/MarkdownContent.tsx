@@ -239,10 +239,9 @@ export function MarkdownContent({
   animated?: StreamdownProps["animated"];
   isAnimating?: boolean;
 }) {
-  // `isAnimating` stays true for a beat after the last token while the entry
-  // animation finishes; a fence is "still arriving" only while the source can
-  // actually still change, which is what `mode` tracks.
-  const streaming = mode === "streaming" || repairIncomplete;
+  // Keep the block renderer mounted when a live answer finishes. Rendering
+  // mode selects the tree shape; isAnimating tells us whether text is arriving.
+  const streaming = (mode === "streaming" && isAnimating) || repairIncomplete;
   return (
     <StreamingMarkdownContext.Provider value={streaming}>
       <Streamdown

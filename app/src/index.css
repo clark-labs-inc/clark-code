@@ -953,7 +953,6 @@ svg.lucide {
 
 .streaming-reply-frame {
   min-height: 0;
-  transition: min-height var(--dur-slow) var(--ease-agent);
 }
 
 .reply-stream-line {
@@ -1016,6 +1015,9 @@ svg.lucide {
    Large spatial travel, perpetual spin, and shimmer movement remain disabled. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
+    /* A nonzero duration with the default `all` property animates even
+       otherwise static layout. Limit reduced-motion cues to paint changes. */
+    transition-property: opacity, color, background-color, border-color, text-decoration-color, box-shadow !important;
     transition-duration: var(--dur-fast) !important;
     scroll-behavior: auto !important;
   }

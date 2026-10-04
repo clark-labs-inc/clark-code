@@ -226,10 +226,10 @@ function MessageImpl({
             >
               <StreamingReplyFrame text={span.text} streaming={live}>
                 <MarkdownContent
-                  mode={live ? "streaming" : "static"}
+                  mode="streaming"
                   className="min-w-0 w-full"
                   animated={reduce ? CHAT_REDUCED_TEXT_ANIMATION : CHAT_TEXT_ANIMATION}
-                  isAnimating={live || animateEntry}
+                  isAnimating={live}
                 >
                   {span.text}
                 </MarkdownContent>

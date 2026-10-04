@@ -26,13 +26,7 @@ import {
   FADE,
   accessibleMotion,
 } from "../lib/motion";
-import {
-  conversationScrollTarget,
-  isConversationAtBottom,
-  isConversationScrollUp,
-  shouldFollowConversation,
-  type ConversationScrollState,
-} from "../lib/conversationScroll";
+import { useConversationScroll } from "../lib/useConversationScroll";
 import { conversationBlockWindow, type ConversationBlock } from "../lib/conversationBlocks";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
@@ -135,12 +129,6 @@ function DismissButton({ onClick, muted = false }: { onClick: () => void; muted?
  * page instead of accumulating DOM, so this stays constant for any transcript. */
 const TIMELINE_WINDOW = 80;
 
-/** Conversation is intentionally kept mounted while live sessions switch, so
- * the scroll element is shared. Keep its viewport state keyed by conversation
- * instead of leaking one chat's pinned/scrollback state into the next. Module
- * scope also preserves it across the loading screen used for cold reopens. */
-const scrollByConversation = new Map<string, ConversationScrollState>();
-
 export function Conversation({
   onOpenArtifact,
 }: {
@@ -164,14 +152,7 @@ export function Conversation({
   const dismissFailedRun = useSessionStore((s) => s.dismissFailedRun);
   const dismissedFailedRuns = useSessionStore((s) => s.dismissedFailedRuns);
   const sessionId = session?.id;
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const lastScrollTop = useRef(0);
-  const scrollFrameRef = useRef<number | null>(null);
   const rowMotionRef = useRef(createChatRowMotionState());
-  const pinnedScrollActive = useRef(false);
-  const scrollingToBottom = useRef(false);
-  const upwardWheel = useRef(false);
   const [historyEnd, setHistoryEnd] = useState<number | null>(null);
   const [remoteHistoryPages, setRemoteHistoryPages] = useState<TranscriptPage[]>([]);
   const [remoteHistoryLoading, setRemoteHistoryLoading] = useState(false);
@@ -182,100 +163,6 @@ export function Conversation({
     setHistoryEnd(null);
     setRemoteHistoryPages([]);
   }, [sessionId]);
-  // Pin to the bottom only when the user is already there — never yank them up
-  // while they're reading scrollback. A small rAF follower absorbs uneven text
-  // batches and tool-card height changes into continuous viewport movement.
-  const stuck = useRef(true);
-  const [atBottom, setAtBottom] = useState(true);
-  const cancelPinnedScroll = useCallback(() => {
-    if (scrollFrameRef.current !== null) {
-      cancelAnimationFrame(scrollFrameRef.current);
-      scrollFrameRef.current = null;
-    }
-    pinnedScrollActive.current = false;
-  }, []);
-  const schedulePinnedScroll = useCallback(() => {
-    if (!sessionId || !stuck.current || scrollFrameRef.current !== null) return;
-    pinnedScrollActive.current = true;
-
-    const scroll = () => {
-      scrollFrameRef.current = null;
-      if (!stuck.current) {
-        pinnedScrollActive.current = false;
-        return;
-      }
-      const el = scrollRef.current;
-      if (!el) {
-        pinnedScrollActive.current = false;
-        return;
-      }
-
-      const target = Math.max(0, el.scrollHeight - el.clientHeight);
-      if (Math.abs(el.scrollTop - target) < 0.5) {
-        pinnedScrollActive.current = false;
-        return;
-      }
-      // One frame is enough to coalesce layout changes. Chasing the target with
-      // recursive easing keeps WebKit's scrolling/compositing tree active for
-      // many frames after every streamed update and makes input feel sticky.
-      el.scrollTop = target;
-      lastScrollTop.current = el.scrollTop;
-      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
-      pinnedScrollActive.current = false;
-    };
-
-    if (typeof requestAnimationFrame === "undefined") {
-      scroll();
-      return;
-    }
-    scrollFrameRef.current = requestAnimationFrame(scroll);
-  }, [sessionId]);
-  useEffect(() => () => cancelPinnedScroll(), [cancelPinnedScroll]);
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const previousScrollTop = lastScrollTop.current;
-    const nearBottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
-    const movedUp = isConversationScrollUp(previousScrollTop, el.scrollTop);
-    const userScrolledUp = upwardWheel.current && movedUp;
-    upwardWheel.current = false;
-    const following = shouldFollowConversation(
-      previousScrollTop,
-      el.scrollTop,
-      nearBottom,
-      scrollingToBottom.current || pinnedScrollActive.current,
-      userScrolledUp,
-    );
-    lastScrollTop.current = el.scrollTop;
-    if (userScrolledUp) cancelPinnedScroll();
-    if (movedUp || nearBottom) scrollingToBottom.current = false;
-    stuck.current = following;
-    if (sessionId) {
-      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: following });
-    }
-    if (following !== atBottom) setAtBottom(following);
-  };
-  const noteUpwardWheel = (deltaY: number) => {
-    // Record intent; wait for an actual scroll event before changing state. An
-    // endpoint bounce can emit a negative wheel delta without moving the
-    // transcript, and should not summon a stale "Jump to latest" button.
-    if (deltaY < 0) upwardWheel.current = true;
-  };
-  const scrollToBottom = () => {
-    const el = scrollRef.current;
-    if (el) {
-      cancelPinnedScroll();
-      scrollingToBottom.current = true;
-      upwardWheel.current = false;
-      stuck.current = true;
-      setAtBottom(true);
-      el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
-      if (sessionId) {
-        scrollByConversation.set(sessionId, { scrollTop: el.scrollHeight, atBottom: true });
-      }
-    }
-  };
-
   const historyPageView = useMemo(() => remoteHistoryPages.length === 0 ? null : ({
     timeline: remoteHistoryPages.flatMap((page) => page.items),
     toolCalls: Object.assign({}, ...remoteHistoryPages.map((page) => page.toolCalls ?? {})),
@@ -298,6 +185,8 @@ export function Conversation({
   } = snapshot;
   const timeline = historyPageView?.timeline ?? liveTimeline;
   const toolCalls = historyPageView?.toolCalls ?? liveToolCalls;
+  const { scrollRef, contentRef, onScroll, noteUpwardWheel, onDisclosureClick, atBottom, scrollToBottom } =
+    useConversationScroll(sessionId, reduce, timeline, toolCalls);
   const artifacts = historyPageView?.artifacts ?? liveArtifacts;
   const providerIncidents = historyPageView?.providerIncidents ?? liveProviderIncidents;
   // Mode flips (e.g. Shift+Tab to "Full access") auto-grant a pending request:
@@ -340,40 +229,6 @@ export function Conversation({
     commitChatRowKeys(rowMotionRef.current, sessionId, rowKeys);
   }, [rowKeys, sessionId]);
 
-  // Restore after React has committed the target transcript but before paint,
-  // avoiding a frame at the previous conversation's unrelated scrollTop.
-  useLayoutEffect(() => {
-    cancelPinnedScroll();
-    const el = scrollRef.current;
-    if (!el || !sessionId) return;
-    const remembered = scrollByConversation.get(sessionId);
-    const busy = currentActivity(useSessionStore.getState().snapshot).busy;
-    el.scrollTop = conversationScrollTarget(remembered, busy, el.scrollHeight);
-    lastScrollTop.current = el.scrollTop;
-    scrollingToBottom.current = false;
-    const bottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
-    stuck.current = bottom;
-    setAtBottom(bottom);
-    scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: bottom });
-  }, [cancelPinnedScroll, sessionId]);
-
-  useEffect(() => {
-    schedulePinnedScroll();
-  }, [schedulePinnedScroll, sessionId, timeline, toolCalls]);
-
-  // Timeline rows, images, and animated pending/permission banners can change
-  // height after their snapshot render. Follow the actual content box while
-  // pinned so "latest" remains truly visible rather than a few pixels below
-  // the viewport after an enter animation settles.
-  useEffect(() => {
-    const el = scrollRef.current;
-    const content = contentRef.current;
-    if (!el || !content || !sessionId || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(schedulePinnedScroll);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [schedulePinnedScroll, sessionId]);
-
   if (!session) return null;
 
   const visible = timeline;
@@ -414,7 +269,7 @@ export function Conversation({
   const renderBlock = (block: ConversationBlock) => {
     if (block.kind === "goal_work") {
       return goal ? (
-        <GoalWorkSummary key={block.key} goal={goal} runActive={goalRunActive}>
+        <GoalWorkSummary key={`${sessionId}:${block.key}`} goal={goal} runActive={goalRunActive}>
           {block.blocks.map(renderBlock)}
         </GoalWorkSummary>
       ) : null;
@@ -423,7 +278,7 @@ export function Conversation({
       const calls = block.ids
         .map((id) => toolCalls[id])
         .filter(Boolean) as ToolCall[];
-      return <WorkBlock key={block.key} calls={calls} />;
+      return <WorkBlock key={`${sessionId}:${block.key}`} calls={calls} />;
     }
     const { item } = block;
     if (item.item === "message") {
@@ -437,7 +292,7 @@ export function Conversation({
       if (streaming && isThinkingOnlyMessage(item)) return null;
       return (
         <Message
-          key={block.key}
+          key={`${sessionId}:${block.key}`}
           role={item.role}
           blocks={item.blocks}
           phase={item.phase}
@@ -451,7 +306,7 @@ export function Conversation({
       const presentation = specialistPresentationFromPayload(item.presentation);
       return presentation ? (
         <SpecialistConversationPresentationCard
-          key={block.key}
+          key={`${sessionId}:${block.key}`}
           presentation={presentation}
           variant="conversation"
         />
@@ -462,7 +317,7 @@ export function Conversation({
       return artifact ? (
         <div
           id={`artifact-${artifact.id}`}
-          key={block.key}
+          key={`${sessionId}:${block.key}`}
           tabIndex={-1}
           className="group/artifact relative outline-none"
         >
@@ -479,7 +334,7 @@ export function Conversation({
         && (incident?.status === "failed" || incident?.status === "interrupted");
       return incident ? (
         <ProviderIncidentCard
-          key={block.key}
+          key={`${sessionId}:${block.key}`}
           incident={incident}
           executionLocation={session.environment?.remote ? "your remote host" : "this computer"}
           modelRouteLabel={session.provider === "local" ? "the agent's cloud model gateway" : "the selected model provider"}
@@ -490,10 +345,10 @@ export function Conversation({
       ) : null;
     }
     if (item.item === "execution_checklist") {
-      return <ExecutionChecklistCard key={block.key} checklist={item.checklist ?? execution_checklist} />;
+      return <ExecutionChecklistCard key={`${sessionId}:${block.key}`} checklist={item.checklist ?? execution_checklist} />;
     }
     if (item.item === "proposed_plan") {
-      return <ProposedPlanCard key={block.key} plan={item.plan ?? proposed_plan} />;
+      return <ProposedPlanCard key={`${sessionId}:${block.key}`} plan={item.plan ?? proposed_plan} />;
     }
     return null;
   };
@@ -503,6 +358,7 @@ export function Conversation({
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        onClickCapture={onDisclosureClick}
         onWheel={(event) => noteUpwardWheel(event.deltaY)}
         role="log"
         aria-label="Conversation"

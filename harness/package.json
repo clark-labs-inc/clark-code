@@ -15,6 +15,7 @@
     "perf:preflight": "node perf-preflight.mjs",
     "perf:stream": "node perf-stream.mjs",
     "perf:compare": "node perf-compare.mjs",
+    "test:rendering-stability": "node rendering-stability.mjs",
     "test:highlight-staleness": "node highlight-staleness-probe.mjs"
   },
   "dependencies": {
