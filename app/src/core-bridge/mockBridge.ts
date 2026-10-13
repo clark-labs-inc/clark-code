@@ -23,10 +23,12 @@ import {
   type ClientResponse,
   type ContentBlock,
   type ProviderInfo,
+  type ResumeTranscript,
   type SecurityScanRecord,
   type Session,
   type Snapshot,
 } from "./types";
+import { buildResumeTranscript } from "../lib/history";
 import { loadStoredResilienceCase, playResilienceSimulation } from "./resilienceBenchmark";
 import { PRODUCT_SPECIALIST_CATALOG } from "../lib/specialists";
 import {
@@ -231,6 +233,10 @@ export class MockBridge implements CoreBridge {
 
   async listProviders(): Promise<ProviderInfo[]> {
     return PROVIDERS;
+  }
+
+  async resumeTranscript(snapshot: Snapshot): Promise<ResumeTranscript | null> {
+    return buildResumeTranscript(snapshot);
   }
 
   async listSpecialistCatalog() {

@@ -117,10 +117,16 @@ pub async fn desktop_conv_delete(
     }
     crate::trajectory::delete_conversation(
         crate::trajectory::outbox_path(&app)?,
-        access.owner_scope,
-        id,
+        access.owner_scope.clone(),
+        id.clone(),
     )
-    .await
+    .await?;
+    state
+        .history_cursors
+        .lock()
+        .await
+        .remove(&(access.owner_scope, id));
+    Ok(())
 }
 
 /// Toggle a desktop conversation's archived flag in the cloud (a snapshot `put`

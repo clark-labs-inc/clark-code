@@ -4,7 +4,6 @@ import {
   createPendingPaste,
   expandPendingPastes,
   fileToAttachment,
-  prettySize,
   restorePendingAttachments,
   shouldThumbnailPastedText,
   toUpload,
@@ -61,14 +60,6 @@ describe("fileToAttachment", () => {
     const roundTrip = Uint8Array.from(atob(att.data_base64), (char) => char.charCodeAt(0));
     expect(roundTrip).toEqual(bytes);
   }, 15_000);
-});
-
-describe("prettySize", () => {
-  it("formats bytes / KB / MB", () => {
-    expect(prettySize(500)).toBe("500 B");
-    expect(prettySize(2048)).toBe("2 KB");
-    expect(prettySize(3 * 1024 * 1024)).toBe("3.0 MB");
-  });
 });
 
 describe("restorePendingAttachments", () => {

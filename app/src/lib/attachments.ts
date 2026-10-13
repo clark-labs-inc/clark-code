@@ -191,9 +191,3 @@ export async function fileToAttachment(file: File): Promise<PendingAttachment> {
     : undefined;
   return attach(file.name, file.type, await blobToBase64(file), file.size, previewUrl);
 }
-
-export function prettySize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}

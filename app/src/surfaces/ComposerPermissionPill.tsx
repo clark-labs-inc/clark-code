@@ -10,12 +10,10 @@ import {
 import { cn } from "../lib/cn";
 import {
   APPROVAL_POLICIES,
-  approvalPolicyForSpecialist,
   type ApprovalPolicy,
 } from "../lib/permissions";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { useSessionStore } from "../store/sessionStore";
-import { useSpecialistStore } from "../store/specialistStore";
 
 const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   ask: Shield,
@@ -28,17 +26,9 @@ export function ComposerPermissionPill() {
   const session = useSessionStore((s) => s.session);
   const globalDefault = useSessionStore((s) => s.approvalPolicy);
   const approvalPolicies = useSessionStore((s) => s.approvalPolicies);
-  const activeSpecialist = useSpecialistStore((s) => s.active);
-  const conversationSpecialist = useSessionStore((s) => s.session
-    ? s.conversations.find((conversation) => conversation.id === s.session?.id)?.specialist?.kind
-    : null);
-  const specialist = conversationSpecialist ?? activeSpecialist;
   // The pill shows THIS chat's level — its own override when it has one, else
   // the account default — so switching chats never displays a sibling's mode.
-  const mode = approvalPolicyForSpecialist(
-    effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id),
-    specialist,
-  );
+  const mode = effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id);
   const setMode = useSessionStore((s) => s.setApprovalPolicy);
   // Permission modes govern the LOCAL engine's gate; a product cloud session
   // runs every tool server-side in its own sandbox and never consults them.

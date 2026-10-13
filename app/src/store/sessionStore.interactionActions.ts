@@ -12,7 +12,6 @@ import {
   LOCAL_ATTACHMENT_KINDS,
   attachmentKind,
   bindCloudTrajectory,
-  buildResumeTranscript,
   cloudCreds,
   cloudShare,
   cloudUnshare,
@@ -59,6 +58,7 @@ import { specialistModelSettings } from "../lib/specialistModel";
 import {
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
+import type { ResumeTranscript } from "../core-bridge/types";
 import { isQuickChatProject, projectDisplayName } from "../lib/projectSidebar";
 import { quickChatModelSettings } from "../lib/localAgent";
 import {
@@ -393,6 +393,12 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       rejectEdit("That message changed before it could be edited. Try again.");
       return null;
     }
+    const checkpoint = snapshot.model_context_checkpoint;
+    const absoluteIndex = (snapshot.timeline_offset ?? 0) + timelineIndex;
+    if ((snapshot.timeline_offset ?? 0) > 0 && (!checkpoint || absoluteIndex < checkpoint.timeline_index)) {
+      rejectEdit("This earlier turn is outside the retained model context and cannot be edited here.");
+      return null;
+    }
     const previousEntry = liveSessions.get(session.id);
     if (!previousEntry) {
       rejectEdit("This conversation is no longer live. Reopen it and try again.");
@@ -416,7 +422,18 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
     const prefix = snapshotBeforeTimelineItem(snapshot, timelineIndex);
     const historyPrefix = prefix.timeline.length > 0 ? prefix : null;
-    const resume = buildResumeTranscript(prefix);
+    let resume: ResumeTranscript | null;
+    try {
+      resume = await bridge.resumeTranscript(prefix);
+    } catch (error) {
+      rejectEdit(`Could not prepare the earlier conversation: ${String(error)}`);
+      return null;
+    }
+    if (
+      epochStale(operationEpoch)
+      || !authAccountMatches(requestAuth, get().auth)
+      || liveSessions.get(session.id) !== previousEntry
+    ) return null;
     const effective = effectiveModelSettings(state.localSettings, state.chatModels, session.id);
     const settings = { ...state.localSettings, ...effective, cwd: projectRoot };
     const previousMeta = state.conversations.find((conversation) => conversation.id === session.id);
@@ -606,6 +623,10 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       return { kind: "not_sent" };
     }
     const entry = liveSessions.get(session.id);
+    if (get().unavailableConversation?.id === session.id) {
+      set({ error: "Reconnect this conversation before sending a message." });
+      return { kind: "not_sent" };
+    }
     const normalizedText = text.trim();
     const activeRunId = Object.values(snapshot.runs).find(
       (run) => run.status === "running" || run.status === "queued",
@@ -954,7 +975,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   },
 
   toggleTerminal: () => set((s) => ({
-    terminalOpen: s.activeRemote ? false : !s.terminalOpen,
+    terminalOpen: s.activeRemote || s.unavailableConversation ? false : !s.terminalOpen,
   })),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   openProjectTerminal: async (path) => {

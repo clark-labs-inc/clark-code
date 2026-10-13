@@ -138,6 +138,7 @@ function MessageImpl({
   timelineIndex,
   streaming = false,
   animateEntry = false,
+  readOnly = false,
 }: {
   role: Role;
   blocks: ContentBlock[];
@@ -149,6 +150,7 @@ function MessageImpl({
   /** True only when this row was appended during the visible conversation.
    * Replayed history stays settled when a conversation opens or switches. */
   animateEntry?: boolean;
+  readOnly?: boolean;
 }) {
   const reduce = useReducedMotion();
   // User turns carry attachment echo blocks (image / resource_link) alongside
@@ -178,15 +180,17 @@ function MessageImpl({
       return (
         <div className="group/user flex items-center justify-end gap-1.5">
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/user:opacity-100">
-            <button
-              type="button"
-              onClick={() => beginMessageEdit(body, timelineIndex)}
-              aria-label="Edit and resend"
-              title="Edit & resend"
-              className="grid size-7 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
-            >
-              <Pencil className="size-3.5" />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => beginMessageEdit(body, timelineIndex)}
+                aria-label="Edit and resend"
+                title="Edit & resend"
+                className="grid size-7 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            )}
             <CopyButton text={body} label="Copy message" className="size-7" />
           </div>
           <div className="max-w-[80%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-1.5 text-sm text-ink">
@@ -304,5 +308,6 @@ export const Message = memo(
     a.timelineIndex === b.timelineIndex &&
     a.streaming === b.streaming &&
     a.animateEntry === b.animateEntry &&
+    a.readOnly === b.readOnly &&
     sameBlocks(a.blocks, b.blocks),
 );

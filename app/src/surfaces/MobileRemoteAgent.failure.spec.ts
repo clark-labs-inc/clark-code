@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MobileRemoteFailure,
   remoteFailureReceipt,
-} from "./MobileRemoteAgent";
+} from "../lib/mobileRemoteFailure";
 
 describe("remoteFailureReceipt", () => {
   it("preserves typed retryability without parsing error prose", () => {

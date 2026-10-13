@@ -162,7 +162,7 @@ pub async fn desktop_conv_get(
         state.inner(),
     )
     .await?;
-    let cloud_detail = match cloud {
+    let mut cloud_detail = match cloud {
         ProductCloudOutcome::Ok(detail) => Some(detail),
         ProductCloudOutcome::Unauthorized(error) => {
             let _ = app.emit("cloud-auth-expired", ());
@@ -185,13 +185,37 @@ pub async fn desktop_conv_get(
             .unwrap_or_default();
         Some((snapshot, rev))
     });
+    let cloud_timeline_offset = cloud_detail.as_ref().map(|detail| {
+        detail
+            .get("snapshot")
+            .and_then(|snapshot| snapshot.get("timeline_offset"))
+            .and_then(Value::as_u64)
+            .and_then(|offset| usize::try_from(offset).ok())
+            .unwrap_or_default()
+    });
+    if let (Some(detail), Some(cursor)) = (cloud_detail.as_mut(), cloud_timeline_offset) {
+        detail["sealedThrough"] = cursor.into();
+    }
     let recovered = crate::trajectory::recover_snapshot(
         crate::trajectory::outbox_path(&app)?,
-        access.owner_scope,
+        access.owner_scope.clone(),
         id.clone(),
         cloud_snapshot,
     )
     .await?;
+    if let Some(cursor) = cloud_timeline_offset.or_else(|| {
+        recovered
+            .as_ref()
+            .map(|recovered| recovered.snapshot.timeline_offset)
+    }) {
+        state
+            .history_cursors
+            .lock()
+            .await
+            .entry((access.owner_scope, id.clone()))
+            .and_modify(|current| *current = (*current).max(cursor))
+            .or_insert(cursor);
+    }
     match (cloud_detail, recovered) {
         (Some(mut detail), Some(recovered)) => {
             let snapshot_recovery_required = recovered.needs_snapshot_publication;
@@ -270,193 +294,6 @@ pub async fn desktop_conv_transcript_pages(
         | ProductCloudOutcome::Unavailable(error)
         | ProductCloudOutcome::Rejected(error) => Err(error),
     }
-}
-
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn desktop_conv_append_transcript_pages(
-    app: AppHandle,
-    id: String,
-    title: String,
-    provider: String,
-    project: Option<String>,
-    repository_fingerprint: Option<String>,
-    remote_host: Option<String>,
-    mode: Option<String>,
-    pages: Vec<agent_core::TranscriptPage>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let _access = current_account_access(state.inner()).await?;
-    if pages.is_empty() || pages.len() > 4 {
-        return Err("transcript page batch must contain 1 to 4 pages".into());
-    }
-    match product_cloud_request(
-        "conversation.append_transcript_pages",
-        serde_json::json!({
-            "id": id,
-            "title": title,
-            "provider": provider,
-            "project": project,
-            "repositoryFingerprint": repository_fingerprint,
-            "remoteHost": remote_host,
-            "mode": mode,
-            "pages": pages,
-        }),
-        &app,
-        state.inner(),
-    )
-    .await?
-    {
-        ProductCloudOutcome::Ok(_) => Ok(()),
-        ProductCloudOutcome::Unauthorized(error) => {
-            let _ = app.emit("cloud-auth-expired", ());
-            Err(error)
-        }
-        ProductCloudOutcome::NotFound(error)
-        | ProductCloudOutcome::Conflict(error)
-        | ProductCloudOutcome::Unavailable(error)
-        | ProductCloudOutcome::Rejected(error) => Err(error),
-    }
-}
-
-/// Insert or replace a desktop conversation snapshot.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn desktop_conv_put(
-    app: AppHandle,
-    id: String,
-    title: String,
-    provider: String,
-    project: Option<String>,
-    repository_fingerprint: Option<String>,
-    remote_host: Option<String>,
-    mode: Option<String>,
-    title_locked: bool,
-    specialist_context: Option<Value>,
-    rev: i64,
-    mut snapshot: Value,
-    status: Option<String>,
-    base_rev: Option<i64>,
-    mutation_id: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    let access = current_account_access(state.inner()).await?;
-    let owner_scope = access.owner_scope;
-    let local_live = status.as_deref() == Some("running");
-    let checkpoint_seq = snapshot
-        .get("history_checkpoint")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    crate::trajectory::wait_for_acknowledged_prefix(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope.clone(),
-        id.clone(),
-        checkpoint_seq,
-        std::time::Duration::from_secs(10),
-    )
-    .await?;
-    if let Some(object) = snapshot.as_object_mut() {
-        object.remove("history_checkpoint");
-        object.remove("sync_pending");
-    }
-    snapshot = crate::trajectory::normalize_snapshot_value(snapshot);
-    let typed_snapshot: Snapshot = serde_json::from_value(snapshot)
-        .map_err(|error| format!("checkpoint desktop snapshot: {error}"))?;
-    let checkpoint_metadata = serde_json::json!({
-        "id": id,
-        "title": title,
-        "provider": provider,
-        "project": project,
-        "repositoryFingerprint": repository_fingerprint,
-        "remoteHost": remote_host,
-        "mode": mode,
-        "titleLocked": title_locked,
-        "specialistContext": specialist_context.clone(),
-        "rev": rev,
-        "archived": false,
-    });
-    let pending_mutation_id = mutation_id.clone();
-    let summary = match product_cloud_request(
-        "conversation.put",
-        serde_json::json!({
-            "id": id,
-            "title": title,
-            "provider": provider,
-            "project": project,
-            "repositoryFingerprint": repository_fingerprint,
-            "remoteHost": remote_host,
-            "mode": mode,
-            "titleLocked": title_locked,
-            "specialistContext": specialist_context,
-            "rev": rev,
-            "snapshot": typed_snapshot,
-            "status": status,
-            "baseRev": base_rev,
-            "mutationId": mutation_id,
-        }),
-        &app,
-        state.inner(),
-    )
-    .await?
-    {
-        ProductCloudOutcome::NotFound(error) => {
-            let _ = app.emit("cloud-conversation-deleted", &id);
-            return Err(format!(
-                "cloud_deleted: this conversation was deleted on another device: {error}"
-            ));
-        }
-        ProductCloudOutcome::Conflict(error) => {
-            crate::trajectory::quarantine_snapshot_branch(
-                crate::trajectory::outbox_path(&app)?,
-                owner_scope.clone(),
-                id.clone(),
-            )
-            .await?;
-            return Err(error);
-        }
-        ProductCloudOutcome::Ok(summary) => summary,
-        ProductCloudOutcome::Unauthorized(error)
-        | ProductCloudOutcome::Unavailable(error)
-        | ProductCloudOutcome::Rejected(error) => {
-            tracing::warn!(
-                event = "conversation_cloud_checkpoint_failed",
-                conversation_id = %id,
-                provider,
-                "product cloud rejected the conversation checkpoint"
-            );
-            return Err(error);
-        }
-    };
-    let stored_rev = summary
-        .get("rev")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    if stored_rev > rev {
-        return Err(format!(
-            "cloud_conflict: product cloud revision {stored_rev} is newer than local revision {rev}"
-        ));
-    }
-    let acknowledged = crate::trajectory::acknowledge_snapshot_publication(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id.clone(),
-        checkpoint_metadata,
-        typed_snapshot,
-        stored_rev,
-        checkpoint_seq,
-        local_live,
-        pending_mutation_id.clone(),
-    )
-    .await?;
-    if !acknowledged {
-        tracing::debug!(
-            event = "conversation_snapshot_ack_superseded",
-            conversation_id = %id,
-            mutation_id = %pending_mutation_id,
-            "ignored a cloud acknowledgement for a superseded local snapshot"
-        );
-    }
-    Ok(summary)
 }
 
 #[derive(Deserialize)]

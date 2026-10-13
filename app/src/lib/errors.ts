@@ -30,7 +30,7 @@ export function humanizeRunFailure(
     case "provider_error":
       return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     case "tool_protocol_exhausted":
-      return "The selected model did not follow Clark Code’s required action format after three attempts. Completed work is saved; retry or choose another model.";
+      return "The selected model did not follow Clark Code’s required action format after three attempts. Completed work is saved. Send a follow-up to continue; if this repeats, start a new session.";
     case "context_overflow":
       return "This conversation is too long for the model’s context window. Start a new session.";
     case "insufficient_credits":

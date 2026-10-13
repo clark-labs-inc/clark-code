@@ -1,13 +1,14 @@
 import type { Snapshot } from "../core-bridge/types";
 
-/**
- * Whether a snapshot deferred off the render path still represents the live
- * projection. Snapshot objects are immutable emissions from the native bridge,
- * so identity is a generation token: any newer event replaces `latest`.
- */
-export function deferredSnapshotPersistIsCurrent(
+/** Coalesce newer active deltas into a deferred checkpoint, while forbidding
+ * an older busy callback from persisting after the run became terminal. */
+export function deferredSnapshotForPersistence(
   latest: Snapshot,
   candidate: Snapshot,
-): boolean {
-  return latest === candidate;
+  wasBusy: boolean,
+  stillBusy: boolean,
+): Snapshot | null {
+  if (latest.session !== candidate.session) return null;
+  if (wasBusy) return stillBusy ? latest : null;
+  return latest === candidate ? candidate : null;
 }

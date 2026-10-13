@@ -29,8 +29,6 @@ import {
   type TestState,
 } from "./SshSettingsForm";
 
-export { sshConfigHostDetail } from "./SshSettingsForm";
-
 export function sshDialogKeyboardIntent(key: string): "close" | "cycle_focus" | "none" {
   if (key === "Escape") return "close";
   if (key === "Tab") return "cycle_focus";

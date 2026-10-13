@@ -5,6 +5,7 @@ mod artifact_text;
 mod cloud;
 mod cloud_authority;
 mod cloud_conversations;
+mod cloud_publication;
 mod computer_use;
 mod desktop_artifacts;
 mod local;
@@ -21,6 +22,7 @@ mod user_message;
 pub use artifact_text::*;
 pub use cloud::*;
 pub use cloud_conversations::*;
+pub use cloud_publication::*;
 pub use computer_use::*;
 pub use desktop_artifacts::*;
 pub use local::*;
@@ -40,7 +42,7 @@ use user_message::user_message_events;
 use agent_core::AgentEvent;
 use agent_core::{
     apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
-    ProviderConfig, RunId, Session, SessionId, Snapshot,
+    ProviderConfig, ResumeTranscript, RunId, Session, SessionId, Snapshot,
 };
 use futures::StreamExt;
 use provider_acp::AcpProvider;
@@ -178,6 +180,16 @@ pub(crate) async fn hydrate_mcp_servers(
 #[tauri::command]
 pub fn provider_list(state: State<'_, AppState>) -> Vec<ProviderInfo> {
     state.product.providers(builtin_providers())
+}
+
+/// Keep native provider replay on agent-core's projection contract rather
+/// than reconstructing a paged transcript in the WebView.
+#[tauri::command]
+pub fn snapshot_resume_transcript(snapshot: Value) -> Result<Option<ResumeTranscript>, String> {
+    let snapshot = crate::trajectory::normalize_snapshot_value(snapshot);
+    let snapshot: Snapshot = serde_json::from_value(snapshot)
+        .map_err(|error| format!("decode session history snapshot: {error}"))?;
+    Ok(snapshot.resume_transcript())
 }
 
 /// Files changed since a session baseline checkpoint (the Changes panel).

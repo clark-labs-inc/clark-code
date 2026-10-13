@@ -8,10 +8,11 @@ import {
 } from "../../lib/artifactPresentation";
 import { openArtifactExternally } from "./ArtifactFileActions";
 
-export function ArtifactGenericPreview({ artifact, Icon, kindLabel }: {
+export function ArtifactGenericPreview({ artifact, Icon, kindLabel, onJumpToSource }: {
   artifact: Artifact;
   Icon: LucideIcon;
   kindLabel: string;
+  onJumpToSource?: () => void;
 }) {
   const location = readableArtifactLocation(artifact);
   const available = artifactAvailability(artifact) !== "unavailable";
@@ -23,8 +24,14 @@ export function ArtifactGenericPreview({ artifact, Icon, kindLabel }: {
         <p className="mt-1 text-sm text-ink-muted">{kindLabel} · {artifactLocationLabel(artifact)}</p>
         {location && <p className="mx-auto mt-3 max-w-lg truncate font-mono text-xs text-ink-faint">{location}</p>}
         <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed text-ink-muted">
-          {available ? "A preview is unavailable. Open the source file to inspect this artifact." : "The source file is unavailable. Its record remains in this session."}
+          {available ? "A preview is unavailable. Open the source file to inspect this artifact." : "Only this file’s record was saved with the conversation. The file itself is not available here."}
         </p>
+        {!available && onJumpToSource && (
+          <button type="button" onClick={onJumpToSource}
+            className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-bg-secondary px-4 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition hover:bg-bg-hover hover:text-ink">
+            View where this file was created
+          </button>
+        )}
         {canOpenArtifactExternally(artifact) && (
           <button type="button" onClick={() => void openArtifactExternally(artifact)}
             className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent transition hover:bg-accent-hover">

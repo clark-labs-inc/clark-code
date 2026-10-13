@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  approvalPolicyForSpecialist,
-  loadApprovalPolicy,
   loadApprovalPolicies,
-  loadCollaborationMode,
   nextApprovalPolicy,
   saveApprovalPolicies,
   wouldAutoApprove,
@@ -96,21 +93,6 @@ describe("nextApprovalPolicy", () => {
     expect(nextApprovalPolicy("ask")).toBe("auto");
     expect(nextApprovalPolicy("auto")).toBe("full");
     expect(nextApprovalPolicy("full")).toBe("ask");
-  });
-});
-
-describe("specialist approval policy", () => {
-  it("keeps specialist approval policy aligned with the selected policy", () => {
-    expect(approvalPolicyForSpecialist("auto", "security")).toBe("auto");
-    expect(approvalPolicyForSpecialist("ask", null)).toBe("ask");
-  });
-});
-
-describe("legacy preference migration", () => {
-  it("maps old plan mode to auto approval plus Plan collaboration", () => {
-    localStorage.setItem("agent-desktop:permission-mode", "plan");
-    expect(loadApprovalPolicy()).toBe("auto");
-    expect(loadCollaborationMode()).toBe("plan");
   });
 });
 

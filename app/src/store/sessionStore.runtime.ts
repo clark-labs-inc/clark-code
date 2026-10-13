@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand";
+import { SnapshotPublicationCadence } from "../lib/snapshotPublicationCadence";
 import type { SidebarConversationMutation } from "../lib/sidebarConversationInteractions";
 import {
   getBridge,
@@ -43,7 +44,6 @@ import {
   type AuthSession,
 } from "../lib/auth";
 import {
-  buildResumeTranscript,
   migratePlanningSnapshot,
   snapshotBeforeTimelineItem,
   settleRuns,
@@ -130,20 +130,20 @@ import { onSettingsMenuRequested, onUpdateMenuRequested } from "../lib/nativeMen
 import { updateDrainBlockerCount } from "../lib/updateDrain";
 
 export {
-  MAX_ATTACHMENT_BYTES, LOCAL_ATTACHMENT_KINDS, addRecentProject, attachmentKind, authSignOut, beginUpdateDrain, buildResumeTranscript,
-  cancelUpdateDrain, checkAndStageUpdate, cloudCreds, cloudDelete, cloudGet, cloudList,
+  MAX_ATTACHMENT_BYTES, LOCAL_ATTACHMENT_KINDS, addRecentProject, attachmentKind, authSignOut, beginUpdateDrain,
+  cancelUpdateDrain, checkAndStageUpdate, cloudCreds, cloudDelete, cloudList,
   cloudSetArchived, cloudShare, cloudUnshare, codeKeyAccountBinding, configureCloudHistoryCredentials, consumeJustUpdated,
   conversationProjectRoot, copyText, deriveTitle, effectiveModelSettings, emptySnapshot,
-  fileToAttachment, getBridge, hasContent, hostReady, installStagedUpdate, prepareCloudDurability,
-  liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
+  fileToAttachment, getBridge, hasContent, installStagedUpdate, prepareCloudDurability,
+  liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadCollaborationModes, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   markAuthReconnectRequired, notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, refreshStagedUpdate, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
-  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, restorePendingAttachments, revokeAttachmentPreviews, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode, saveCollaborationModes,
+  resetCloudHistory, resetFanOut, restorePendingAttachments, revokeAttachmentPreviews, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode, saveCollaborationModes,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
   signInWithGoogle, snapshotBeforeTimelineItem, syncFanOut, toUpload,
-  updateDrainBlockerCount, wouldAutoApprove,
+  wouldAutoApprove,
 };
 export type {
   ApprovalPolicy, AuthMethod, AuthSession, ChatModelOverride,
@@ -199,6 +199,8 @@ export interface UnavailableConversation {
   title: string;
   detail: string;
   kind: "unavailable" | "refresh_required";
+  /** A cloud/cached transcript is available for reading without a provider. */
+  savedSnapshot?: boolean;
 }
 
 /** `/btw` overlay state. `loading` is true while the forked side-question call
@@ -578,6 +580,7 @@ export interface SessionState {
    *  `force` (sign-out) tears down every live session instead. */
   endSession: (opts?: { force?: boolean }) => void;
   openConversation: (id: string) => Promise<void>;
+  bindConversationProject: (id: string, path: string) => Promise<void>;
   /** Permanently remove the selected unavailable entry, then return to a clean
    * new-chat composer with no project selected. */
   cleanupUnavailableConversation: () => Promise<void>;
@@ -736,7 +739,7 @@ export interface LiveEntry {
   /** Follow-ups typed while this conversation's run was streaming. */
   queued: QueuedMessage[];
   // Per-session bookkeeping for the shared snapshot handler.
-  lastPersist: number;
+  publicationCadence: SnapshotPublicationCadence;
   prevBusy: boolean;
   dispatching: boolean;
   /** A prompt invoke has begun but its first running snapshot may not have
@@ -843,7 +846,7 @@ export function newLiveEntry(
     session,
     live: { ...emptySnapshot(), session: session.id },
     queued: [],
-    lastPersist: 0,
+    publicationCadence: new SnapshotPublicationCadence(),
     prevBusy: false,
     dispatching: false,
     starting: false,
@@ -940,8 +943,9 @@ export async function bindCloudTrajectory(
   if (!creds) {
     throw new Error("product cloud is required to start or resume a coding session.");
   }
-  const repositoryFingerprint = meta.project
-    ? await repositoryFingerprintForRoot(meta.project, codeKeyAccountBinding(auth))
+  const executionRoot = session.environment?.checkout_root ?? meta.project;
+  const repositoryFingerprint = executionRoot
+    ? await repositoryFingerprintForRoot(executionRoot, codeKeyAccountBinding(auth))
     : null;
   const config: CloudTrajectoryConfig = {
     title: meta.title,

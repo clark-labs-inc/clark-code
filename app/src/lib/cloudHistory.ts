@@ -21,8 +21,7 @@ import {
   type CloudDetail,
   type CloudSummary,
 } from "./cloudHistoryTypes";
-import { prepareSnapshotForUpload } from "./snapshotUpload";
-import { preparePagedSnapshot, transcriptPageBatches } from "./transcriptPaging";
+import { CloudLiveCheckpointBounds } from "./cloudLiveCheckpoint";
 import {
   repositoryFingerprintForRoot,
   repositoryIdentityForRoot,
@@ -72,9 +71,9 @@ export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | nu
   if (epoch !== cloudHistoryEpoch || !sameCloudOwner(configuredCreds, c)) return null;
   if (typeof detail?.rev === "number") {
     serverRevisions.set(id, detail.rev);
-    serverTimelineOffsets.set(id, detail.snapshot?.timeline_offset ?? 0);
     conflicted.delete(id);
   }
+  liveCheckpointBounds.record(id, detail?.sealedThrough);
   // Durable cloud history can outlive the snapshot schema that produced it.
   // Normalize legacy planning rows before the snapshot crosses the native
   // `session_configure_cloud` boundary, whose Rust enum intentionally accepts
@@ -126,34 +125,52 @@ export async function cloudGetTranscriptPages(
 async function cloudPut(
   c: CloudCreds,
   meta: ConversationMeta,
-  snapshot: Snapshot,
   rev: number,
   status: "running" | "idle",
   baseRev: number,
   mutationId: string,
+  retryAttempt: number,
   shouldSend: () => boolean = () => true,
-): Promise<number> {
+): Promise<CloudPublicationResult> {
   const repositoryFingerprint = meta.project
     ? await repositoryFingerprintForRoot(meta.project, c.accountScope)
     : null;
   if (!shouldSend()) throw new CloudWriteCancelled();
-  const summary = await invoke<{ rev: number }>("desktop_conv_put", {
-    id: meta.id,
-    title: meta.title,
-    provider: meta.provider,
-    project: meta.project ?? null,
-    repositoryFingerprint,
-    remoteHost: meta.remoteHost ?? null,
-    mode: meta.mode ?? null,
-    titleLocked: meta.titleLocked ?? false,
-    specialistContext: meta.specialist ?? null,
-    rev,
-    snapshot,
-    status,
-    baseRev,
-    mutationId,
+  const summary = await invoke<CloudPublicationResult>("desktop_conv_publish", {
+    publication: {
+      id: meta.id,
+      title: meta.title,
+      provider: meta.provider,
+      project: meta.project ?? null,
+      repositoryFingerprint,
+      remoteHost: meta.remoteHost ?? null,
+      mode: meta.mode ?? null,
+      titleLocked: meta.titleLocked ?? false,
+      specialistContext: meta.specialist ?? null,
+      rev,
+      status,
+      baseRev,
+      mutationId,
+      retryAttempt,
+    },
   });
-  return summary.rev;
+  return summary;
+}
+
+type CloudPublicationResult =
+  | { outcome: "published"; rev: number; sealedThrough: number; large: boolean }
+  | { outcome: "superseded" }
+  | { outcome: "retry"; message: string; retryAfterMs: number }
+  | { outcome: "conflict" | "deleted" | "rejected"; message: string };
+
+class CloudPublicationFailure extends Error {
+  constructor(
+    readonly outcome: Exclude<CloudPublicationResult["outcome"], "published" | "superseded">,
+    message: string,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+  }
 }
 
 // --- Single-flight, coalescing write pipeline -----------------------------
@@ -174,12 +191,6 @@ interface PendingPush {
   epoch: number;
 }
 
-/** Once a live projection reaches this size, publish one checkpoint and rely on
- * the ordered trajectory stream until the terminal checkpoint. The product
- * transport segments snapshots independently, so this is a serialization-rate
- * threshold rather than a correctness or upload limit. */
-export const LARGE_SNAPSHOT_BYTES = 8 * 1024 * 1024;
-
 const inflight = new Map<string, string>();
 const pending = new Map<string, PendingPush>();
 const locallyDurableMutations = new Set<string>();
@@ -189,12 +200,8 @@ const checkpointChains = new Map<string, Promise<void>>();
 // because rev is a timestamp (always "newer"), a no-op PUT would also make
 // every mobile/web poller re-download the full snapshot it already has.
 const lastSent = new Map<string, string>();
-// After the first large live checkpoint succeeds, repeatedly serializing the
-// growing projection every two seconds only competes with rendering. Trajectory
-// events remain current; the full segmented checkpoint runs again at idle.
-const largeSnapshots = new Set<string>();
+const liveCheckpointBounds = new CloudLiveCheckpointBounds();
 const serverRevisions = new Map<string, number>();
-const serverTimelineOffsets = new Map<string, number>();
 const conflicted = new Set<string>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryAttempts = new Map<string, number>();
@@ -239,9 +246,8 @@ export function resetCloudHistory(): void {
   locallyDurableMutations.clear();
   lastSent.clear();
   serverRevisions.clear();
-  serverTimelineOffsets.clear();
   conflicted.clear();
-  largeSnapshots.clear();
+  liveCheckpointBounds.clear();
   deleting.clear();
   deleteGenerations.clear();
   resetArtifactCloudSync();
@@ -259,7 +265,7 @@ function clearRetry(id: string): void {
   retryTimers.delete(id);
 }
 
-function retryPendingPush(id: string): void {
+function retryPendingPush(id: string, requestedDelayMs?: number): void {
   const job = pending.get(id);
   if (
     retryTimers.has(id)
@@ -272,7 +278,7 @@ function retryPendingPush(id: string): void {
   }
   const attempts = retryAttempts.get(id) ?? 0;
   retryAttempts.set(id, attempts + 1);
-  const delay = Math.min(RETRY_INITIAL_DELAY_MS * (2 ** attempts), RETRY_MAX_DELAY_MS);
+  const delay = requestedDelayMs ?? Math.min(RETRY_INITIAL_DELAY_MS * (2 ** attempts), RETRY_MAX_DELAY_MS);
   const timer = setTimeout(() => {
     retryTimers.delete(id);
     void drainPush(id);
@@ -326,29 +332,6 @@ function fingerprint(job: PendingPush, snapshotJson: string): string {
   return `${(h >>> 0).toString(16)}:${payload.length}`;
 }
 
-function exceedsApproximateChars(value: unknown, limit: number): boolean {
-  const stack: unknown[] = [value];
-  let total = 0;
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (typeof current === "string") total += current.length;
-    else if (Array.isArray(current)) stack.push(...current);
-    else if (current && typeof current === "object") stack.push(...Object.values(current));
-    if (total > limit) return true;
-  }
-  return false;
-}
-
-function deferLiveCheckpoint(snapshot: Snapshot): boolean {
-  if (snapshot.timeline.length > 320) return true;
-  const latest = snapshot.timeline[snapshot.timeline.length - 1];
-  if (exceedsApproximateChars(latest, 1024 * 1024)) return true;
-  if (latest?.item === "tool_call") {
-    return exceedsApproximateChars(snapshot.tool_calls[latest.id], 1024 * 1024);
-  }
-  return false;
-}
-
 /** Queue a conversation snapshot for cloud sync (coalesced + single-flight). */
 export function scheduleCloudPut(
   creds: CloudCreds,
@@ -363,14 +346,15 @@ export function scheduleCloudPut(
   if (!sameCreds(configuredCreds, creds) || deleting.has(meta.id)) return;
   // A stale branch stays read-only until cloudGet reloads its exact base.
   if (conflicted.has(meta.id)) return;
-  if (status === "running" && (largeSnapshots.has(meta.id) || deferLiveCheckpoint(snapshot))) return;
+  if (status === "running" && liveCheckpointBounds.deferLive(meta.id, snapshot)) return;
   // Monotonic rev: pushes now also happen mid-run (throttled), where the
   // timeline length is stable while message text grows — so a length-based
   // rev would make the server drop streamed updates as stale. A millisecond
-  // timestamp is strictly increasing across pushes (the 2s throttle + the
-  // single-flight queue guarantee spacing), survives restarts, and nothing
+  // Assign a strictly increasing rev even when first text and run start occur
+  // in the same millisecond; conditional mobile reads must see the new body.
+  // The acknowledged cloud rev preserves this order across restarts. Nothing
   // reads the rev back as a length — it is purely an ordering token.
-  const rev = Date.now();
+  const rev = liveCheckpointBounds.nextRevision(meta.id, Date.now(), serverRevisions.get(meta.id) ?? meta.rev ?? 0);
   if (!artifactsAlreadyScheduled) {
     scheduleArtifactCloudSync(creds, meta.id, snapshot, () => {
       const current = configuredCreds;
@@ -480,58 +464,35 @@ async function drainPush(id: string): Promise<void> {
   inflight.set(id, job.mutationId);
   let ok = false;
   try {
-    // Serialize exactly, then fingerprint and size-check what we'll send.
-    const paged = preparePagedSnapshot(
-      job.snapshot,
-      serverTimelineOffsets.get(id) ?? job.snapshot.timeline_offset ?? 0,
-    );
-    const prepared = prepareSnapshotForUpload(paged.head);
-    const mark = fingerprint(job, prepared.json);
-    const large = prepared.bytes > LARGE_SNAPSHOT_BYTES;
+    // Keep the no-op fingerprint bounded. Native recomputes and validates the
+    // actual page plan from the full durable snapshot before publication.
+    const boundedHead = liveCheckpointBounds.head(id, job.snapshot);
+    const mark = fingerprint(job, JSON.stringify(boundedHead));
     if (lastSent.get(id) !== mark) {
       const creds = configuredCreds;
       if (!creds) throw new CloudWriteCancelled();
       await ensurePendingSnapshotDurable(id, job);
-      const repositoryFingerprint = job.meta.project
-        ? await repositoryFingerprintForRoot(job.meta.project, creds.accountScope)
-        : null;
-      if (paged.pageEndLocal > paged.pageStartLocal) {
-        for (const pages of transcriptPageBatches(
-          job.snapshot,
-          paged.pageStartLocal,
-          paged.pageEndLocal,
-        )) {
-          if (!jobIsCurrent(id, job) || !sameCreds(configuredCreds, creds)) {
-            throw new CloudWriteCancelled();
-          }
-          await invoke("desktop_conv_append_transcript_pages", {
-            id: job.meta.id,
-            title: job.meta.title,
-            provider: job.meta.provider,
-            project: job.meta.project ?? null,
-            repositoryFingerprint,
-            remoteHost: job.meta.remoteHost ?? null,
-            mode: job.meta.mode ?? null,
-            pages,
-          });
-        }
-      }
-      const storedRev = await cloudPut(
+      const published = await cloudPut(
         creds,
         job.meta,
-        prepared.snapshot,
         job.rev,
         job.status,
         serverRevisions.get(id) ?? job.meta.rev ?? 0,
         job.mutationId,
+        retryAttempts.get(id) ?? 0,
         () => jobIsCurrent(id, job) && sameCreds(configuredCreds, creds),
       );
-      if (jobIsCurrent(id, job)) {
-        serverRevisions.set(id, storedRev);
-        serverTimelineOffsets.set(id, paged.sealedThrough);
+      if (published.outcome !== "published" && published.outcome !== "superseded") {
+        throw new CloudPublicationFailure(
+          published.outcome,
+          published.message,
+          published.outcome === "retry" ? published.retryAfterMs : undefined,
+        );
+      }
+      if (published.outcome === "published" && jobIsCurrent(id, job)) {
+        serverRevisions.set(id, published.rev);
         lastSent.set(id, mark);
-        if (large) largeSnapshots.add(id);
-        else largeSnapshots.delete(id);
+        liveCheckpointBounds.record(id, published.sealedThrough);
       }
     }
     if (jobIsCurrent(id, job)) {
@@ -547,14 +508,14 @@ async function drainPush(id: string): Promise<void> {
       const creds = configuredCreds;
       if (creds && !pending.has(id)) pending.set(id, { ...job, creds });
       ok = true;
-    } else if (String(error).includes("cloud_conflict")) {
+    } else if (error instanceof CloudPublicationFailure && error.outcome === "conflict") {
       conflicted.add(id);
       pending.delete(id);
       clearRetry(id);
       retryAttempts.delete(id);
       conflictHandler?.(id);
       ok = true;
-    } else if (String(error).includes("cloud_deleted:")) {
+    } else if (error instanceof CloudPublicationFailure && error.outcome === "deleted") {
       pending.delete(id);
       clearRetry(id);
       retryAttempts.delete(id);
@@ -562,12 +523,21 @@ async function drainPush(id: string): Promise<void> {
         "This conversation was deleted on another device, so Clark Code stopped syncing it here.",
       );
       ok = true;
+    } else if (error instanceof CloudPublicationFailure && error.outcome === "rejected") {
+      pending.delete(id);
+      clearRetry(id);
+      retryAttempts.delete(id);
+      warningHandler?.(`This conversation could not sync: ${error.message}`);
+      ok = true;
     } else {
       // Transient (offline / backend not deployed). Requeue unless a newer push
       // already superseded it, then retry without needing another user action.
       const creds = configuredCreds;
       if (creds && !pending.has(id)) pending.set(id, { ...job, creds });
-      retryPendingPush(id);
+      retryPendingPush(
+        id,
+        error instanceof CloudPublicationFailure ? error.retryAfterMs : undefined,
+      );
     }
   } finally {
     if (inflight.get(id) === job.mutationId) inflight.delete(id);
@@ -596,9 +566,8 @@ function forgetConversationPushState(id: string): void {
   retryAttempts.delete(id);
   lastSent.delete(id);
   serverRevisions.delete(id);
-  serverTimelineOffsets.delete(id);
   conflicted.delete(id);
-  largeSnapshots.delete(id);
+  liveCheckpointBounds.forget(id);
 }
 
 /** Delete a conversation from the cloud. Tombstone local write scheduling first,

@@ -8,7 +8,7 @@ import {
   cloudGet,
   cloudDelete,
   configureCloudHistoryCredentials,
-  LARGE_SNAPSHOT_BYTES,
+  onCloudHistoryConflict,
   onCloudHistoryWarning,
   prepareCloudDurability,
   resetCloudHistory,
@@ -16,6 +16,7 @@ import {
 } from "./cloudHistory";
 
 const creds = { accountScope: "id:account-one" };
+const LARGE_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
 function commandCalls(command: string): unknown[][] {
   return invoke.mock.calls.filter(([calledCommand]) => calledCommand === command);
@@ -33,6 +34,34 @@ afterEach(() => {
 });
 
 describe("cloud history size backstop", () => {
+  it("leaves the cloud page cursor under native ownership", async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_conv_get") return {
+        id: "recovered-pages",
+        title: "Recovered pages",
+        provider: "local",
+        createdAt: 1,
+        updatedAt: 1,
+        rev: 7,
+        snapshot: {
+          runs: {}, timeline_offset: 0, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {},
+        },
+      };
+      if (command === "desktop_conv_commit_pending") return undefined;
+      if (command === "desktop_conv_publish") return { outcome: "published", rev: 8, sealedThrough: 0, large: false };
+      throw new Error(`unexpected command ${command}`);
+    });
+    const snapshot = await cloudGet(creds, "recovered-pages");
+    expect(snapshot).not.toBeNull();
+    scheduleCloudPut(creds, {
+      id: "recovered-pages", title: "Recovered pages", provider: "local", createdAt: 1, updatedAt: 1,
+    }, snapshot!);
+
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
+    const published = commandCalls("desktop_conv_publish")[0]?.[1] as { publication: Record<string, unknown> };
+    expect(published.publication).not.toHaveProperty("alreadySealedThrough");
+  });
+
   it("drops a cloud read that finishes after the account partition changes", async () => {
     let finishRead!: (value: unknown) => void;
     invoke.mockImplementationOnce(
@@ -106,10 +135,10 @@ describe("cloud history size backstop", () => {
     expect("plan" in (snapshot as Snapshot & { plan?: unknown })).toBe(false);
   });
 
-  it("publishes a large UTF-8 snapshot through the segmented native transport", async () => {
+  it("stages a large UTF-8 snapshot once before native publication", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") return { rev: 1 };
+      if (command === "desktop_conv_publish") return { outcome: "published", rev: 1, sealedThrough: 0, large: true };
       throw new Error(`unexpected command ${command}`);
     });
     const warning = vi.fn();
@@ -141,10 +170,14 @@ describe("cloud history size backstop", () => {
 
     await expect(prepareCloudDurability(100)).resolves.toBe(true);
     expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
-      id: "oversized-utf8",
-      snapshot,
-    }));
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_commit_pending", {
+      commit: expect.objectContaining({ id: "oversized-utf8", snapshot }),
+    });
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_publish", {
+      publication: expect.objectContaining({ id: "oversized-utf8" }),
+    });
+    expect((commandCalls("desktop_conv_publish")[0]?.[1] as { publication: Record<string, unknown> }).publication)
+      .not.toHaveProperty("snapshot");
     expect(warning).not.toHaveBeenCalled();
     unsubscribe();
   });
@@ -152,7 +185,7 @@ describe("cloud history size backstop", () => {
   it("defers an oversized live checkpoint to the terminal bounded-sync pass", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") return { rev: 1 };
+      if (command === "desktop_conv_publish") return { outcome: "published", rev: 1, sealedThrough: 0, large: true };
       throw new Error(`unexpected command ${command}`);
     });
     const warning = vi.fn();
@@ -185,13 +218,11 @@ describe("cloud history size backstop", () => {
     expect(invoke).not.toHaveBeenCalled();
 
     scheduleCloudPut(creds, meta, snapshot, "idle");
-    await vi.waitFor(() => expect(commandCalls("desktop_conv_put")).toHaveLength(1));
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
     expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
-      id: "oversized-running",
-      snapshot,
-      status: "idle",
-    }));
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_publish", {
+      publication: expect.objectContaining({ id: "oversized-running", status: "idle" }),
+    });
     unsubscribe();
   });
 
@@ -235,7 +266,7 @@ describe("cloud history size backstop", () => {
         snapshot,
       };
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") return { rev: 8 };
+      if (command === "desktop_conv_publish") return { outcome: "published", rev: 8, sealedThrough: 0, large: false };
       throw new Error(`unexpected command ${command}`);
     });
 
@@ -243,7 +274,7 @@ describe("cloud history size backstop", () => {
       runs: { "run-1": { status: "failed" } },
       goal: { status: "blocked" },
     });
-    await expect.poll(() => commandCalls("desktop_conv_put").length).toBe(1);
+    await expect.poll(() => commandCalls("desktop_conv_publish").length).toBe(1);
 
     expect(invoke).toHaveBeenCalledWith("desktop_conv_get", {
       id: "recovered-terminal",
@@ -252,20 +283,20 @@ describe("cloud history size backstop", () => {
       commit: expect.objectContaining({
         id: "recovered-terminal",
         mutationId: "recovered-mutation",
+        snapshot: expect.objectContaining({
+          runs: expect.objectContaining({
+            "run-1": expect.objectContaining({ status: "failed" }),
+          }),
+          goal: expect.objectContaining({ status: "blocked" }),
+        }),
       }),
     });
-    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_publish", { publication: expect.objectContaining({
       id: "recovered-terminal",
       status: "idle",
       baseRev: 7,
       mutationId: "recovered-mutation",
-      snapshot: expect.objectContaining({
-        runs: expect.objectContaining({
-          "run-1": expect.objectContaining({ status: "failed" }),
-        }),
-        goal: expect.objectContaining({ status: "blocked" }),
-      }),
-    }));
+    }) });
   });
 
   it("permanently republishes a sanitized provider-contaminated snapshot", async () => {
@@ -295,22 +326,22 @@ describe("cloud history size backstop", () => {
         },
       };
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") return { rev: 5 };
+      if (command === "desktop_conv_publish") return { outcome: "published", rev: 5, sealedThrough: 0, large: false };
       throw new Error(`unexpected command ${command}`);
     });
 
     await expect(cloudGet(creds, "provider-residue")).resolves.toMatchObject({
       timeline: [],
     });
-    await expect.poll(() => commandCalls("desktop_conv_put").length).toBe(1);
+    await expect.poll(() => commandCalls("desktop_conv_publish").length).toBe(1);
 
-    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_commit_pending", { commit: expect.objectContaining({
       id: "provider-residue",
       baseRev: 4,
       snapshot: expect.objectContaining({ timeline: [] }),
-    }));
-    const put = commandCalls("desktop_conv_put")[0]?.[1] as { snapshot: Snapshot };
-    expect(put.snapshot.model_context_checkpoint).toBeUndefined();
+    }) });
+    const staged = commandCalls("desktop_conv_commit_pending")[0]?.[1] as { commit: { snapshot: Snapshot } };
+    expect(staged.commit.snapshot.model_context_checkpoint).toBeUndefined();
   });
 
   it("retries a queued snapshot without exposing the refreshed native credential", async () => {
@@ -318,10 +349,10 @@ describe("cloud history size backstop", () => {
     let putAttempts = 0;
     invoke.mockImplementation(async (command: string) => {
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") {
+      if (command === "desktop_conv_publish") {
         putAttempts += 1;
-        if (putAttempts === 1) throw new Error("offline");
-        return { rev: 8 };
+        if (putAttempts === 1) return { outcome: "retry", message: "offline", retryAfterMs: 1_000 };
+        return { outcome: "published", rev: 8, sealedThrough: 0, large: false };
       }
       throw new Error(`unexpected command ${command}`);
     });
@@ -333,25 +364,67 @@ describe("cloud history size backstop", () => {
       updatedAt: 1,
     }, { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} });
 
-    await vi.waitFor(() => expect(commandCalls("desktop_conv_put")).toHaveLength(1));
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
     configureCloudHistoryCredentials(creds);
     await vi.advanceTimersByTimeAsync(1_000);
 
     expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(1);
-    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.not.objectContaining({
+    expect(commandCalls("desktop_conv_publish")).toHaveLength(2);
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_publish", expect.not.objectContaining({
       token: expect.anything(),
       endpoint: expect.anything(),
     }));
   });
 
+  it("stops publishing a branch after a typed native conflict", async () => {
+    const conflict = vi.fn();
+    const unsubscribe = onCloudHistoryConflict(conflict);
+    invoke.mockImplementation(async (command: string) => {
+      if (command === "desktop_conv_commit_pending") return undefined;
+      if (command === "desktop_conv_publish") {
+        return { outcome: "conflict", message: "a newer cloud revision exists" };
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    scheduleCloudPut(creds, {
+      id: "conflicted", title: "Conflicted", provider: "local", createdAt: 1, updatedAt: 1,
+    }, { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} });
+
+    await vi.waitFor(() => expect(conflict).toHaveBeenCalledWith("conflicted"));
+    expect(commandCalls("desktop_conv_publish")).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("publishes the newer queued mutation after native supersedes the old one", async () => {
+    let resolveFirst!: (value: { outcome: "superseded" }) => void;
+    let publications = 0;
+    invoke.mockImplementation((command: string) => {
+      if (command === "desktop_conv_commit_pending") return Promise.resolve();
+      if (command === "desktop_conv_publish") {
+        publications += 1;
+        if (publications === 1) return new Promise((resolve) => { resolveFirst = resolve; });
+        return Promise.resolve({ outcome: "published", rev: 9, sealedThrough: 0, large: false });
+      }
+      throw new Error(`unexpected command ${command}`);
+    });
+    const meta = { id: "superseded", title: "First", provider: "local", createdAt: 1, updatedAt: 1 };
+    const snapshot: Snapshot = { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} };
+    scheduleCloudPut(creds, meta, snapshot);
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
+    scheduleCloudPut(creds, { ...meta, title: "Second" }, snapshot);
+    resolveFirst({ outcome: "superseded" });
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(2));
+    expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(2);
+  });
+
   it("waits for an in-flight PUT before deleting and clears its write revision", async () => {
-    let resolvePut: (value: { rev: number }) => void = () => {
+    let resolvePut: (value: { outcome: "published"; rev: number; sealedThrough: number; large: boolean }) => void = () => {
       throw new Error("PUT resolver was not installed");
     };
     invoke.mockImplementation((command: string) => {
       if (command === "desktop_conv_commit_pending") return Promise.resolve();
-      if (command === "desktop_conv_put") {
-        return new Promise<{ rev: number }>((resolve) => { resolvePut = resolve; });
+      if (command === "desktop_conv_publish") {
+        return new Promise<{ outcome: "published"; rev: number; sealedThrough: number; large: boolean }>((resolve) => { resolvePut = resolve; });
       }
       if (command === "desktop_conv_delete") return Promise.resolve();
       throw new Error(`unexpected command ${command}`);
@@ -364,11 +437,11 @@ describe("cloud history size backstop", () => {
       updatedAt: 1,
     }, { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} });
 
-    await vi.waitFor(() => expect(commandCalls("desktop_conv_put")).toHaveLength(1));
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
     const deleting = cloudDelete(creds, "delete-race");
     await Promise.resolve();
     expect(commandCalls("desktop_conv_delete")).toHaveLength(0);
-    resolvePut({ rev: 8 });
+    resolvePut({ outcome: "published", rev: 8, sealedThrough: 0, large: false });
     await deleting;
 
     expect(invoke).toHaveBeenCalledWith("desktop_conv_delete", {
@@ -382,8 +455,8 @@ describe("cloud history size backstop", () => {
     const unsubscribe = onCloudHistoryWarning(warning);
     invoke.mockImplementation(async (command: string) => {
       if (command === "desktop_conv_commit_pending") return undefined;
-      if (command === "desktop_conv_put") {
-        throw new Error("cloud_deleted: conversation removed");
+      if (command === "desktop_conv_publish") {
+        return { outcome: "deleted", message: "conversation removed" };
       }
       throw new Error(`unexpected command ${command}`);
     });
@@ -395,10 +468,10 @@ describe("cloud history size backstop", () => {
       updatedAt: 1,
     }, { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} });
 
-    await vi.waitFor(() => expect(commandCalls("desktop_conv_put")).toHaveLength(1));
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
     await vi.advanceTimersByTimeAsync(60_000);
 
-    expect(commandCalls("desktop_conv_put")).toHaveLength(1);
+    expect(commandCalls("desktop_conv_publish")).toHaveLength(1);
     expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(1);
     expect(warning).toHaveBeenCalledWith(expect.stringContaining("deleted on another device"));
     unsubscribe();
@@ -407,7 +480,7 @@ describe("cloud history size backstop", () => {
   it("allows restart after native checkpointing even while cloud delivery is unresolved", async () => {
     invoke.mockImplementation((command: string) => {
       if (command === "desktop_conv_commit_pending") return Promise.resolve();
-      if (command === "desktop_conv_put") return new Promise(() => {});
+      if (command === "desktop_conv_publish") return new Promise(() => {});
       throw new Error(`unexpected command ${command}`);
     });
     scheduleCloudPut(creds, {
@@ -420,13 +493,13 @@ describe("cloud history size backstop", () => {
 
     await expect(prepareCloudDurability(100)).resolves.toBe(true);
     expect(commandCalls("desktop_conv_commit_pending")).toHaveLength(1);
-    expect(commandCalls("desktop_conv_put")).toHaveLength(1);
+    expect(commandCalls("desktop_conv_publish")).toHaveLength(1);
   });
 
   it("checkpoints a newer queued tail while an older cloud PUT remains unresolved", async () => {
     invoke.mockImplementation((command: string) => {
       if (command === "desktop_conv_commit_pending") return Promise.resolve();
-      if (command === "desktop_conv_put") return new Promise(() => {});
+      if (command === "desktop_conv_publish") return new Promise(() => {});
       throw new Error(`unexpected command ${command}`);
     });
     const meta = {
@@ -443,7 +516,7 @@ describe("cloud history size backstop", () => {
       artifacts: [],
       provider_incidents: {},
     });
-    await vi.waitFor(() => expect(commandCalls("desktop_conv_put")).toHaveLength(1));
+    await vi.waitFor(() => expect(commandCalls("desktop_conv_publish")).toHaveLength(1));
     scheduleCloudPut(creds, meta, {
       runs: {},
       timeline: [{

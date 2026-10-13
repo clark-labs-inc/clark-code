@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SnapshotPublicationCadence } from "../lib/snapshotPublicationCadence";
 import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
@@ -137,7 +138,7 @@ describe("startNewProject (local)", () => {
       remoteHost: null,
       projectRoot: "/tmp/old-app",
       queued: [],
-      lastPersist: 0,
+      publicationCadence: new SnapshotPublicationCadence(),
       prevBusy: false,
       dispatching: false,
       starting: false,

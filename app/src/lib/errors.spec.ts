@@ -42,6 +42,8 @@ describe("humanizeRunFailure", () => {
 
     expect(msg).toMatch(/required action format/i);
     expect(msg).toMatch(/three attempts/i);
+    expect(msg).toMatch(/follow-up/i);
+    expect(msg).not.toMatch(/choose another model/i);
     expect(msg).not.toMatch(/taking longer|rate.limit|transport/i);
   });
 

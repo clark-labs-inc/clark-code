@@ -3,7 +3,9 @@ import type { Artifact } from "../core-bridge/types";
 import {
   artifactAvailability,
   artifactLocationLabel,
+  artifactsWithSelected,
   canOpenArtifactExternally,
+  preferredArtifact,
   readableArtifactLocation,
 } from "./artifactPresentation";
 import { installProductModule, neutralProduct } from "../product/productModule";
@@ -32,6 +34,22 @@ describe("artifact presentation metadata", () => {
     expect(artifactAvailability(artifact())).toBe("unavailable");
     expect(artifactAvailability(artifact("/tmp/report.md"))).toBe("saved");
     expect(artifactAvailability(artifact("https://example.com/report.md"))).toBe("available");
+  });
+
+  it("opens the newest usable artifact before a later metadata-only record", () => {
+    const usable = { ...artifact("/tmp/report.md"), id: "local" };
+    const record = { ...artifact(), id: "synced" };
+    expect(preferredArtifact([usable, record])).toBe(usable);
+    expect(preferredArtifact([record])).toBe(record);
+    expect(preferredArtifact([])).toBeUndefined();
+  });
+
+  it("keeps a paged transcript file available in its workspace", () => {
+    const fromPage = { ...artifact("/tmp/report.md"), id: "paged" };
+    const metadataOnly = { ...artifact(), id: "paged" };
+    expect(artifactsWithSelected([], fromPage)).toEqual([fromPage]);
+    expect(artifactsWithSelected([metadataOnly], fromPage)).toEqual([fromPage]);
+    expect(artifactsWithSelected([fromPage], metadataOnly)).toEqual([fromPage]);
   });
 
   it("describes embedded data without exposing its payload", () => {

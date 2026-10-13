@@ -414,6 +414,9 @@ export interface CoreBridge {
    *  tagged with its session id (`snapshot.session`); the handler routes it.
    *  Returns an unsubscribe fn. */
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
+  /** Derive provider-visible replay from a saved projection. Native uses
+   * agent-core; browser preview bridges use the matching fixture-backed path. */
+  resumeTranscript(snapshot: Snapshot): Promise<ResumeTranscript | null>;
   /**
    * List the project-scoped memory (the `MEMORY.md` index plus any per-fact
    * files) for a live conversation's native-bound checkout. Read-only.

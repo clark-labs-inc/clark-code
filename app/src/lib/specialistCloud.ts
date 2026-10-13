@@ -58,20 +58,6 @@ export async function specialistOrganizations(
   return productRequest<SpecialistOrganization[]>("specialist.organizations");
 }
 
-export async function specialistCreateOrganization(
-  _creds: CloudCreds,
-  name: string,
-  domain: string,
-): Promise<SpecialistOrganization> {
-  if (!inTauri()) {
-    return { id: "org-demo-created", name, role: "owner", status: "active" };
-  }
-  return productRequest<SpecialistOrganization>("specialist.create_organization", {
-    name,
-    domain,
-  });
-}
-
 export async function specialistEntitlement(
   _creds: CloudCreds,
   kind: SpecialistKind,
@@ -103,29 +89,6 @@ export async function specialistQuery<T>(
     });
   if (operation === "scientist_overview") return parseResearchOverview(result) as T;
   return result as T;
-}
-
-export async function specialistPublishOverview(
-  _creds: CloudCreds,
-  specialist: "scientist",
-  organizationId: string,
-  sequence: number,
-  projection: ResearchOverview,
-): Promise<ResearchOverview> {
-  if (!Number.isSafeInteger(sequence) || sequence <= 0) {
-    throw new Error("Specialist projection sequence must be a positive safe integer");
-  }
-  const validated = parseResearchOverview(projection);
-  const result = !inTauri()
-    ? validated
-    : await productRequest<unknown>("specialist.publish", {
-      specialist,
-      organizationId,
-      schemaVersion: 1,
-      sequence,
-      projection: validated,
-    });
-  return parseResearchOverview(result);
 }
 
 export const demoOrganizations: SpecialistOrganization[] = [

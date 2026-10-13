@@ -6,6 +6,7 @@ import {
   snapshotBeforeTimelineItem,
 } from "./history";
 import type { ProviderIncident, Snapshot, ToolCall } from "../core-bridge/types";
+import pagedResumeFixture from "../../../harness/fixtures/paged-resume-transcript.json";
 
 function tool(id: string, status: ToolCall["status"]): ToolCall {
   return { id, title: id, kind: "execute", status, locations: [], content: [] };
@@ -228,6 +229,11 @@ describe("buildResumeTranscript", () => {
     expect(JSON.stringify(out)).not.toContain("old turn");
     expect(JSON.stringify(out)).not.toContain("compacted");
   });
+
+  it("replays the retained tail after an absolute paged-history checkpoint", () => {
+    const { snapshot, expected } = pagedResumeFixture;
+    expect(buildResumeTranscript(snapshot as unknown as Snapshot)).toEqual(expected);
+  });
 });
 
 describe("planning history migration", () => {
@@ -322,5 +328,14 @@ describe("snapshotBeforeTimelineItem", () => {
 
     expect(snapshotBeforeTimelineItem(snapshot, 2).model_context_checkpoint).toBeDefined();
     expect(snapshotBeforeTimelineItem(snapshot, 0).model_context_checkpoint).toBeUndefined();
+  });
+
+  it("keeps absolute pagination coordinates when trimming a retained turn", () => {
+    const snapshot = pagedResumeFixture.snapshot as unknown as Snapshot;
+    const prefix = snapshotBeforeTimelineItem(snapshot, 3);
+    expect(prefix.timeline_offset).toBe(240);
+    expect(prefix.model_context_checkpoint?.timeline_index).toBe(242);
+    expect(buildResumeTranscript(prefix)?.items).toEqual(pagedResumeFixture.expected.items.slice(0, 2));
+    expect(snapshotBeforeTimelineItem(snapshot, 1).model_context_checkpoint).toBeUndefined();
   });
 });

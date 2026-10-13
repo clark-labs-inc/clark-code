@@ -24,7 +24,6 @@ import { ConversationMutationTransition } from "./surfaces/ConversationMutationT
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { WorkspaceStage } from "./components/WorkspaceStage";
 import { ArtifactWorkspaceEmpty } from "./surfaces/work/ArtifactWorkspaceEmpty";
-import type { Artifact } from "./core-bridge/types";
 import {
   DEFAULT_ARTIFACT_PANEL_WIDTH,
   MIN_ARTIFACT_PANEL_WIDTH,
@@ -33,6 +32,7 @@ import {
   loadArtifactPanelWidth,
   saveArtifactPanelWidth,
 } from "./lib/artifactPanelWidth";
+import { useArtifactPanelSelection } from "./lib/useArtifactPanelSelection";
 
 const loadConversation = () =>
   import("./surfaces/Conversation").then((module) => ({ default: module.Conversation }));
@@ -105,8 +105,21 @@ export default function AuthenticatedWorkspace({
   const conversationTitle = useSessionStore((state) =>
     state.session ? state.conversations.find((conversation) => conversation.id === state.session?.id)?.title : null,
   );
-  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
-  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+  const {
+    artifactPanelOpen,
+    activeArtifactId,
+    selectedArtifact,
+    setActiveArtifactId,
+    closeArtifactPanel,
+    openArtifact,
+    openArtifacts,
+    jumpToSource,
+  } = useArtifactPanelSelection({
+    sessionId: session?.id,
+    artifactCount,
+    subagentsOpen,
+    closeSubagents,
+  });
   const [artifactPanelWidth, setArtifactPanelWidth] = useState(loadArtifactPanelWidth);
   const [subagentsPanelWidth, setSubagentsPanelWidth] = useState(480);
   const [resizingArtifactPanel, setResizingArtifactPanel] = useState(false);
@@ -127,10 +140,6 @@ export default function AuthenticatedWorkspace({
           ? "conversation"
           : "start";
 
-  useEffect(() => {
-    setArtifactPanelOpen(false);
-    setActiveArtifactId(null);
-  }, [session?.id]);
   // The conversation panel is lazy-loaded; the first chat switch pays its
   // chunk download + V8 eval (~450ms in dev, less in prod but still nonzero).
   // Preload it during idle time after mount so the first click is instant.
@@ -165,21 +174,6 @@ export default function AuthenticatedWorkspace({
     useSpecialistStore.getState().open(link.kind);
     if (link.tab) useSpecialistStore.getState().setTab(link.tab);
   }, []);
-  useEffect(() => {
-    // Re-check membership when the artifact set changes (count is the cheap
-    // signal; the array is read fresh from the store).
-    const artifacts = useSessionStore.getState().snapshot.artifacts;
-    if (activeArtifactId && !artifacts.some((artifact) => artifact.id === activeArtifactId)) {
-      setActiveArtifactId(null);
-    }
-  }, [activeArtifactId, artifactCount]);
-
-  useEffect(() => {
-    if (!subagentsOpen || !artifactPanelOpen) return;
-    setArtifactPanelOpen(false);
-    setActiveArtifactId(null);
-  }, [artifactPanelOpen, subagentsOpen]);
-
   useEffect(() => {
     const splitPane = splitPaneRef.current;
     if (!sidePanelOpen || !splitPane || typeof ResizeObserver === "undefined") return;
@@ -255,33 +249,6 @@ export default function AuthenticatedWorkspace({
     }
   };
 
-  const openArtifact = (artifact: Artifact) => {
-    closeSubagents();
-    setArtifactPanelOpen(true);
-    setActiveArtifactId(artifact.id);
-  };
-  const openArtifacts = () => {
-    if (!useSessionStore.getState().session) return;
-    const artifacts = useSessionStore.getState().snapshot.artifacts;
-    const latest = artifacts.at(-1);
-    closeSubagents();
-    setArtifactPanelOpen(true);
-    setActiveArtifactId((current) =>
-      current && artifacts.some((artifact) => artifact.id === current) ? current : (latest?.id ?? null),
-    );
-  };
-  const jumpToSource = (artifact: Artifact) => {
-    const targetId = artifact.tool_call ? `tool-call-${artifact.tool_call}` : `artifact-${artifact.id}`;
-    setArtifactPanelOpen(false);
-    setActiveArtifactId(null);
-    requestAnimationFrame(() => {
-      const target = document.getElementById(targetId);
-      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      target?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
-      target?.focus({ preventScroll: true });
-    });
-  };
-
   const detailsPanel = sidePanelOpen && (
     <>
       <div
@@ -326,8 +293,7 @@ export default function AuthenticatedWorkspace({
           resetKey={subagentsOpen ? "subagents" : activeArtifactId}
           onDismiss={() => {
             closeSubagents();
-            setArtifactPanelOpen(false);
-            setActiveArtifactId(null);
+            closeArtifactPanel();
           }}
         >
           <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
@@ -336,16 +302,14 @@ export default function AuthenticatedWorkspace({
             ) : activeArtifactId ? (
               <ArtifactWorkspace
                 activeArtifactId={activeArtifactId}
+                selectedArtifact={selectedArtifact}
                 conversationTitle={conversationTitle ?? "Current conversation"}
                 onSelect={setActiveArtifactId}
-                onClose={() => {
-                  setArtifactPanelOpen(false);
-                  setActiveArtifactId(null);
-                }}
+                onClose={closeArtifactPanel}
                 onJumpToSource={jumpToSource}
               />
             ) : (
-              <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
+              <ArtifactWorkspaceEmpty onClose={closeArtifactPanel} />
             )}
           </Suspense>
         </PanelErrorBoundary>
@@ -399,7 +363,7 @@ export default function AuthenticatedWorkspace({
                 <div className={sidePanelOpen
                   ? "hidden min-w-[20rem] flex-1 flex-col xl:flex"
                   : "flex min-w-0 flex-1 flex-col"}>
-                  <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme}
+                  <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme} compact={sidePanelOpen}
                     artifactCount={artifactCount} onOpenArtifacts={openArtifacts} onOpenArtifact={openArtifact} />
                 </div>
                 {detailsPanel}

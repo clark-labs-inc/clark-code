@@ -4,7 +4,7 @@ import * as m from "motion/react-m";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
-import { approvalPolicyForSpecialist, wouldAutoApprove } from "../lib/permissions";
+import { wouldAutoApprove } from "../lib/permissions";
 import {
   currentActivity,
   isAwaitingAssistantReply,
@@ -131,17 +131,16 @@ const TIMELINE_WINDOW = 80;
 
 export function Conversation({
   onOpenArtifact,
+  readOnly = false,
 }: {
   onOpenArtifact?: (artifact: Artifact) => void;
+  readOnly?: boolean;
 }) {
   const reduce = useReducedMotion();
   const snapshot = useSessionStore((s) => s.snapshot);
   const session = useSessionStore((s) => s.session);
   const approvalPolicy = useSessionStore((s) => s.approvalPolicy);
   const approvalPolicies = useSessionStore((s) => s.approvalPolicies);
-  const specialistKind = useSessionStore((s) => s.conversations.find(
-    (conversation) => conversation.id === s.session?.id,
-  )?.specialist?.kind);
   const includedModel = useSessionStore((s) =>
     isIncludedCodingModel(
       effectiveModelSettings(s.localSettings, s.chatModels, s.session?.id ?? null).model,
@@ -196,10 +195,7 @@ export function Conversation({
   // still never mount here.
   const permissionAutoGranted = pending_permission
     ? wouldAutoApprove(
-        approvalPolicyForSpecialist(
-          effectiveApprovalPolicy(approvalPolicy, approvalPolicies, sessionId),
-          specialistKind,
-        ),
+        effectiveApprovalPolicy(approvalPolicy, approvalPolicies, sessionId),
         pending_permission,
       )
     : false;
@@ -238,15 +234,15 @@ export function Conversation({
   const awaitingReply = isAwaitingAssistantReply(visible);
   // Tool rows and actively streaming unphased responses own their live state;
   // completed commentary keeps this row visible until the run advances or ends.
-  const showPending = shouldShowPending(snapshot);
-  const toolReplyReserve = awaitingReply && activity.busy && !showPending;
+  const showPending = !readOnly && shouldShowPending(snapshot);
+  const toolReplyReserve = !readOnly && awaitingReply && activity.busy && !showPending;
   // The "Run failed" banner reflects only the MOST RECENT run — so it clears
   // on its own once the next turn starts, instead of every past failure
   // lingering below the messages forever. It can also be dismissed outright.
   const runList = Object.values(runs);
   const latestRun = runList[runList.length - 1];
   const goalRunStatus = goal?.run ? runs[goal.run]?.status : undefined;
-  const goalRunActive = goalRunStatus === "queued" || goalRunStatus === "running";
+  const goalRunActive = !readOnly && (goalRunStatus === "queued" || goalRunStatus === "running");
   const failed =
     latestRun?.status === "failed" && !dismissedFailedRuns.includes(latestRun.id)
       ? latestRun
@@ -282,8 +278,12 @@ export function Conversation({
     }
     const { item } = block;
     if (item.item === "message") {
+      const offset = snapshot.timeline_offset ?? 0;
+      const checkpointIndex = snapshot.model_context_checkpoint?.timeline_index;
+      const beforeRetainedContext = offset > 0 &&
+        (checkpointIndex === undefined || offset + block.timelineIndex < checkpointIndex);
       const streaming =
-        activity.busy &&
+        !readOnly && activity.busy &&
         block.timelineIndex === visible.length - 1 &&
         item.role === "agent";
       // The canonical live state is the pending row below. Do not mount an
@@ -299,6 +299,7 @@ export function Conversation({
           timelineIndex={block.timelineIndex}
           animateEntry={historyEnd === null && enteringRows.has(block.key)}
           streaming={streaming}
+          readOnly={readOnly || historyPageView !== null || beforeRetainedContext}
         />
       );
     }
@@ -338,7 +339,7 @@ export function Conversation({
           incident={incident}
           executionLocation={session.environment?.remote ? "your remote host" : "this computer"}
           modelRouteLabel={session.provider === "local" ? "the agent's cloud model gateway" : "the selected model provider"}
-          onContinue={canContinue
+          onContinue={!readOnly && canContinue
             ? () => void useSessionStore.getState().continueProviderIncident(incident.id)
             : undefined}
         />
@@ -402,7 +403,7 @@ export function Conversation({
           </div>
         )}
 
-        <FanOutPanel />
+        {!readOnly && <FanOutPanel />}
 
         {/* The waiting reserve and the first streamed reply intentionally share
             the same four-line geometry. When prose begins, replace the reserve
@@ -425,7 +426,7 @@ export function Conversation({
         {/* Default (sync) mode, not popLayout: transient notices collapse in
             flow so they never float over a following notice or receipt. */}
         <AnimatePresence initial={false}>
-          {pending_permission && showPermissionGate && (
+          {!readOnly && pending_permission && showPermissionGate && (
             <m.div key="permission" {...transientMotion}>
               <PermissionGate req={pending_permission} />
             </m.div>
@@ -538,7 +539,7 @@ export function Conversation({
       {/* `/btw` side-question overlay — a fixed modal above the transcript.
           Renders only while a side question is open; the active run keeps
           streaming behind the translucent backdrop. */}
-      <SideQuestionCard />
+      {!readOnly && <SideQuestionCard />}
     </div>
   );
 }

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS journal_conversation (
     local_live INTEGER NOT NULL DEFAULT 0,
     snapshot_pending INTEGER NOT NULL DEFAULT 0,
     pending_mutation_id TEXT,
+    acknowledged_mutation_id TEXT,
     created_at_ms INTEGER NOT NULL,
     updated_at_ms INTEGER NOT NULL,
     PRIMARY KEY (owner_key, conversation_id)

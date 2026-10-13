@@ -5,6 +5,21 @@ fn run() -> RunId {
 }
 
 #[test]
+fn paged_resume_transcript_matches_shared_frontend_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../harness/fixtures/paged-resume-transcript.json"
+    ))
+    .expect("valid shared replay fixture");
+    let snapshot: Snapshot = serde_json::from_value(fixture["snapshot"].clone())
+        .expect("fixture snapshot follows the agent-core wire contract");
+    let actual = snapshot.resume_transcript().expect("retained replay");
+    assert_eq!(
+        serde_json::to_value(actual).expect("serialize replay"),
+        fixture["expected"]
+    );
+}
+
+#[test]
 fn usage_updates_are_visible_before_the_run_finishes() {
     let mut snapshot = Snapshot::new();
     apply(&mut snapshot, &AgentEvent::RunStarted { run: run() });

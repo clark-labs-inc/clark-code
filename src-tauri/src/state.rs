@@ -6,6 +6,7 @@
 //! streams fold events into it and the host emits it (tagged with its session
 //! id via `Snapshot::session`) to the UI.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -54,6 +55,9 @@ pub struct AppState {
     /// the exclusive transition. Independent requests never queue behind one
     /// another, but an account generation still changes atomically.
     pub(crate) account_lifecycle: Arc<RwLock<()>>,
+    /// Cloud-acknowledged transcript page cursors, scoped by native account
+    /// and conversation. The renderer never chooses a publication cursor.
+    pub(crate) history_cursors: Arc<Mutex<HashMap<(String, String), usize>>>,
     /// Once set, no new provider runs may start. Existing runs retain their
     /// guards and drain normally before the updater installs and restarts.
     update_draining: Arc<AtomicBool>,
@@ -87,6 +91,7 @@ impl AppState {
             runtime_registry: Arc::new(RuntimeRegistry::new()),
             credentials: Arc::new(SessionCredentials::with_policy(credential_policy)),
             account_lifecycle: Arc::new(RwLock::new(())),
+            history_cursors: Arc::new(Mutex::new(HashMap::new())),
             update_draining: Arc::new(AtomicBool::new(false)),
             active_runs: Arc::new(AtomicUsize::new(0)),
         }

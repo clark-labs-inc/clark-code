@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreBridge } from "../core-bridge/bridge";
-import { emptySnapshot, type Session } from "../core-bridge/types";
+import { emptySnapshot, type Session, type Snapshot } from "../core-bridge/types";
 import {
   composerDraftOwner,
   loadComposerDraft,
@@ -8,6 +8,8 @@ import {
 } from "../lib/composerDraft";
 import { liveSessions, newLiveEntry, snapshotCache } from "./sessionStore.runtime";
 import { useSessionStore } from "./sessionStore";
+import { loadConversationProjectBinding } from "../lib/conversationProjectBinding";
+import { buildResumeTranscript } from "../lib/history";
 
 const previousSession = { id: "previous-chat", provider: "local" } as Session;
 const originalDeleteConversation = useSessionStore.getState().deleteConversation;
@@ -17,6 +19,7 @@ function failingBridge(): CoreBridge {
     openSession: vi.fn(async () => {
       throw new Error("resume transport unavailable");
     }),
+    resumeTranscript: async (snapshot: Snapshot) => buildResumeTranscript(snapshot),
     closeSession: vi.fn(async () => {}),
   } as unknown as CoreBridge;
 }
@@ -162,6 +165,93 @@ describe("unavailable conversation navigation", () => {
     expect(state.opening).toBeNull();
     expect(state.error).toBeNull();
     expect(state.activeProjectRoot).toBeNull();
+  });
+
+  it("keeps saved history readable when this computer cannot attach its project", async () => {
+    const saved = {
+      ...emptySnapshot(),
+      timeline: [{ item: "message" as const, run: "run-1", role: "user" as const, blocks: [
+        { type: "text" as const, text: "Review this repository" },
+      ] }],
+    };
+    snapshotCache.set("missing-chat", saved);
+
+    await useSessionStore.getState().openConversation("missing-chat");
+
+    const state = useSessionStore.getState();
+    expect(state.unavailableConversation).toMatchObject({
+      id: "missing-chat",
+      savedSnapshot: true,
+    });
+    expect(state.session?.id).toBe("missing-chat");
+    expect(state.session?.environment).toBeUndefined();
+    expect(state.snapshot.timeline).toEqual(saved.timeline);
+    expect(liveSessions.has("missing-chat")).toBe(false);
+    expect(await state.send("Continue the security review")).toEqual({ kind: "not_sent" });
+    expect(useSessionStore.getState().snapshot.timeline).toEqual(saved.timeline);
+  });
+
+  it("keeps saved history readable when the original provider is not installed", async () => {
+    const saved = { ...emptySnapshot(), session: "missing-chat" };
+    snapshotCache.set("missing-chat", saved);
+    useSessionStore.setState({ providers: [] });
+
+    await useSessionStore.getState().openConversation("missing-chat");
+
+    const state = useSessionStore.getState();
+    expect(state.unavailableConversation).toMatchObject({ savedSnapshot: true });
+    expect(state.session?.id).toBe("missing-chat");
+    expect(state.snapshot.session).toBe("missing-chat");
+    expect(state.unavailableConversation?.detail).toContain("provider");
+  });
+
+  it("rebinds a saved chat to an explicit folder on this device without changing cloud metadata", async () => {
+    const account = { user: { id: "account-a", name: "Alice", method: "google" as const } };
+    const foreignPath = "/Users/previous/repository";
+    const currentPath = "/Users/current/repository";
+    const openSession = vi.fn(async (_provider, _config, request) => {
+      if (request.kind !== "new") throw new Error("unexpected load");
+      if (request.options.cwd === foreignPath) throw new Error(`project root ${foreignPath}: not found`);
+      return {
+        id: request.bindId!,
+        provider: "local",
+        capabilities: useSessionStore.getState().providers[0]!.capabilities,
+        environment: {
+          checkout_root: currentPath,
+          workspace_roots: [currentPath],
+          remote: false,
+        },
+      } as Session;
+    });
+    useSessionStore.setState({
+      auth: account,
+      bridge: {
+        openSession,
+        closeSession: vi.fn(async () => {}),
+        resumeTranscript: async (snapshot: Snapshot) => buildResumeTranscript(snapshot),
+      } as unknown as CoreBridge,
+      conversations: [{
+        id: "missing-chat",
+        title: "Security work",
+        provider: "local",
+        project: foreignPath,
+        specialist: { kind: "security" },
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    });
+    snapshotCache.set("missing-chat", emptySnapshot());
+
+    await useSessionStore.getState().openConversation("missing-chat");
+    expect(useSessionStore.getState().unavailableConversation?.savedSnapshot).toBe(true);
+    await useSessionStore.getState().bindConversationProject("missing-chat", currentPath);
+
+    expect(openSession.mock.calls.map(([, , request]) => request.options.cwd))
+      .toEqual([foreignPath, currentPath]);
+    expect(loadConversationProjectBinding("id:account-a", "missing-chat")).toBe(currentPath);
+    expect(useSessionStore.getState().conversations[0]?.project).toBe(foreignPath);
+    expect(useSessionStore.getState().activeProjectRoot).toBe(currentPath);
+    expect(useSessionStore.getState().unavailableConversation).toBeNull();
   });
 
   it("cleans up the unavailable entry and resets the new-chat composer", async () => {

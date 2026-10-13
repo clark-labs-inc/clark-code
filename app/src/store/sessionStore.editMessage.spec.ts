@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session, type Snapshot } from "../core-bridge/types";
 import { useSessionStore } from "./sessionStore";
+import { buildResumeTranscript } from "../lib/history";
 
 const session: Session = {
   id: "chat-edit",
@@ -27,6 +28,7 @@ function bridgeStub(): CoreBridge {
   return {
     listProviders: async () => [{ id: "local", label: "Clark Code", capabilities: session.capabilities }],
     openSession: vi.fn(async () => session),
+    resumeTranscript: async (snapshot) => buildResumeTranscript(snapshot),
     closeSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => ({ runId: "run-stub" })),
     cancel: vi.fn(async () => {}),
@@ -78,6 +80,26 @@ beforeEach(() => {
 });
 
 describe("edit and resend", () => {
+  it("keeps an earlier paged turn read-only when its model context is no longer retained", async () => {
+    const bridge = bridgeStub();
+    useSessionStore.setState({ bridge });
+    await useSessionStore.getState().startSession();
+    useSessionStore.setState({
+      snapshot: {
+        ...editableSnapshot(),
+        timeline_offset: 240,
+        model_context_checkpoint: {
+          timeline_index: 242,
+          transcript: { items: [], truncated: true },
+        },
+      },
+    });
+
+    expect(await useSessionStore.getState().resendFrom(0, "unsafe edit")).toBeNull();
+    expect(bridge.openSession).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().composerPrefill).toEqual({ text: "unsafe edit", timelineIndex: 0 });
+  });
+
   it("replaces the selected turn and resumes the model from only the retained prefix", async () => {
     const bridge = bridgeStub();
     useSessionStore.setState({ bridge });

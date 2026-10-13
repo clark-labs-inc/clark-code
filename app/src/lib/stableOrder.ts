@@ -74,8 +74,3 @@ export function resetStableOrder(): void {
   newProjectsSeen = 0;
   projectRanks.clear();
 }
-
-/** Test-only alias retained for the focused ordering suite. */
-export function __resetStableOrderForTests(): void {
-  resetStableOrder();
-}

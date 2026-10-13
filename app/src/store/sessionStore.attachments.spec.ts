@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
 import type { PendingAttachment } from "../lib/attachments";
+import { buildResumeTranscript } from "../lib/history";
 import { useSessionStore } from "./sessionStore";
 
 const session: Session = {
@@ -28,6 +29,7 @@ function bridgeStub(): CoreBridge {
   return {
     listProviders: async () => [],
     openSession: vi.fn(async () => session),
+    resumeTranscript: async (snapshot) => buildResumeTranscript(snapshot),
     prompt: vi.fn(async () => ({ runId: "run-stub" })),
     cancel: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),

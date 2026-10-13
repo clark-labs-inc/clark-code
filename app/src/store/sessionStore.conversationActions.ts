@@ -8,7 +8,6 @@ import {
   type SessionSet,
   addRecentProject,
   bindCloudTrajectory,
-  buildResumeTranscript,
   clearUnseenFinished,
   closeLiveSession,
   codeKeyAccountBinding,
@@ -56,8 +55,11 @@ import {
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
-import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { quickChatModelSettings } from "../lib/localAgent";
+import {
+  loadConversationProjectBinding,
+  saveConversationProjectBinding,
+} from "../lib/conversationProjectBinding";
 import type { Snapshot } from "../core-bridge/types";
 
 export function shouldResumeSavedProgress(snapshot: Snapshot): boolean {
@@ -81,6 +83,7 @@ type ConversationActions = Pick<
   | "dismissManagedWorktreeStart"
   | "endSession"
   | "openConversation"
+  | "bindConversationProject"
   | "cleanupUnavailableConversation"
   | "archiveConversation"
   | "restoreConversation"
@@ -91,6 +94,16 @@ type ConversationActions = Pick<
   | "archiveSelectedConversations"
   | "deleteSelectedConversations"
 >;
+
+const HISTORY_PREVIEW_CAPABILITIES = {
+  streaming: false,
+  permissions: false,
+  fs: false,
+  terminal: false,
+  load_session: false,
+  modes: [],
+  collaboration_modes: [],
+};
 
 function syncNextSessionTarget(
   get: SessionGet,
@@ -375,10 +388,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       let options;
       let remoteHost: string | null = null;
       const collaboration_mode = get().collaborationMode;
-      const mode = approvalPolicyForSpecialist(
-        get().approvalPolicy,
-        specialistContext?.kind,
-      );
+      const mode = get().approvalPolicy;
       if (specialistDefinition && specialistContext) {
         const specialistHost = isRemote
           ? loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId)
@@ -726,12 +736,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const cached = snapshotCache.get(id) ?? null;
     const previewProject = openingMeta?.project ?? null;
     set({
-      ...(providerForPreview
+      ...(openingMeta
         ? {
             session: {
               id,
               provider: targetProvider,
-              capabilities: providerForPreview.capabilities,
+              capabilities: providerForPreview?.capabilities ?? HISTORY_PREVIEW_CAPABILITIES,
               mode: openingMeta?.mode,
               collaboration_mode: get().collaborationMode,
               environment: previewProject
@@ -814,6 +824,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         openingMeta?.project,
         localSettings.cwd,
       );
+      if (isProjectProvider && !openingMeta?.remoteHost && !quickChat) {
+        requestedProjectRoot = loadConversationProjectBinding(
+          codeKeyAccountBinding(auth), id,
+        ) ?? requestedProjectRoot;
+      }
       if (quickChat) {
         if (!bridge.prepareQuickChatWorkspace) {
           throw new Error("Quick Chat requires Clark Code native workspace.");
@@ -836,10 +851,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // has one, else the global default — so reopening a chat you'd set to
       // "Full access" restarts it there, not on whatever the composer happens
       // to show now.
-      const mode = approvalPolicyForSpecialist(
-        effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id),
-        openingMeta?.specialist?.kind,
-      );
+      const mode = effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id);
       const savedSettings = effectiveModelSettings(localSettings, get().chatModels, id);
       const effSettings = quickChat
         ? quickChatModelSettings(savedSettings)
@@ -923,7 +935,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // Providers that can't resume have no server-side context either: replay
       // the typed transcript so model history and the restored UI agree.
       if (!canResume && restored) {
-        const resume = buildResumeTranscript(restored);
+        const resume = await bridge.resumeTranscript(restored);
         if (resume) (options as SessionOptions).resume = resume;
       }
 
@@ -1034,13 +1046,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     } catch (e) {
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (epochStale(epoch)) return;
+      const previewSession = get().session?.id === id ? get().session : null;
       // The clicked conversation remains the navigation target even though it
-      // could not become a live provider session. Detach the previously shown
-      // chat (its live entry keeps running in the background) so the workspace
-      // cannot snap back to stale content behind a generic error toast.
+      // could not become a live provider session. Keep a recovered transcript
+      // readable, but remove its machine-specific execution environment. The
+      // recovery surface never mounts a composer for this preview shell.
       set({
-        session: null,
-        snapshot: emptySnapshot(),
+        session: restored && previewSession
+          ? { ...previewSession, environment: undefined }
+          : null,
+        snapshot: restored ?? emptySnapshot(),
         error: null,
         connecting: false,
         opening: null,
@@ -1049,10 +1064,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           title: openingMeta?.title || "Conversation",
           detail: String(e),
           kind: "unavailable",
+          ...(restored && previewSession ? { savedSnapshot: true } : {}),
         },
         unavailableCleanupId: null,
         attachments: [],
-        historyPrefix: null,
+        historyPrefix: restored,
         queued: [],
         terminalOpen: false,
         sideQuestion: null,
@@ -1060,6 +1076,25 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         activeRemoteHost: null,
         activeProjectRoot: null,
       });
+    }
+  },
+
+  bindConversationProject: async (id, path) => {
+    const meta = get().conversations.find((conversation) => conversation.id === id);
+    const account = codeKeyAccountBinding(get().auth);
+    if (
+      !meta || !account || !path.trim()
+      || (meta.provider !== "local" && meta.provider !== "specialist")
+      || meta.remoteHost || isQuickChatProject(meta.project, id)
+    ) {
+      set({ error: "This conversation needs a signed-in local project to continue." });
+      return;
+    }
+    try {
+      saveConversationProjectBinding(account, id, path);
+      await get().openConversation(id);
+    } catch (error) {
+      set({ error: String(error) });
     }
   },
 

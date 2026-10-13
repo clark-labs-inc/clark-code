@@ -1,7 +1,8 @@
 import type { SidebarConversationMutationKind } from "../lib/sidebarConversationInteractions";
 import { composerDraftOwner, removeComposerDraft } from "../lib/composerDraft";
 import { clearCloudComposerDraft } from "../lib/cloudComposerDraft";
-import { authAccountMatches } from "../lib/account";
+import { authAccountMatches, codeKeyAccountBinding } from "../lib/account";
+import { removeConversationProjectBinding } from "../lib/conversationProjectBinding";
 import { useSpecialistStore } from "./specialistStore";
 import {
   type SessionGet,
@@ -245,6 +246,7 @@ async function deleteConversations(
       }
       closeLiveSession(get().bridge, id);
       snapshotCache.delete(id);
+      removeConversationProjectBinding(codeKeyAccountBinding(requestAuth), id);
       removeComposerDraft(draftOwner, id);
       set((state) => ({
         conversations: state.conversations.filter((conversation) => conversation.id !== id),

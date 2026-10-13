@@ -248,6 +248,18 @@ try {
       window.__agentDesktopProfiling.store.getState().snapshot.runs,
     ).every((run) => run.status === "done"));
     await page.screenshot({ path: screenshotPath(specialist.kind, "complete"), animations: "disabled" });
+    const securityWorkspace = page.locator('[data-qa="specialist-workspace-security"]');
+    await securityWorkspace.getByRole("button", { name: "Artifacts in this session, 0" }).click();
+    await page.getByRole("region", { name: "Artifact workspace" }).waitFor();
+    const headingBox = await securityWorkspace.getByRole("heading", { name: "Security", exact: true }).boundingBox();
+    const newSessionBox = await securityWorkspace.getByRole("button", { name: "New Security session" }).boundingBox();
+    check(headingBox && newSessionBox && (
+      headingBox.x + headingBox.width <= newSessionBox.x
+      || headingBox.y + headingBox.height <= newSessionBox.y
+    ), "Security heading overlaps its new-session action beside the artifact panel");
+    await page.screenshot({ path: screenshotPath(specialist.kind, "split-empty"), animations: "disabled" });
+    checks.push("security_split_header_has_no_overlap");
+    await page.getByRole("button", { name: "Close artifact workspace" }).click();
 
     const boundary = await page.evaluate(() => {
       const state = window.__agentDesktopProfiling.store.getState();
@@ -308,6 +320,67 @@ try {
     check(overflow.document <= overflow.viewport + 1, `${specialist.label} overflowed the mobile viewport`);
     await page.screenshot({ path: screenshotPath(specialist.kind, "mobile-reopened"), animations: "disabled" });
     checks.push(`${specialist.kind}_mobile_chat_canvas_and_overflow`);
+
+    // A cloud row can arrive on a second computer with an absolute project
+    // path that exists only on the first. History must remain readable while
+    // the user selects this device's corresponding checkout.
+    await page.setViewportSize(desktopViewport);
+    const crossDeviceId = "912a9700-7f5f-4f18-9785-b5d9315a41b4";
+    const foreignRoot = "/Users/previous/security-project";
+    const currentRoot = "/Users/current/security-project";
+    await page.evaluate(async ({ id, foreignRoot: root }) => {
+      const { useSessionStore } = await import("/src/store/sessionStore.ts");
+      const { snapshotCache } = await import("/src/store/sessionStore.runtime.ts");
+      const { emptySnapshot } = await import("/src/core-bridge/types.ts");
+      snapshotCache.set(id, {
+        ...emptySnapshot(),
+        timeline: [{
+          item: "message",
+          run: "saved-run",
+          role: "user",
+          blocks: [{ type: "text", text: "Saved on the other computer" }],
+        }],
+      });
+      useSessionStore.setState((state) => ({
+        conversations: [{
+          id,
+          title: "Cross-device Security review",
+          provider: "local",
+          project: root,
+          specialist: { kind: "security" },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }, ...state.conversations],
+      }));
+      window.__specialistMatrixProbe.failNextOpen = true;
+    }, { id: crossDeviceId, foreignRoot });
+    await page.locator(`[data-qa="specialist-conversation-security-${crossDeviceId}"] button`).first().click();
+    await page.getByRole("heading", { name: "History is available; the agent is disconnected" }).waitFor();
+    await page.getByText("Saved on the other computer", { exact: true }).waitFor();
+    check(await page.getByLabel("Message Clark Code").count() === 0, "Disconnected history exposed a live composer");
+    await page.screenshot({ path: screenshotPath(specialist.kind, "cross-device-history"), animations: "disabled" });
+    checks.push(`${specialist.kind}_cross_device_history_readable_without_project`);
+
+    await page.evaluate(async ({ id, path: selectedPath }) => {
+      const { useSessionStore } = await import("/src/store/sessionStore.ts");
+      await useSessionStore.getState().bindConversationProject(id, selectedPath);
+    }, { id: crossDeviceId, path: currentRoot });
+    await page.locator(`[data-qa="specialist-conversation-${specialist.kind}"]`).getByText(
+      "Saved on the other computer", { exact: true },
+    ).waitFor();
+    const rebound = await page.evaluate(async (id) => {
+      const { useSessionStore } = await import("/src/store/sessionStore.ts");
+      const state = useSessionStore.getState();
+      return {
+        projectRoot: state.activeProjectRoot,
+        cloudProject: state.conversations.find((row) => row.id === id)?.project,
+        unavailable: state.unavailableConversation,
+      };
+    }, crossDeviceId);
+    check(rebound.projectRoot === currentRoot, "Selected local project did not own the resumed session");
+    check(rebound.cloudProject === foreignRoot, "Local rebinding overwrote shared cloud project metadata");
+    check(rebound.unavailable === null, "Successful local rebinding left the recovery screen active");
+    checks.push(`${specialist.kind}_cross_device_folder_rebind_keeps_cloud_metadata`);
     results[specialist.kind] = {
       conversation_id: boundary.session.id,
       run_id: boundary.runs[0].id,
@@ -321,7 +394,9 @@ try {
           : null,
         failed_start: screenshotPath(specialist.kind, "start-failure"),
         complete: screenshotPath(specialist.kind, "complete"),
+        split: screenshotPath(specialist.kind, "split-empty"),
         mobile: screenshotPath(specialist.kind, "mobile-reopened"),
+        cross_device_history: screenshotPath(specialist.kind, "cross-device-history"),
       },
     };
     await context.close();

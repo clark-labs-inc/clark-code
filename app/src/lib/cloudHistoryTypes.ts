@@ -18,6 +18,8 @@ export interface CloudSummary {
 }
 
 export interface CloudDetail extends Partial<CloudSummary> {
+  /** Native/cloud-observed immutable prefix; does not choose publication. */
+  sealedThrough?: number;
   snapshot?: WireSnapshot;
   snapshotRecoveryRequired?: boolean;
   snapshotPendingMutationId?: string;

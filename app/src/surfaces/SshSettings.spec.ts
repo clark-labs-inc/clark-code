@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { hostCanSave, hostReady, type SshHost } from "../lib/sshHosts";
-import { sshConfigHostDetail, sshConfigSelectionKey, sshTargetAfterSave } from "./SshSettings";
+import { sshConfigSelectionKey, sshTargetAfterSave } from "./SshSettings";
+import { sshConfigHostDetail } from "./SshSettingsForm";
 
 const host = (overrides: Partial<SshHost> = {}): SshHost => ({
   id: "host-1",

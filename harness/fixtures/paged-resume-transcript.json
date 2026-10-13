@@ -1,0 +1,83 @@
+{
+  "snapshot": {
+    "timeline_offset": 240,
+    "runs": {},
+    "timeline": [
+      {
+        "item": "message",
+        "run": "old-run",
+        "role": "user",
+        "blocks": [{ "type": "text", "text": "Already covered by the checkpoint" }]
+      },
+      { "item": "tool_call", "id": "old-tool", "run": "old-run" },
+      {
+        "item": "message",
+        "run": "new-run",
+        "role": "user",
+        "blocks": [{ "type": "text", "text": "Keep this retained turn" }]
+      },
+      { "item": "tool_call", "id": "new-tool", "run": "new-run" }
+    ],
+    "model_context_checkpoint": {
+      "timeline_index": 242,
+      "transcript": {
+        "items": [
+          {
+            "item": "message",
+            "role": "system",
+            "blocks": [{ "type": "text", "text": "Compacted earlier history" }]
+          }
+        ],
+        "truncated": true
+      }
+    },
+    "tool_calls": {
+      "old-tool": {
+        "id": "old-tool",
+        "title": "Old read",
+        "kind": "read",
+        "status": "completed",
+        "locations": [],
+        "content": []
+      },
+      "new-tool": {
+        "id": "new-tool",
+        "tool_name": "read_file",
+        "title": "Read retained file",
+        "kind": "read",
+        "status": "completed",
+        "locations": [{ "path": "src/main.rs", "line": 7 }],
+        "raw_input": { "path": "src/main.rs" },
+        "content": [{ "type": "text", "text": "file content" }]
+      }
+    },
+    "artifacts": [],
+    "provider_incidents": {}
+  },
+  "expected": {
+    "items": [
+      {
+        "item": "message",
+        "role": "system",
+        "blocks": [{ "type": "text", "text": "Compacted earlier history" }]
+      },
+      {
+        "item": "message",
+        "role": "user",
+        "blocks": [{ "type": "text", "text": "Keep this retained turn" }]
+      },
+      {
+        "item": "tool_call",
+        "id": "new-tool",
+        "tool_name": "read_file",
+        "title": "Read retained file",
+        "kind": "read",
+        "status": "completed",
+        "locations": [{ "path": "src/main.rs", "line": 7 }],
+        "arguments": { "path": "src/main.rs" },
+        "content": [{ "type": "text", "text": "file content" }]
+      }
+    ],
+    "truncated": true
+  }
+}

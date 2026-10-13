@@ -3,7 +3,7 @@ import {
   stableOrderIds,
   stableProjectOrder,
   stableRankMap,
-  __resetStableOrderForTests,
+  resetStableOrder,
 } from "./stableOrder";
 
 interface Row {
@@ -14,7 +14,7 @@ interface Row {
 const row = (id: string, createdAt = 0, updatedAt = 0): Row => ({ id, createdAt, updatedAt });
 const ids = (rows: Row[]) => rows.map((r) => r.id);
 
-beforeEach(() => __resetStableOrderForTests());
+beforeEach(() => resetStableOrder());
 
 describe("stableOrderIds", () => {
   it("puts the latest-created conversation first regardless of source order", () => {

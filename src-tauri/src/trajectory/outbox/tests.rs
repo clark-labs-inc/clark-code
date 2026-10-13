@@ -577,6 +577,64 @@ async fn newer_pending_snapshot_survives_a_superseded_publication_ack() {
 }
 
 #[tokio::test]
+async fn publication_reads_only_the_exact_durable_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("publication.sqlite3");
+    let mut snapshot = Snapshot::new();
+    snapshot.session = Some(SessionId::new("staged"));
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        snapshot.clone(),
+        7,
+        0,
+        false,
+        "mutation-1".into(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        publication_snapshot(path.clone(), "owner".into(), "conversation".into(), "mutation-1".into())
+            .await
+            .unwrap(),
+        PublicationSnapshot::Pending(staged) if staged.session == snapshot.session
+    ));
+    assert!(matches!(
+        publication_snapshot(
+            path.clone(),
+            "owner".into(),
+            "conversation".into(),
+            "older".into()
+        )
+        .await
+        .unwrap(),
+        PublicationSnapshot::Superseded
+    ));
+    assert!(acknowledge_snapshot_publication(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        snapshot.clone(),
+        8,
+        0,
+        false,
+        "mutation-1".into(),
+    )
+    .await
+    .unwrap());
+    assert!(matches!(
+        publication_snapshot(path, "owner".into(), "conversation".into(), "mutation-1".into())
+            .await
+            .unwrap(),
+        PublicationSnapshot::Published(staged, rev) if staged.session == snapshot.session && rev == 8
+    ));
+}
+
+#[tokio::test]
 async fn pending_snapshot_is_not_discarded_when_an_uncertain_put_advanced_cloud_revision() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("outbox.sqlite3");

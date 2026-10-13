@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   conversationScrollTarget,
   isConversationAtBottom,
-  nextPinnedScrollTop,
   shouldFollowConversation,
 } from "./conversationScroll";
 
@@ -42,13 +41,4 @@ describe("conversation scroll state", () => {
     expect(shouldFollowConversation(830, 800, true)).toBe(true);
   });
 
-  it("eases ordinary streamed growth instead of snapping to the new bottom", () => {
-    expect(nextPinnedScrollTop(400, 440)).toBeCloseTo(408.8);
-    expect(nextPinnedScrollTop(439.8, 440)).toBe(440);
-  });
-
-  it("caps tall content jumps while always moving forward", () => {
-    expect(nextPinnedScrollTop(100, 1_000)).toBe(172);
-    expect(nextPinnedScrollTop(100, 101)).toBe(101);
-  });
 });

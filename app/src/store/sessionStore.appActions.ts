@@ -1,5 +1,4 @@
-import { deferredSnapshotPersistIsCurrent } from "../lib/snapshotPersistence";
-import { approvalPolicyForSpecialist } from "../lib/permissions";
+import { deferredSnapshotForPersistence } from "../lib/snapshotPersistence";
 import { sidebarFixtureConversations, sidebarFixtureEnabled } from "../lib/sidebarFixture";
 import {
   type SessionState,
@@ -575,8 +574,8 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       // that from melting the UI:
       //   • render — only the ACTIVE session renders, coalesced to at most one
       //     React update per animation frame;
-      //   • persist — each session writes its transcript at most ~2×/sec while
-      //     streaming, and always once it goes idle so nothing is lost.
+      //   • persist — first public text is immediate; growing text is coalesced
+      //     at 250ms with a trailing flush, and idle always flushes immediately.
       const raf: (cb: () => void) => void =
         typeof requestAnimationFrame !== "undefined"
           ? (cb) => requestAnimationFrame(() => cb())
@@ -630,9 +629,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         // idle. While busy the work runs in a macrotask AFTER the frame commits
         // — JSON.stringify of a long transcript was a source of 100ms+ hitches.
         if (hasContent(snapshot)) {
-          const now = Date.now();
-          if (!busyNow || now - entry.lastPersist >= 2000) {
-            entry.lastPersist = now;
+          {
             const persistPrefixLen = entry.historyPrefix?.timeline.length ?? 0;
             const persist = () => {
               // Sign-out, account replacement, archive, and delete remove this
@@ -644,7 +641,9 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
               // blocks the render frame. A terminal event can arrive before
               // that task runs; never let the older "running" projection land
               // after the newer idle snapshot and resurrect mobile activity.
-              if (busyNow && !deferredSnapshotPersistIsCurrent(entry.live, live)) return;
+              const persistedLive = deferredSnapshotForPersistence(entry.live, live, busyNow, isBusy(entry.live));
+              if (!persistedLive) return;
+              const snapshot = entry.historyPrefix ? mergeHistory(entry.historyPrefix, persistedLive) : persistedLive;
               // Cache the latest snapshot in memory (never to disk); the cloud
               // push below is the durable copy.
               snapshotCache.set(id, snapshot);
@@ -693,8 +692,10 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
               const creds = cloudCreds(get().auth);
               if (creds) scheduleCloudPut(creds, meta, snapshot, busyNow ? "running" : "idle");
             };
-            if (busyNow) setTimeout(persist, 0);
-            else persist();
+            entry.publicationCadence.schedule(snapshot, busyNow, () => {
+              if (busyNow) setTimeout(persist, 0);
+              else persist();
+            });
           }
         }
 
@@ -738,13 +739,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         // conversation isn't on screen.
         const pend = live.pending_permission;
         if (pend) {
-          const specialistKind = get().conversations.find(
-            (conversation) => conversation.id === id,
-          )?.specialist?.kind;
-          const policy = approvalPolicyForSpecialist(
-            effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id),
-            specialistKind,
-          );
+          const policy = effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id);
           if (pend.id !== entry.autoResolvedId && wouldAutoApprove(policy, pend)) {
             const opt = pickAllowOption(pend);
             if (opt) {

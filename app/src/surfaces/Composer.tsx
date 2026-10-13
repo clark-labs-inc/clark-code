@@ -88,7 +88,6 @@ import {
 import { useSpecialistStore } from "../store/specialistStore";
 import { productModule, productName } from "../product/productModule";
 import { composerBrandingCopy } from "./composerBranding";
-import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { specialistModelSettings } from "../lib/specialistModel";
 import { isQuickChatProject } from "../lib/projectSidebar";
 
@@ -145,10 +144,9 @@ function ScopedComposer() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
-  const approvalPolicy = useSessionStore((s) => approvalPolicyForSpecialist(
+  const approvalPolicy = useSessionStore((s) =>
     effectiveApprovalPolicy(s.approvalPolicy, s.approvalPolicies, s.session?.id),
-    activeSpecialist,
-  ));
+  );
   const projectMode = useSessionStore((s) => s.projectMode);
   const localSettings = useSessionStore((s) => s.localSettings);
   const selectedSpecialistSettings = specialistModelSettings(specialistContext);

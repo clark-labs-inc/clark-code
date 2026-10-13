@@ -15,10 +15,12 @@ import {
   type ClientResponse,
   type ContentBlock,
   type ProviderInfo,
+  type ResumeTranscript,
   type Session,
   type Snapshot,
   type WireSnapshot,
 } from "./types";
+import { buildResumeTranscript } from "../lib/history";
 
 export class DevBridge implements CoreBridge {
   private ws: WebSocket;
@@ -122,5 +124,9 @@ export class DevBridge implements CoreBridge {
     this.handlers.add(handler);
     handler(this.snapshot);
     return () => this.handlers.delete(handler);
+  }
+
+  async resumeTranscript(snapshot: Snapshot): Promise<ResumeTranscript | null> {
+    return buildResumeTranscript(snapshot);
   }
 }

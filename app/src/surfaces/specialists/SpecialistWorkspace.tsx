@@ -71,12 +71,14 @@ function previewCredentials(): CloudCreds {
 export function SpecialistWorkspace({
   dark,
   onToggleTheme,
+  compact,
   artifactCount,
   onOpenArtifacts,
   onOpenArtifact,
 }: {
   dark: boolean;
   onToggleTheme: () => void;
+  compact: boolean;
   artifactCount: number;
   onOpenArtifacts: () => void;
   onOpenArtifact: (artifact: Artifact) => void;
@@ -279,8 +281,8 @@ export function SpecialistWorkspace({
 
   return (
     <div data-qa={`specialist-workspace-${active}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg">
-      <header className="flex min-h-16 shrink-0 items-center gap-4 px-5 py-2.5">
-        <div className="min-w-0">
+      <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-5 py-2.5">
+        <div className="min-w-[10rem] flex-1">
           <h1 className="flex items-center gap-2 font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">
             {active === "security" && <ShieldCheck className="size-5 text-accent" aria-hidden="true" />}
             {active === "security" ? "Security" : `${productModule().branding.shortName} ${definition.label}`}
@@ -289,7 +291,7 @@ export function SpecialistWorkspace({
             {active === "security" ? "Find vulnerabilities, validate fixes, and strengthen your code." : definition.value}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           <UpdatePill />
           <button
             type="button"
@@ -299,7 +301,7 @@ export function SpecialistWorkspace({
             className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
           >
             <Plus className="size-4" />
-            <span className="hidden sm:inline">New {definition.label} session</span>
+            {!compact && <span className="hidden sm:inline">New {definition.label} session</span>}
           </button>
           {boundConversation && (
             <button
@@ -310,7 +312,7 @@ export function SpecialistWorkspace({
               className="flex h-9 items-center gap-1.5 rounded-xl px-2 text-xs font-medium text-ink-muted transition hover:bg-accent-subtle hover:text-accent"
             >
               <Library className="size-4" />
-              <span className="hidden sm:inline">Artifacts</span>
+              {!compact && <span className="hidden sm:inline">Artifacts</span>}
               <span className="tabular-nums">{artifactCount}</span>
             </button>
           )}
@@ -344,12 +346,12 @@ export function SpecialistWorkspace({
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
             </label>
           )}
-          <span className={cn(
+          {!compact && <span className={cn(
             "hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex",
             access === "ready" ? "bg-success/10 text-success" : "bg-accent-soft text-accent",
           )}>
             {specialistAccessBadge(access)}
-          </span>
+          </span>}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}

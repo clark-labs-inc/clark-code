@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session, type Snapshot } from "../core-bridge/types";
 import type { CodeRemoteCommand } from "../lib/mobileRemote";
+import { buildResumeTranscript } from "../lib/history";
 import { useSessionStore } from "../store/sessionStore";
 import {
   liveSessions,
@@ -12,6 +13,7 @@ import {
   cancelRun,
   compactConversation,
   editAndResend,
+  resolvePermission,
   steerRun,
 } from "./MobileRemoteAgent";
 
@@ -40,6 +42,7 @@ function bridgeStub(): CoreBridge {
   return {
     listProviders: async () => [{ id: "local", label: "Clark Code", capabilities: session.capabilities }],
     openSession: vi.fn(async () => session),
+    resumeTranscript: async (snapshot) => buildResumeTranscript(snapshot),
     closeSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => ({ runId: "rerun-from-phone" })),
     cancel: vi.fn(async () => {}),
@@ -108,6 +111,31 @@ beforeEach(() => {
 });
 
 describe("the agent Mobile parity commands", () => {
+  it.each([true, false])("resolves a live running permission with approved=%s", async (approved) => {
+    const snapshot: Snapshot = {
+      ...emptySnapshot(),
+      session: session.id,
+      runs: { "run-active": { id: "run-active", status: "running" } },
+      timeline: [{ item: "tool_call", id: "shell-1", run: "run-active" }],
+      pending_permission: {
+        id: "perm-shell-1", session: session.id, tool_call: "shell-1", title: "Run a shell command?",
+        options: [
+          { id: "once", kind: "allow_once", label: "Allow once" },
+          { id: "reject", kind: "reject_once", label: "Reject" },
+        ],
+      },
+    };
+    const bridge = await openWithSnapshot(snapshot);
+
+    await resolvePermission(command("resolve_permission", {
+      run_id: "run-active", action_id: "perm-shell-1", approved,
+    }));
+
+    expect(bridge.respond).toHaveBeenCalledWith(session.id, {
+      kind: "permission", request: "perm-shell-1", option: approved ? "once" : "reject",
+    });
+  });
+
   it("classifies a recovered stale run without reopening its large transcript", async () => {
     const restored = {
       ...emptySnapshot(),

@@ -50,4 +50,28 @@ describe("UnavailableConversationPanel", () => {
     expect(markup).toContain("Reload latest");
     expect(markup).not.toContain("Clean up");
   });
+
+  it("offers local folder selection while preserving the saved transcript", () => {
+    const markup = renderToStaticMarkup(
+      <UnavailableConversationPanel
+        conversation={{
+          id: "saved",
+          title: "Security research",
+          detail: "project root unavailable",
+          kind: "unavailable",
+          savedSnapshot: true,
+        }}
+        removing={false}
+        cleanupError={null}
+        allowCleanup={false}
+        onChooseFolder={vi.fn()}
+        onRetry={vi.fn()}
+        onCleanup={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain("History is available; the agent is disconnected");
+    expect(markup).toContain("Choose project folder");
+    expect(markup).not.toContain("Clean up");
+  });
 });

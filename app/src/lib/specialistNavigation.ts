@@ -6,6 +6,5 @@ export function specialistConversationsForNavigation(
   kind: SpecialistKind,
 ): ConversationMeta[] {
   return conversations
-    .filter((conversation) => !conversation.archived && conversation.specialist?.kind === kind)
-    .slice(0, 4);
+    .filter((conversation) => !conversation.archived && conversation.specialist?.kind === kind);
 }

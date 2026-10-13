@@ -185,7 +185,10 @@ export function buildResumeTranscript(snapshot: Snapshot): ResumeTranscript | nu
   const checkpoint = snapshot.model_context_checkpoint;
   const checkpointItems = checkpoint?.transcript.items ?? [];
   const items: ResumeItem[] = [];
-  for (const item of snapshot.timeline.slice(checkpoint?.timeline_index ?? 0)) {
+  // Checkpoint indices are absolute; timeline starts at timeline_offset once
+  // older transcript pages have been sealed away.
+  const tailStart = Math.max(0, (checkpoint?.timeline_index ?? 0) - (snapshot.timeline_offset ?? 0));
+  for (const item of snapshot.timeline.slice(tailStart)) {
     if (item.item === "message") {
       const blocks = replayBlocks(item.blocks);
       if (blocks.length > 0) items.push({ item: "message", role: item.role, blocks });
@@ -227,6 +230,7 @@ export function buildResumeTranscript(snapshot: Snapshot): ResumeTranscript | nu
  * the abandoned branch and must be removed from both display and replay. */
 export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): Snapshot {
   const timeline = snapshot.timeline.slice(0, Math.max(0, index));
+  const absoluteEnd = (snapshot.timeline_offset ?? 0) + index;
   const toolIds = new Set(
     timeline.flatMap((item) => (item.item === "tool_call" ? [item.id] : [])),
   );
@@ -265,10 +269,11 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
 
   return {
     ...(snapshot.session ? { session: snapshot.session } : {}),
+    ...(snapshot.timeline_offset ? { timeline_offset: snapshot.timeline_offset } : {}),
     runs,
     timeline,
     ...(snapshot.model_context_checkpoint &&
-    index >= snapshot.model_context_checkpoint.timeline_index
+    absoluteEnd >= snapshot.model_context_checkpoint.timeline_index
       ? { model_context_checkpoint: snapshot.model_context_checkpoint }
       : {}),
     tool_calls,

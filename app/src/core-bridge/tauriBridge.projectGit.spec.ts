@@ -5,6 +5,8 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { TauriBridge } from "./tauriBridge";
+import type { Snapshot } from "./types";
+import pagedResumeFixture from "../../../harness/fixtures/paged-resume-transcript.json";
 
 describe("TauriBridge remote project Git", () => {
   beforeEach(() => {
@@ -98,5 +100,13 @@ describe("TauriBridge remote project Git", () => {
       attachments: [],
       internalResume: true,
     });
+  });
+
+  it("delegates saved transcript replay to agent-core in the native host", async () => {
+    const snapshot = pagedResumeFixture.snapshot as unknown as Snapshot;
+    invoke.mockResolvedValueOnce(pagedResumeFixture.expected);
+
+    await expect(new TauriBridge().resumeTranscript(snapshot)).resolves.toEqual(pagedResumeFixture.expected);
+    expect(invoke).toHaveBeenCalledWith("snapshot_resume_transcript", { snapshot });
   });
 });

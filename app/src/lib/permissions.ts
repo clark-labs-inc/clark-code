@@ -46,13 +46,6 @@ export function nextApprovalPolicy(policy: ApprovalPolicy): ApprovalPolicy {
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
 export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
-export function approvalPolicyForSpecialist(
-  policy: ApprovalPolicy,
-  _specialistKind?: string | null,
-): ApprovalPolicy {
-  return policy;
-}
-
 /** The option that grants the request, preferring a one-time allow. */
 export function pickAllowOption(req: PermissionRequest): PermissionOption | undefined {
   return (
@@ -89,28 +82,18 @@ export function wouldAutoApprove(policy: ApprovalPolicy, req: PermissionRequest)
 const APPROVAL_KEY = "agent-desktop:approval-policy";
 const APPROVAL_POLICIES_KEY = "agent-desktop:approval-policies";
 const COLLABORATION_KEY = "agent-desktop:collaboration-mode";
-const LEGACY_MODE_KEY = "agent-desktop:permission-mode";
 
-function legacyMode(): string | null {
-  try {
-    return localStorage.getItem(LEGACY_MODE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function loadApprovalPolicy(scope?: string | null): ApprovalPolicy {
+export function loadApprovalPolicy(scope: string | null): ApprovalPolicy {
   try {
     const value = localStorage.getItem(accountScopedKey(APPROVAL_KEY, scope));
     if (value === "ask" || value === "auto" || value === "full") return value;
   } catch {
     return DEFAULT_APPROVAL_POLICY;
   }
-  const legacy = scope === undefined ? legacyMode() : null;
-  return legacy === "ask" || legacy === "full" ? legacy : DEFAULT_APPROVAL_POLICY;
+  return DEFAULT_APPROVAL_POLICY;
 }
 
-export function saveApprovalPolicy(policy: ApprovalPolicy, scope?: string | null): void {
+export function saveApprovalPolicy(policy: ApprovalPolicy, scope: string | null): void {
   try {
     localStorage.setItem(accountScopedKey(APPROVAL_KEY, scope), policy);
   } catch {
@@ -163,17 +146,17 @@ export function saveApprovalPolicies(
   }
 }
 
-export function loadCollaborationMode(scope?: string | null): CollaborationMode {
+export function loadCollaborationMode(scope: string | null): CollaborationMode {
   try {
     const value = localStorage.getItem(accountScopedKey(COLLABORATION_KEY, scope));
     if (value === "default" || value === "plan") return value;
   } catch {
     return DEFAULT_COLLABORATION_MODE;
   }
-  return scope === undefined && legacyMode() === "plan" ? "plan" : DEFAULT_COLLABORATION_MODE;
+  return DEFAULT_COLLABORATION_MODE;
 }
 
-export function saveCollaborationMode(mode: CollaborationMode, scope?: string | null): void {
+export function saveCollaborationMode(mode: CollaborationMode, scope: string | null): void {
   try {
     localStorage.setItem(accountScopedKey(COLLABORATION_KEY, scope), mode);
   } catch {

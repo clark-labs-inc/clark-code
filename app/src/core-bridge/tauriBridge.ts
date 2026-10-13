@@ -45,6 +45,7 @@ import {
   type Session,
   type Snapshot,
   type MemoryOverview,
+  type ResumeTranscript,
   type SecurityScanRecord,
   type CollaborationMode,
 } from "./types";
@@ -201,6 +202,10 @@ export class TauriBridge implements CoreBridge {
     return () => {
       void unlisten.then((fn) => fn());
     };
+  }
+
+  resumeTranscript(snapshot: Snapshot): Promise<ResumeTranscript | null> {
+    return invoke<ResumeTranscript | null>("snapshot_resume_transcript", { snapshot });
   }
 
   listMemory(sessionId: string): Promise<MemoryOverview> {

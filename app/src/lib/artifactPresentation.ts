@@ -12,6 +12,23 @@ export function artifactAvailability(artifact: Artifact): ArtifactAvailability {
     : "available";
 }
 
+export function preferredArtifact(artifacts: readonly Artifact[]): Artifact | undefined {
+  return [...artifacts].reverse().find((artifact) => artifactAvailability(artifact) !== "unavailable")
+    ?? artifacts.at(-1);
+}
+
+/** A transcript page can contain a file that is absent from the live snapshot. */
+export function artifactsWithSelected(
+  snapshot: readonly Artifact[],
+  selected: Artifact | null,
+): readonly Artifact[] {
+  if (!selected) return snapshot;
+  const index = snapshot.findIndex((artifact) => artifact.id === selected.id);
+  if (index < 0) return [...snapshot, selected];
+  if (snapshot[index].uri || !selected.uri) return snapshot;
+  return snapshot.map((artifact, at) => at === index ? selected : artifact);
+}
+
 export function artifactLocationLabel(artifact: Artifact): string {
   const uri = artifact.uri;
   if (!uri) return "Unavailable";

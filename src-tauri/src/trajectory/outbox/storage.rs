@@ -82,6 +82,10 @@ fn open_once(path: &Path) -> Result<Connection, Error> {
             "ALTER TABLE journal_conversation ADD COLUMN pending_mutation_id TEXT",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE journal_conversation ADD COLUMN acknowledged_mutation_id TEXT",
+            [],
+        );
         initialized.insert(path.to_path_buf());
     }
     Ok(conn)

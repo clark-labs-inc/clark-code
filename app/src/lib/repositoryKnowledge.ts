@@ -73,15 +73,6 @@ export function projectKnowledgeEnabled(scope?: string | null): boolean {
   }
 }
 
-export function setProjectKnowledgeEnabled(enabled: boolean, scope?: string | null): void {
-  try {
-    localStorage.setItem(accountScopedKey(ENABLED_KEY, scope), enabled ? "1" : "0");
-    window.dispatchEvent(new CustomEvent("agent-desktop:project-knowledge-setting"));
-  } catch {
-    // Storage can be unavailable in hardened browser previews.
-  }
-}
-
 export function repositoryIdentityForRoot(root: string): RepositoryIdentity | null {
   return identities.get(root.trim()) ?? null;
 }

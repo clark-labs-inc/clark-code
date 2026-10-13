@@ -11,7 +11,7 @@ import {
 } from "../lib/mobileRemote";
 import type { PendingAttachment } from "../lib/attachments";
 import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
-import { pickAllowOption } from "../lib/permissions";
+import { mobileRemotePermissionResponse } from "../lib/mobileRemotePermission";
 import { notify } from "../lib/notify";
 import {
   repositoryIdentityForRoot,
@@ -29,7 +29,6 @@ import { mobileRemoteCommandWaitsForIdle } from "../lib/mobileRemoteCommandSched
 
 
 import { remoteFailure, remoteFailureReceipt } from "../lib/mobileRemoteFailure";
-export { MobileRemoteFailure, remoteFailureReceipt } from "../lib/mobileRemoteFailure";
 
 function leaf(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path || "Project";
@@ -148,11 +147,6 @@ async function sendRemotePrompt(
     remoteFailure("submission_failed", "Clark Code did not start the mobile prompt.");
   }
   return outcome.receipt;
-}
-
-function commandBool(command: CodeRemoteCommand, key: string): boolean | null {
-  const value = command.request[key];
-  return typeof value === "boolean" ? value : null;
 }
 
 function commandString(command: CodeRemoteCommand, key: string): string | null {
@@ -318,42 +312,13 @@ async function submitPrompt(
   return { modelSettings, promptReceipt };
 }
 
-async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
+export async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
   const { state, entry, snapshot } = await requireLiveDesktop(command);
-  const actionId = commandString(command, "action_id");
-  const runId = commandRunId(command);
-  const approved = commandBool(command, "approved");
-  const pending = snapshot.pending_permission;
-  const run = runId ? snapshot.runs[runId] : null;
-  if (!actionId || !runId || approved === null) {
-    remoteFailure("invalid_command", "Clark Code permission command is incomplete.");
-  }
-  if (!run || run.status !== "awaiting_input") {
-    remoteFailure("stale_permission", "That run is not waiting for mobile approval.");
-  }
-  if (pending?.session !== command.desktop_id) {
-    remoteFailure(
-      "invalid_command",
-      "That permission request belongs to another desktop conversation.",
-    );
-  }
-  if (!pending || pending.id !== actionId) {
-    remoteFailure("stale_permission", "That permission request is no longer pending.");
-  }
-  const option = approved
-    ? pickAllowOption(pending)
-    : pending.options.find((item) => item.kind === "reject_once" || item.kind === "reject_always");
-  if (!option) {
-    remoteFailure("invalid_command", "No matching permission option is available.");
-  }
+  const response = mobileRemotePermissionResponse(snapshot, command);
   if (!state.bridge) {
     remoteFailure("desktop_unavailable", "Clark Code desktop session is not connected.", true);
   }
-  await state.bridge.respond(entry.session.id, {
-    kind: "permission",
-    request: pending.id,
-    option: option.id,
-  });
+  await state.bridge.respond(entry.session.id, response);
 }
 
 export async function cancelRun(command: CodeRemoteCommand): Promise<void> {

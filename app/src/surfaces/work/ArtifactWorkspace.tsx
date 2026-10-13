@@ -4,7 +4,6 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  Clock3,
   Copy,
   Download,
   ExternalLink,
@@ -13,12 +12,10 @@ import {
   FileText,
   Film,
   Globe,
-  History,
   Image as ImageIcon,
   Info,
   Link2,
   Loader2,
-  MessageCircle,
   PanelRightClose,
   Plus,
   Presentation,
@@ -40,6 +37,7 @@ import {
 import {
   artifactAvailability,
   artifactLocationLabel,
+  artifactsWithSelected,
   canOpenArtifactExternally,
   readableArtifactLocation,
 } from "../../lib/artifactPresentation";
@@ -79,7 +77,7 @@ const KIND_LABEL: Record<ArtifactKind, string> = {
   other: "Artifact",
 };
 
-type ContextPanel = "details" | "versions" | "comments" | "source";
+type ContextPanel = "details" | "source";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -125,6 +123,7 @@ function ArtifactTab({
   onClose: () => void;
 }) {
   const Icon = isMarkdownDoc(artifact) ? FileText : (KIND_ICON[artifact.kind] ?? FileBox);
+  const unavailable = artifactAvailability(artifact) === "unavailable";
   return (
     <div
       className={cn(
@@ -144,7 +143,9 @@ function ArtifactTab({
       >
         <Icon className={cn("size-3.5 shrink-0", active ? "text-accent" : "text-ink-faint")} />
         <span className="truncate text-xs font-medium">{artifact.title}</span>
+        {unavailable && <span className="sr-only">Unavailable</span>}
       </button>
+      {unavailable && <span title="File unavailable" aria-hidden="true" className="mr-1 size-1.5 shrink-0 rounded-full bg-warning" />}
       <button
         type="button"
         onClick={(event) => {
@@ -166,6 +167,7 @@ function ArtifactPreview({
   loading,
   readFailed,
   onRetry,
+  onJumpToSource,
   presenting,
 }: {
   artifact: Artifact;
@@ -173,10 +175,15 @@ function ArtifactPreview({
   loading: boolean;
   readFailed: boolean;
   onRetry: () => void;
+  onJumpToSource: () => void;
   presenting: boolean;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [artifact.id, artifact.uri]);
+
+  if (!artifact.uri) {
+    return <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} onJumpToSource={onJumpToSource} />;
+  }
 
   if (isMarkdownDoc(artifact)) {
     if (loading) {
@@ -245,7 +252,7 @@ function ArtifactPreview({
 
   if (isJsonArtifact(artifact)) {
     return <ArtifactJsonPreview text={text} loading={loading} onFallback={() =>
-      <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} />
+      <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} onJumpToSource={onJumpToSource} />
     } />;
   }
 
@@ -286,7 +293,7 @@ function ArtifactPreview({
     );
   }
 
-  return <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} />;
+  return <ArtifactGenericPreview artifact={artifact} Icon={KIND_ICON[artifact.kind] ?? FileBox} kindLabel={KIND_LABEL[artifact.kind]} onJumpToSource={onJumpToSource} />;
 }
 
 function ContextPopover({
@@ -313,7 +320,7 @@ function ContextPopover({
       className="absolute bottom-3 left-3 right-[4.25rem] top-auto z-20 max-h-[calc(100%-1.5rem)] w-auto overflow-auto rounded-xl border border-border bg-bg-elevated shadow-lifted xl:bottom-auto xl:left-auto xl:right-14 xl:top-28 xl:w-[19rem]"
     >
       <header className="flex h-11 items-center gap-2 border-b border-border-subtle px-3.5">
-        {panel === "source" ? <Link2 className="size-3.5" /> : panel === "details" ? <Info className="size-3.5" /> : panel === "versions" ? <History className="size-3.5" /> : <MessageCircle className="size-3.5" />}
+        {panel === "source" ? <Link2 className="size-3.5" /> : <Info className="size-3.5" />}
         <h2 className="text-sm font-semibold text-ink">{heading}</h2>
         <button
           type="button"
@@ -356,39 +363,20 @@ function ContextPopover({
           {location && <div className="max-h-24 overflow-auto break-all border-t border-border-subtle pt-3 font-mono text-xs leading-relaxed text-ink-faint">{location}</div>}
         </dl>
       )}
-      {panel === "versions" && (
-        <div className="p-4">
-          <div className="rounded-lg border border-border-subtle bg-bg p-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-ink">
-              <span className={cn("size-2 rounded-full", availability === "unavailable" ? "bg-ink-faint" : "bg-success")} />
-              {availability === "unavailable" ? "No available version" : "Current"}
-            </div>
-            <p className="mt-1 pl-4 text-xs text-ink-faint">
-              {availability === "unavailable" ? "Waiting for a file or link" : "Latest available artifact"}
-            </p>
-          </div>
-          <p className="mt-3 text-xs leading-relaxed text-ink-faint">Earlier versions will appear here when the artifact contract includes revision history.</p>
-        </div>
-      )}
-      {panel === "comments" && (
-        <div className="p-5 text-center">
-          <MessageCircle className="mx-auto size-5 text-ink-faint" />
-          <p className="mt-2 text-sm font-medium text-ink-secondary">No comments yet</p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-faint">Comments stay attached to this artifact while you work.</p>
-        </div>
-      )}
     </section>
   );
 }
 
 export function ArtifactWorkspace({
   activeArtifactId,
+  selectedArtifact,
   conversationTitle,
   onSelect,
   onClose,
   onJumpToSource,
 }: {
   activeArtifactId: string;
+  selectedArtifact: Artifact | null;
   conversationTitle: string;
   onSelect: (id: string) => void;
   onClose: () => void;
@@ -398,7 +386,11 @@ export function ArtifactWorkspace({
   // (AuthenticatedWorkspace) needn't subscribe to the full snapshot and
   // re-render the whole workspace ~60fps while a run streams. Per-frame
   // re-renders are scoped to this panel, which is only mounted when open.
-  const artifacts = useSessionStore((s) => s.snapshot.artifacts);
+  const snapshotArtifacts = useSessionStore((s) => s.snapshot.artifacts);
+  const artifacts = useMemo(
+    () => artifactsWithSelected(snapshotArtifacts, selectedArtifact),
+    [snapshotArtifacts, selectedArtifact],
+  );
   const sessionId = useSessionStore((s) => s.session?.id);
   const toolCalls = useSessionStore((s) => s.snapshot.tool_calls);
   const [openArtifactIds, setOpenArtifactIds] = useState<Set<string>>(
@@ -447,7 +439,7 @@ export function ArtifactWorkspace({
     setPdfSaved(false);
     setPresenting(false);
     setMarkdownReadFailed(false);
-    if (!activeId || (!activeIsMarkdown && !activeIsJson)) {
+    if (!activeId || !activeUri || (!activeIsMarkdown && !activeIsJson)) {
       setLoadingText(false);
       return;
     }
@@ -638,7 +630,7 @@ export function ArtifactWorkspace({
                   >
                     <Icon className="size-3.5 shrink-0 text-ink-faint" />
                     <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
-                    <span className="text-xs text-ink-faint">{KIND_LABEL[artifact.kind]}</span>
+                    <span className="text-xs text-ink-faint">{artifactAvailability(artifact) === "unavailable" ? "Unavailable" : KIND_LABEL[artifact.kind]}</span>
                   </button>
                 );
               })}
@@ -724,14 +716,13 @@ export function ArtifactWorkspace({
             loading={loadingText}
             readFailed={markdownReadFailed}
             onRetry={() => setMarkdownReadAttempt((attempt) => attempt + 1)}
+            onJumpToSource={() => onJumpToSource(active)}
             presenting={presenting}
           />
         </div>
         <nav aria-label="Artifact context" className={cn("flex min-w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg py-2", presenting && "hidden")}>
           {([
             ["details", Info, "Details"],
-            ["versions", Clock3, "Versions"],
-            ["comments", MessageCircle, "Comments"],
             ["source", Link2, "Source"],
           ] as const).map(([value, Icon, label]) => (
             <button

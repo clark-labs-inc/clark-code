@@ -55,6 +55,56 @@ pub struct RecoveredSnapshot {
     pub pending_mutation_id: Option<String>,
 }
 
+pub enum PublicationSnapshot {
+    Pending(Snapshot),
+    Published(Snapshot, i64),
+    Superseded,
+}
+
+/// Read the exact mutation already committed to SQLite. A retry after its
+/// acknowledgement sees the acknowledged head; a newer pending mutation fences
+/// this request before it can publish stale bytes.
+pub async fn publication_snapshot(
+    path: PathBuf,
+    owner_scope: String,
+    conversation_id: String,
+    mutation_id: String,
+) -> Result<PublicationSnapshot, String> {
+    blocking(move || {
+        let conn = open(&path)?;
+        let row = conn
+            .query_row(
+                "SELECT base_snapshot_json, base_rev, snapshot_pending, pending_mutation_id, acknowledged_mutation_id \
+                 FROM journal_conversation WHERE owner_key = ?1 AND conversation_id = ?2",
+                params![owner_key(&owner_scope), conversation_id],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, bool>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sql_error)?;
+        let Some((bytes, stored_rev, pending, stored_mutation_id, acknowledged_mutation_id)) = row else {
+            return Err("conversation publication has no durable snapshot".into());
+        };
+        if pending && stored_mutation_id.as_deref() == Some(mutation_id.as_str()) {
+            let snapshot = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+            return Ok(PublicationSnapshot::Pending(snapshot));
+        }
+        if !pending && acknowledged_mutation_id.as_deref() == Some(mutation_id.as_str()) {
+            let snapshot = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+            return Ok(PublicationSnapshot::Published(snapshot, stored_rev));
+        }
+        Ok(PublicationSnapshot::Superseded)
+    })
+    .await
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StagedArtifact {
     pub filename: String,
@@ -325,6 +375,7 @@ pub async fn acknowledge_snapshot_publication(
                    local_live = ?8,
                    snapshot_pending = 0,
                    pending_mutation_id = NULL,
+                   acknowledged_mutation_id = ?3,
                    updated_at_ms = ?9
                WHERE owner_key = ?1 AND conversation_id = ?2
                  AND pending_mutation_id = ?3"#,
