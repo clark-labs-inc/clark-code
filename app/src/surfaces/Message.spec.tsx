@@ -63,27 +63,9 @@ describe("assistant message actions", () => {
 
     expect(markup).toContain('data-sd-animate="true"');
     expect(markup).toContain('data-streaming-reply="true"');
-    expect(markup.match(/reply-stream-bar/g)).toHaveLength(3);
     expect(markup).toContain("<strong><span");
     expect(markup).toContain(">streaming</span></strong>");
     expect(markup).not.toContain("--streamdown-caret");
-  });
-
-  it("trades reserved skeleton rows for streamed Markdown lines", () => {
-    const markup = renderToStaticMarkup(
-      <Message
-        role="agent"
-        blocks={[{ type: "text", text: "First line.\nSecond line.\nThird line." }]}
-        timelineIndex={0}
-        streaming
-      />,
-    );
-
-    expect(markup).toContain('data-streaming-reply="true"');
-    expect(markup.match(/reply-stream-bar/g)).toHaveLength(1);
-    expect(markup).toContain(">First</span>");
-    expect(markup).toContain(">Second</span>");
-    expect(markup).toContain(">Third</span>");
   });
 
   it("keeps every assistant markdown layer on the full message rail", () => {

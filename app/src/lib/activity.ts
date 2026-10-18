@@ -14,28 +14,6 @@ export function isThinkingOnlyMessage(item: TimelineItem | undefined): boolean {
     && item.blocks.every((block) => block.type === "thinking");
 }
 
-/** Whether the latest user turn still has no visible assistant prose. Plans,
- * checklists, and completed tool rows may arrive first; they must not consume
- * the reply skeleton before the reply itself has begun. */
-export function isAwaitingAssistantReply(timeline: readonly TimelineItem[]): boolean {
-  let latestUser = -1;
-  for (let index = timeline.length - 1; index >= 0; index -= 1) {
-    const item = timeline[index];
-    if (item.item === "message" && item.role === "user") {
-      latestUser = index;
-      break;
-    }
-  }
-  if (latestUser < 0) return timeline.length === 0;
-
-  return !timeline.slice(latestUser + 1).some((item) =>
-    item.item === "message"
-    && item.role === "agent"
-    && item.phase !== "commentary"
-    && item.blocks.some((block) => block.type === "text" && block.text.trim().length > 0)
-  );
-}
-
 /** The most recent streamed progress line of a tool call (e.g. a subagent step),
  *  stripped of bullet markers. Used to show live progress on long calls. */
 export function lastProgressLine(tool: ToolCall): string | undefined {

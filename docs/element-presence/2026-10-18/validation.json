@@ -1,0 +1,384 @@
+{
+  "recorded_at": "2026-10-18T16:10:47.227528+00:00",
+  "head": "99e0f5b53246150b19654738cdb1bdb0bf16387c",
+  "scope": "Isolated Vite/React browser fixtures, synthetic local account and mock bridge; no hosted calls, active native-app restart, commits or release.",
+  "baseline": {
+    "lifecycle": "before-lifecycle.json: Chromium normal/reduced, original six modal source files at HEAD; pre-existing transcript changes retained. Initial harness had exit/rapid probes only.",
+    "modal_source_sha256": {
+      "app/src/AuthenticatedWorkspace.tsx": "c2682085a60f07243ec9fecf4006fc9a507f8fce0cde89dddbaa9d678a6669b1",
+      "app/src/surfaces/CommandPalette.tsx": "a442d61c61e7ed36f234128279e42b8a48b4dd939e34d2bc74e825c3b33409f9",
+      "app/src/surfaces/NewProjectDialog.tsx": "5f6eadf1ece753394b2f7ea3f239c634053bffdae043112d920467d36246e816",
+      "app/src/surfaces/Settings.tsx": "8f1091e561c19fe275a8f58c91b3c9f01470211c359bdcb7fa0177c30beb214d",
+      "app/src/surfaces/McpSettings.tsx": "7935060a8f705eff4a1c950db0ffeeaf195ae8a379b045081104de8f2ac6328e",
+      "app/src/surfaces/SshSettings.tsx": "217466d8ba14bfdd3a1a26af212d75ca691ae87132b6b90e9f1d0caef4c07430"
+    },
+    "css_handoff": "before-css.json: WebKit normal/reduced after lifecycle repair, before reduced-motion CSS repair. Each reduced-motion dialog reversed opacity once; Animation handed off to opacity CSSTransition on the same node."
+  },
+  "source_sha256": {
+    "app/src/AuthenticatedWorkspace.tsx": "226cf4c9e70c60b7d38229d1be3f830cee58ec54de740d112427719c47a3d10a",
+    "app/src/index.css": "60389edeb76d44dc0d8e72ba35e86a8ca9ab30449975a7a3f1de20ab1c0c7626",
+    "app/src/lib/activity.spec.ts": "135715d49c4b61c7008db1c4f663fd8b65deeddc4070d3a70a284f73e33ec15a",
+    "app/src/lib/activity.ts": "6f1309dbe79a43eeb3cf884ad12ae3fc93b8b9c8151e2815dcca4f67ee1765be",
+    "app/src/lib/motion.spec.ts": "a81ac8ef9ff849c8c4ac28e4512b98dfec923d34d3d47374ed0fab28185333d1",
+    "app/src/lib/motion.ts": "ff7553acf16ef1779a89107afbe863c8221b8a0bd8b2e98230b94f66cef84b65",
+    "app/src/lib/motionPolicy.spec.ts": "839bfd783f5702da7a20e1e6c2dd2340062ff34840ca89caaf771326273d81dd",
+    "app/src/perf/hotPath.perf.spec.ts": "79b409817417e188ce1acba39809894be230ff504d7ecab164fe0e807981155b",
+    "app/src/surfaces/CommandPalette.tsx": "c31a266747e8a8ed41d70de71dc3ce816646b4ad3753a9bc2aca1a0112913b74",
+    "app/src/surfaces/Conversation.tsx": "d7c8259bbe17b82779587249da15a6b0ea93d5460f34547042d407790c8237ab",
+    "app/src/surfaces/ConversationActivity.tsx": "971a79630444180e7be7f9c6fe49dfe1d2992f6cd8283556683bfb4d6ed850fc",
+    "app/src/surfaces/McpSettings.tsx": "3e5ad05f23fee8bb431221bc389bf7bd5740b9a9b9bae9914c0b88646c3efde8",
+    "app/src/surfaces/Message.spec.tsx": "965a715631a2d0fdda7d332df0e99d6d92ec763c0bb315a0dea32ae2b6d582ed",
+    "app/src/surfaces/Message.tsx": "f9067c627f18aca0d4d0366ec155f8102d811dff64dabd9f080dbb67a6625418",
+    "app/src/surfaces/NewProjectDialog.tsx": "525da94156dcdbba3c540f6fc04945d3ba31561e4e27e88400645882f5c363de",
+    "app/src/surfaces/Settings.tsx": "0b48a6b5edfcc67e02f38c9262dc8efbb0b93d9be429be4e00246ef27c1d6c20",
+    "app/src/surfaces/SshSettings.tsx": "a9590094b197aa2cefa6595f50c2fe2b1f43d1c6ffc0e57d5a8d96267de6acfc",
+    "app/src/surfaces/StreamingReply.tsx": null,
+    "harness/element-presence.mjs": "94e1f0ddbf37a62d6b2591bd6fed545b52a77d8320e102b4e28c86ba78af20d0",
+    "harness/fixtures/conversation-progress.mjs": "9343327e6e0ba5ce1b894768f424428695ddbdd7fec2069e33c743bbc514754e",
+    "harness/package.json": "493bc5e2f97e893e12f5a688afdfa9fb102816f0dfd3a30c921c2ed0452736fa",
+    "harness/rendering-stability.mjs": "27cc52a7b457a2e8a0aa496c745414cefbfce9e851f1e0269a82c46e3373a6ee",
+    "harness/conversation-motion.mjs": "eb6d37cf15a0860cf1e60fb9b522ef4e001244fab5dafad99471436efcbea83a"
+  },
+  "artifact_sha256": {
+    "README.md": "7fa30711cb834ea73afb312d2d3577b2ea37cf4d2d68720195a48f2e21e5b07c",
+    "after-chromium.webm": "9947d2cdd118885905027bbe0e47b3a61f6356e47d7096fe83df7cf41a65c94a",
+    "after-webkit.webm": "cb726d5e6c494a57b91528f1fbbe8aaf62fe944fff3c6790fc1be0487db6c12b",
+    "after.json": "aeb35e3df2423fb511831f40db15d914ea9bd38af7188eae292a6a4df9b97605",
+    "before-css.json": "4d5d1ddd45f8d1c19610b71fdd7f89971bfd28445e94586fc55cda4a9896118e",
+    "before-css.webm": "af068e5b395c178bc90293a1e97e18cde003ad5cd7a893181d675b8d1e95564b",
+    "before-lifecycle.json": "4f5190f792ce70194d4ab4b8e186f491ebd11c5bd749460c6d2b7beeb1373028",
+    "before-lifecycle.webm": "8677dab4585dc4314cf23bddaa4bc51dd800cec83fb608e4c8c1cd259d914ac6"
+  },
+  "after": {
+    "configurations": 4,
+    "dialogs_per_configuration": 5,
+    "cases": 20,
+    "entry_reversals": 0,
+    "competing_css_opacity_transitions": 0,
+    "rapid_node_replacements": 0,
+    "settled_displacement_px": 0,
+    "page_errors": 0
+  },
+  "checks": {
+    "frozen_frontend_install": "passed",
+    "typecheck": "passed",
+    "frontend_tests": {
+      "passed": 848,
+      "skipped": 3
+    },
+    "production_build": "passed",
+    "rust_fmt": "passed",
+    "strict_clippy": "passed",
+    "nextest": {
+      "run_id": "90e88335-5bcf-4fb7-9567-6713edaa0701",
+      "passed": 802,
+      "skipped": 8
+    },
+    "core_wasm": "passed",
+    "browser_regressions": {
+      "transcript": [
+        {
+          "label": "chromium no-preference",
+          "history": {
+            "mounted": 60,
+            "faded": 0
+          },
+          "disclosureShift": 0,
+          "readingShift": 0,
+          "scrollbackShift": 0,
+          "retainedFence": true,
+          "completion": {
+            "initial": 25.796875,
+            "final": 25.796875,
+            "intermediate": 0
+          },
+          "progress": {
+            "commentary": {
+              "height": 1053.484375,
+              "anchorTop": 658.25
+            },
+            "runningTool": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "completedTool": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "done": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "appendHeight": 32,
+            "statusHeightShift": 0,
+            "statusAnchorShift": 0,
+            "finishHeightShift": 0
+          },
+          "commands": {
+            "frames": 73,
+            "overlap": 0,
+            "replaced": 0,
+            "duplicates": 0,
+            "retainedTitles": true,
+            "count": 12,
+            "visible": 12
+          },
+          "errors": []
+        },
+        {
+          "label": "chromium reduce",
+          "history": {
+            "mounted": 60,
+            "faded": 0
+          },
+          "disclosureShift": 0,
+          "readingShift": 0,
+          "scrollbackShift": 0,
+          "retainedFence": true,
+          "completion": {
+            "initial": 25.796875,
+            "final": 25.796875,
+            "intermediate": 0
+          },
+          "progress": {
+            "commentary": {
+              "height": 1053.484375,
+              "anchorTop": 658.25
+            },
+            "runningTool": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "completedTool": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "done": {
+              "height": 1085.484375,
+              "anchorTop": 626.25
+            },
+            "appendHeight": 32,
+            "statusHeightShift": 0,
+            "statusAnchorShift": 0,
+            "finishHeightShift": 0
+          },
+          "commands": {
+            "frames": 74,
+            "overlap": 0,
+            "replaced": 0,
+            "duplicates": 0,
+            "retainedTitles": true,
+            "count": 12,
+            "visible": 12
+          },
+          "errors": []
+        },
+        {
+          "label": "webkit no-preference",
+          "history": {
+            "mounted": 60,
+            "faded": 0
+          },
+          "disclosureShift": 0,
+          "readingShift": 0,
+          "scrollbackShift": 0,
+          "retainedFence": true,
+          "completion": {
+            "initial": 25.796875,
+            "final": 25.796875,
+            "intermediate": 0
+          },
+          "progress": {
+            "commentary": {
+              "height": 1053.484375,
+              "anchorTop": 659.25
+            },
+            "runningTool": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "completedTool": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "done": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "appendHeight": 31.984375,
+            "statusHeightShift": 0,
+            "statusAnchorShift": 0,
+            "finishHeightShift": 0
+          },
+          "commands": {
+            "frames": 59,
+            "overlap": 0,
+            "replaced": 0,
+            "duplicates": 0,
+            "retainedTitles": true,
+            "count": 12,
+            "visible": 12
+          },
+          "errors": []
+        },
+        {
+          "label": "webkit reduce",
+          "history": {
+            "mounted": 60,
+            "faded": 0
+          },
+          "disclosureShift": 0,
+          "readingShift": 0,
+          "scrollbackShift": 0,
+          "retainedFence": true,
+          "completion": {
+            "initial": 25.796875,
+            "final": 25.796875,
+            "intermediate": 0
+          },
+          "progress": {
+            "commentary": {
+              "height": 1053.484375,
+              "anchorTop": 659.25
+            },
+            "runningTool": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "completedTool": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "done": {
+              "height": 1085.46875,
+              "anchorTop": 627.25
+            },
+            "appendHeight": 31.984375,
+            "statusHeightShift": 0,
+            "statusAnchorShift": 0,
+            "finishHeightShift": 0
+          },
+          "commands": {
+            "frames": 59,
+            "overlap": 0,
+            "replaced": 0,
+            "duplicates": 0,
+            "retainedTitles": true,
+            "count": 12,
+            "visible": 12
+          },
+          "errors": []
+        }
+      ],
+      "conversation": [
+        {
+          "label": "chromium no-preference",
+          "hover": {
+            "transform": "matrix(1.015, 0, 0, 1.015, 0, -2)",
+            "width": 322.77001953125
+          },
+          "initialWidth": 318,
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 900
+          },
+          "exitOpacity": 0.136415,
+          "restoredFocus": true,
+          "trappedFocus": true,
+          "scrollShift": 0,
+          "attachmentExit": 0.781021,
+          "errors": []
+        },
+        {
+          "label": "chromium reduce",
+          "hover": {
+            "transform": "none",
+            "width": 318
+          },
+          "initialWidth": 318,
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 900
+          },
+          "exitOpacity": 0.670816,
+          "restoredFocus": true,
+          "trappedFocus": true,
+          "scrollShift": 0,
+          "attachmentExit": 0.594714,
+          "errors": []
+        },
+        {
+          "label": "webkit no-preference",
+          "hover": {
+            "transform": "matrix(1.015, 0, 0, 1.015, 0, -2)",
+            "width": 322.77001953125
+          },
+          "initialWidth": 318,
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 900
+          },
+          "exitOpacity": 0.099272,
+          "restoredFocus": true,
+          "trappedFocus": true,
+          "scrollShift": 0,
+          "attachmentExit": 0.587258,
+          "errors": []
+        },
+        {
+          "label": "webkit reduce",
+          "hover": {
+            "transform": "none",
+            "width": 318
+          },
+          "initialWidth": 318,
+          "viewport": {
+            "x": 0,
+            "y": 0,
+            "width": 1280,
+            "height": 900
+          },
+          "exitOpacity": 0.459465,
+          "restoredFocus": true,
+          "trappedFocus": true,
+          "scrollShift": 0,
+          "attachmentExit": 0.543907,
+          "errors": []
+        }
+      ],
+      "workspace": [
+        "chromium reducedMotion=false: stable navigation, streaming, settings scroll PASS",
+        "chromium reducedMotion=true: stable navigation, streaming, settings scroll PASS",
+        "webkit reducedMotion=false: stable navigation, streaming, settings scroll PASS",
+        "webkit reducedMotion=true: stable navigation, streaming, settings scroll PASS"
+      ],
+      "permission_and_toast": [
+        "PASS chromium/full: frames=17 intermediate=8 fadeMs=248 firstO=1.00 lastReadO=0.00 spatialFrames=0 toastMs=200 toastLive=polite errors=0",
+        "PASS chromium/reduced: frames=13 intermediate=6 fadeMs=183 firstO=1.00 lastReadO=0.00 spatialFrames=0 toastMs=120 toastLive=polite errors=0",
+        "PASS webkit/full: frames=21 intermediate=9 fadeMs=247 firstO=1.00 lastReadO=0.00 spatialFrames=0 toastMs=200 toastLive=polite errors=0",
+        "PASS webkit/reduced: frames=15 intermediate=5 fadeMs=166 firstO=1.00 lastReadO=0.01 spatialFrames=0 toastMs=120 toastLive=polite errors=0"
+      ]
+    }
+  },
+  "limits": [
+    "Not a frame-rate or latency benchmark.",
+    "Installed native WKWebView, packaged releases, native OS-window creation and arbitrary popover rasterization remain unqualified.",
+    "No live provider, account or physical-phone qualification."
+  ],
+  "release_cleanup": {
+    "duplicate_gifs_removed": [
+      "docs/conversation-motion/before/review.gif",
+      "docs/conversation-motion/after/review.gif"
+    ],
+    "bytes_removed": 4795108,
+    "retained_evidence": "Both MP4s and all original receipts remain.",
+    "harness_output": "Routine conversation-motion captures default to target; OUTPUT opts into an explicit export directory.",
+    "verification": "Frontend typecheck, 848 tests (3 skipped), build and four image/attachment motion configurations rerun after cleanup."
+  }
+}

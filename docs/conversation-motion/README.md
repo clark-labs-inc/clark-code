@@ -1,7 +1,7 @@
 # Conversation motion review — 2026-10-17
 
 [Open the before/after review](index.html), or play the
-[updated video](after/review.mp4) / [GIF](after/review.gif).
+[updated video](after/review.mp4).
 The review page offers side-by-side playback, pause, and half speed.
 
 ## What changed and why
@@ -41,7 +41,7 @@ node harness/artifact-delivery-smoke.mjs
 ```
 
 The motion harness runs Chromium and WebKit with both normal and reduced
-motion. It records a normal-motion Chromium video/GIF and retains the four
+motion. It records a normal-motion Chromium video and retains the four
 [geometry/focus/presence receipts](after/receipts.json). `--baseline` is for
 capturing the source before an implementation change, not for recreating an
 older implementation after edits. Raw intermediate videos stay under `target/`.
@@ -59,6 +59,10 @@ older implementation after edits. Raw intermediate videos stay under `target/`.
 | Focused motion/message suite | 43 tests passed |
 | Frontend | Frozen install, typecheck, and production build passed |
 | Foundation Rust | Strict Clippy, 802 nextest tests (8 skipped), and WASM check passed; nextest `8188b912-bc33-4eee-ae29-8a8c539f27e7` |
+
+Routine captures now write to `target/conversation-motion/`. Set `OUTPUT` to an
+explicit directory when exporting a durable review. MP4 recordings retain the
+before/after evidence; duplicate GIF exports and their generator were removed.
 
 ## Shared-checkout limits
 

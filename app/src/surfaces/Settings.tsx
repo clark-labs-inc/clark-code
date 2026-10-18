@@ -558,10 +558,6 @@ export function Settings({
   const section = useSessionStore((s) => s.settingsSection);
   const setOpen = useSessionStore((s) => s.setSettingsOpen);
   const [query, setQuery] = useState("");
-  // Reduced Motion (or WKWebView's opacity-fade flicker in general) → appear
-  // instantly, no fade. The opacity animation is exactly the "half-opacity
-  // flicker" the ProfileMenu popover was fixed for; the modal dialogs never
-  // got the same treatment and re-animated regardless of the OS preference.
   const reduce = useReducedMotion();
   const dialogRef = useModalFocus<HTMLElement>(open);
 
@@ -581,7 +577,7 @@ export function Settings({
   const activeSection = SETTINGS_SECTIONS.find((item) => item.id === section);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence propagate>
       {open && (
         <m.section
           ref={dialogRef}

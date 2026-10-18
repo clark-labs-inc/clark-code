@@ -271,9 +271,9 @@ const USER_MESSAGE_ROW: MotionProps = {
 };
 
 const ASSISTANT_MESSAGE_ROW: MotionProps = {
-  initial: { opacity: 0, transform: "translate3d(0, 7px, 0)" },
-  animate: { opacity: 1, transform: "translate3d(0, 0, 0)" },
-  transition: { duration: DUR.slow, ease: EASE.out },
+  initial: FADE.initial,
+  animate: FADE.animate,
+  transition: FADE.transition,
 };
 
 const SYSTEM_MESSAGE_ROW: MotionProps = {

@@ -194,7 +194,6 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
 export function McpSettings() {
   const open = useSessionStore((s) => s.mcpOpen);
   const setOpen = useSessionStore((s) => s.setMcpOpen);
-  // Instant, no opacity fade under Reduced Motion — see Settings for why.
   const reduce = useReducedMotion();
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
@@ -281,7 +280,7 @@ export function McpSettings() {
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence propagate>
       {open && (
         <m.div
           {...accessibleMotion(OVERLAY, reduce)}

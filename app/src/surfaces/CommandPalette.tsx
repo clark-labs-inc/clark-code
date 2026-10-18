@@ -134,8 +134,6 @@ export function CommandPalette({
   }, [open]);
   useEffect(() => setActive(0), [query]);
 
-  if (!open) return null;
-
   const run = (item?: PaletteItem) => {
     if (!item) return;
     setOpen(false);
@@ -167,45 +165,47 @@ export function CommandPalette({
 
   return (
     <AnimatePresence>
-      <m.div
-        {...accessibleMotion(OVERLAY, reduce)}
-        className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-strong px-4 pt-[12vh]"
-        onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
-      >
+      {open && (
         <m.div
-          ref={dialogRef}
-          {...accessibleMotion(DIALOG, reduce)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Command palette"
-          className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
+          key="palette"
+          {...accessibleMotion(OVERLAY, reduce)}
+          className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-strong px-4 pt-[12vh]"
+          onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
         >
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Search actions and conversations…"
-            aria-label="Search commands"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            className="composer-input w-full shrink-0 bg-bg-secondary/55 px-4 py-3.5 text-sm text-ink outline-none placeholder:text-ink-muted"
-          />
-          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
-            {matches.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-ink-faint">No matches.</p>
-            ) : (
-              matches.map((item, i) => {
-                const showGroup = item.group !== lastGroup;
-                lastGroup = item.group;
-                const Icon = item.icon;
-                return (
-                  <div key={item.id}>
-                    {showGroup && (
-                      <div className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
-                        {item.group}
-                      </div>
+          <m.div
+            ref={dialogRef}
+            {...accessibleMotion(DIALOG, reduce)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+            className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
+          >
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKey}
+              placeholder="Search actions and conversations…"
+              aria-label="Search commands"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              className="composer-input w-full shrink-0 bg-bg-secondary/55 px-4 py-3.5 text-sm text-ink outline-none placeholder:text-ink-muted"
+            />
+            <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
+              {matches.length === 0 ? (
+                <p className="px-3 py-6 text-center text-sm text-ink-faint">No matches.</p>
+              ) : (
+                matches.map((item, i) => {
+                  const showGroup = item.group !== lastGroup;
+                  lastGroup = item.group;
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.id}>
+                      {showGroup && (
+                        <div className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
+                          {item.group}
+                        </div>
                     )}
                     <button
                       ref={setRowRef(i)}
@@ -235,6 +235,7 @@ export function CommandPalette({
           </div>
         </m.div>
       </m.div>
+      )}
     </AnimatePresence>
   );
 }

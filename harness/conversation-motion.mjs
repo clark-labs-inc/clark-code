@@ -11,7 +11,7 @@ import { chromium, webkit } from "playwright";
 const root = new URL("../", import.meta.url).pathname;
 const baseline = process.argv.includes("--baseline");
 const phase = baseline ? "before" : "after";
-const out = `${root}docs/conversation-motion/${phase}`;
+const out = process.env.OUTPUT ?? `${root}target/conversation-motion/${phase}`;
 mkdirSync(out, { recursive: true });
 const port = await new Promise((resolve, reject) => {
   const server = createServer();
@@ -211,7 +211,6 @@ try {
         if (capture) {
           const source = await video.path();
           execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", source, "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", `${out}/review.mp4`]);
-          execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", source, "-filter_complex", "fps=15,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer", `${out}/review.gif`]);
         }
         console.log(JSON.stringify(result));
       }

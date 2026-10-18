@@ -15,7 +15,6 @@ import { currentActivity } from "../lib/activity";
 import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
 import { MarkdownContent, MARKDOWN_CLASSES } from "./MarkdownContent";
-import { StreamingReplyFrame } from "./StreamingReply";
 import { ZoomableImage } from "./ImageLightbox";
 import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
 
@@ -222,22 +221,21 @@ function MessageImpl({
           return (
             <div
               key={i}
+              data-streaming-reply={live ? "true" : "false"}
               className={cn(
                 "min-w-0 w-full text-base leading-[1.72] [overflow-wrap:anywhere]",
                 MARKDOWN_CLASSES,
                 kind === "narrate" && "text-ink-secondary",
               )}
             >
-              <StreamingReplyFrame text={span.text} streaming={live}>
-                <MarkdownContent
-                  mode="streaming"
-                  className="min-w-0 w-full"
-                  animated={reduce ? CHAT_REDUCED_TEXT_ANIMATION : CHAT_TEXT_ANIMATION}
-                  isAnimating={live}
-                >
-                  {span.text}
-                </MarkdownContent>
-              </StreamingReplyFrame>
+              <MarkdownContent
+                mode="streaming"
+                className="min-w-0 w-full"
+                animated={reduce ? CHAT_REDUCED_TEXT_ANIMATION : CHAT_TEXT_ANIMATION}
+                isAnimating={live}
+              >
+                {span.text}
+              </MarkdownContent>
             </div>
           );
         })}

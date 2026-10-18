@@ -189,7 +189,7 @@ export function NewProjectDialog() {
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence propagate>
       {open && (
         <m.div
           {...accessibleMotion(OVERLAY, reduce)}

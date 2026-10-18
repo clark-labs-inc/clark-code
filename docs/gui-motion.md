@@ -35,6 +35,9 @@ an action. It should not decorate every update.
    workspace shell mounted and acknowledge navigation with `WorkspaceStage`;
    do not delay new content behind an outgoing screen. Use `popLayout` only
    for lists where the surrounding content should reflow immediately.
+   Lazy dialogs also need a presence owner outside their conditional shell;
+   their inner presence boundaries propagate exits. Keep the palette's presence
+   owner mounted while its child closes, so a rapid reopen reverses that child.
 4. Keep feedback quick: 120 ms for controls, 200 ms for normal entries, and
    300 ms only for a deliberate large reveal.
 5. Do not add `will-change` by default. Persistent compositor layers consume
@@ -89,10 +92,14 @@ never become the containing block for its fixed overlay. The scrim, media,
 and toolbar have coordinated presence; closing makes the viewer inert during
 its fade, then restores focus to the triggering thumbnail without scrolling.
 
-Reply skeleton lines fade out of flow using keyed `popLayout` presence. Their
-disappearance never interpolates the answer's height. Composer attachments
-use position-only layout animation, and the rail retains presence even when
-its last item is removed. See the [recorded motion review](conversation-motion/README.md).
+Conversation status uses one fixed line at the tail. Changing between prose,
+tool activity, and idle only fades that line; it does not add or remove predicted
+answer height. Markdown uses its actual rendered size from the first token.
+Assistant rows fade into their final position without translating over nearby
+command receipts. Command rows retain their DOM identity as later calls arrive.
+Composer attachments use position-only layout animation, and the rail retains
+presence even when its last item is removed. See the
+[recorded motion review](conversation-motion/README.md).
 
 `EXPAND_REDUCED` is the reduced-motion counterpart to `EXPAND`: entry and
 exit use brief opacity-only fades without geometry animation. Use it with the same ternary as the transients in
@@ -132,6 +139,15 @@ Under reduce, `accessibleMotion` and `staggeredTransition` (and `REDUCED_EXIT`
 for bespoke spreads) are what guarantee both halves of that policy. The global
 `prefers-reduced-motion: reduce` block removes spatial CSS motion and smooth
 scrolling while retaining brief fades and semantic status text.
+
+Nonzero CSS transition durations belong to explicit transition utilities. Do
+not give every element an opacity transition: in WebKit that starts a second
+fade from zero when Motion commits a finished WAAPI animation's final inline
+opacity. Narrow utilities such as `transition-colors` keep their property set;
+broad or spatial utilities are limited to paint properties under reduce.
+`node harness/element-presence.mjs` samples first appearance, exit, and rapid
+reopening for the palette, session chooser, Settings, MCP, and SSH dialogs in
+Chromium and WebKit with both motion preferences.
 
 Do not use movement as the only signal. Focus, labels, live-region text, color,
 and icons must continue to communicate the same state.

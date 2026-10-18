@@ -16,6 +16,55 @@ paid provider runs are opt-in and require explicit authorization.
 6. Keep typed receipts and first failures; never infer success from UI state or
    a process exit alone.
 
+## Dialog appearance and presence — 2026-10-18
+
+`node harness/element-presence.mjs` samples first appearance, close, and rapid
+reopening of the command palette, session chooser, Settings, MCP, and SSH
+dialogs. The initial Chromium probe found all five removed in 3–14 ms with
+zero exit-fade frames; rapid reopening replaced their DOM nodes. A separate
+WebKit reduced-motion probe then caught a full-opacity → zero-opacity reversal
+on every dialog's first appearance. Its frame records show a CSS opacity
+transition starting when Motion commits the completed WAAPI fade.
+
+The lazy modal shells now retain a keyed outer presence owner and propagate
+inner exits; the palette keeps its presence owner mounted while closed.
+Reduced-motion CSS gives nonzero durations only to explicit CSS transition
+utilities, preserving narrower property sets instead of adding a second opacity
+transition to Motion surfaces. All 20 engine/motion/dialog combinations pass
+with zero entry reversals, no duplicate/replaced nodes on rapid reopening,
+continuous exits, and zero settled displacement or page errors.
+
+Retained [frames, recordings, source digests, and scope](docs/element-presence/2026-10-18/README.md)
+use synthetic local state in Chromium and WebKit. Frontend frozen install,
+typecheck, 848 tests (3 skipped), and production build pass. Foundation format,
+strict Clippy, 802 Nextest tests (8 skipped), and core WASM check pass.
+Transcript geometry/identity, workspace navigation, image/attachment motion,
+and permission/toast exits also pass both engines and both motion preferences.
+Installed-native, packaged-release, OS-window creation, and arbitrary popover
+paint behavior are outside this browser qualification.
+
+Release cleanup removes the obsolete reply-reserve helper, estimator, styles,
+and tests. Duplicate conversation-motion GIFs and their encoder are removed;
+MP4 evidence remains. Routine motion captures now default to ignored `target/`
+output, with an explicit `OUTPUT` override for durable exports.
+
+## Transcript geometry and command identity — 2026-10-18
+
+`node harness/rendering-stability.mjs` now covers narration/tool handoffs,
+short-answer and run completion, and rapid appends while output opens/closes.
+Chromium and WebKit passed with normal and reduced motion: zero status/finish
+height shift, zero command overlap, stable identities/titles for 12 visible
+commands, and 58–71 sampled frames per configuration. Existing disclosure,
+scrollback, and retained-Markdown checks passed. Four-line transcript skeleton
+geometry is removed; a fixed activity line and opacity-only assistant entrances
+replace it. This supersedes the older reply-placeholder motion contract below.
+
+Retained [receipt, source digests, recording, and screenshot](docs/transcript-stability/2026-10-18/README.md)
+use synthetic local state. Frontend tests pass 848 (3 skipped), typecheck,
+frozen install, and production build pass. Rust format, strict foundation
+Clippy, 802 Nextest tests (8 skipped), and the core WASM check pass. These checks
+do not qualify the installed native application or the user's live conversation.
+
 ## Conversation motion — 2026-10-17
 
 `node harness/conversation-motion.mjs` exercises the actual UI with synthetic
@@ -23,7 +72,7 @@ local conversations in Chromium and WebKit, each with normal and reduced
 motion. All four configurations passed: image hover policy, full-viewport
 viewer geometry, keyboard focus containment/return, viewer and final-attachment
 exit fades, Markdown/generated-image viewing, zero transcript displacement,
-and zero page errors. Retained [before/after GIFs, videos, receipts, and review
+and zero page errors. Retained [before/after videos, receipts, and review
 notes](docs/conversation-motion/README.md) document the visual conclusions.
 The baseline exposed a viewer trapped by a transformed message row; the body
 portal fixes that boundary.

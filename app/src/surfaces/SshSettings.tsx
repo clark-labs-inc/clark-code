@@ -301,7 +301,7 @@ export function SshSettings() {
   const activeTest = activeHost ? tests[activeHost.id] : undefined;
 
   return (
-    <AnimatePresence>
+    <AnimatePresence propagate>
       {open && (
         <m.div
           {...accessibleMotion(OVERLAY, reduce)}

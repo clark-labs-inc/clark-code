@@ -117,15 +117,13 @@ describe("motion policy", () => {
     });
   });
 
-  it("gives user and assistant rows distinct compositor-friendly entrances", () => {
+  it("keeps new assistant rows in place beside command receipts", () => {
     expect(chatRowMotion("user").initial).toMatchObject({
       opacity: 0,
       transform: expect.stringContaining("translate3d(8px"),
     });
-    expect(chatRowMotion("agent").initial).toMatchObject({
-      opacity: 0,
-      transform: expect.stringContaining("translate3d(0, 7px"),
-    });
+    expect(chatRowMotion("agent").initial).toEqual({ opacity: 0 });
+    expect(chatRowMotion("agent").animate).toEqual({ opacity: 1 });
   });
 
   it("keeps reduced motion as an opacity fade without spatial movement", () => {

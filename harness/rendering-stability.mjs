@@ -2,10 +2,11 @@
 // scroll ownership. Uses the real components with deterministic store input.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium, webkit } from "playwright";
+import { commandRowGeometry, conversationProgressGeometry } from "./fixtures/conversation-progress.mjs";
 
 const root = new URL("../", import.meta.url).pathname;
 const port = await new Promise((resolve, reject) => {
@@ -32,9 +33,13 @@ try {
     const browser = await engine.launch({ headless: true });
     try {
       for (const reducedMotion of ["no-preference", "reduce"]) {
-        const context = await browser.newContext({ viewport: { width: 1360, height: 880 }, reducedMotion });
+        const capture = name === "chromium" && reducedMotion === "no-preference";
+        const context = await browser.newContext({ viewport: { width: 1360, height: 880 }, reducedMotion,
+          ...(capture ? { recordVideo: { dir: `${root}target/ui-rendering/video`, size: { width: 1360, height: 880 } } } : {}),
+        });
         await context.addInitScript(() => {
           localStorage.setItem("agent-desktop.dev-account", JSON.stringify({ user: { id: "rendering-qa", name: "Rendering QA", method: "local" } }));
+          localStorage.setItem("agent-desktop.theme", "dark");
         });
         const page = await context.newPage();
         const errors = [];
@@ -138,7 +143,7 @@ try {
         await sleep(350);
         const completion = await page.evaluate(async () => {
           const store = window.__agentDesktopStore;
-          const frame = document.querySelector(".streaming-reply-frame");
+          const frame = document.querySelector("[data-streaming-reply]");
           const heights = [];
           const initial = frame.getBoundingClientRect().height;
           store.setState({ snapshot: { ...store.getState().snapshot, runs: { "answer-run": { id: "answer-run", status: "done" } } } });
@@ -155,15 +160,24 @@ try {
           await page.screenshot({ path: `${root}target/ui-rendering/settled.png` });
         }
         const label = `${name} ${reducedMotion}`;
-        console.log(JSON.stringify({ label, history, disclosureShift, readingShift, scrollbackShift, retainedFence, completion, errors }));
+        const progress = await conversationProgressGeometry(page);
+        const commands = await commandRowGeometry(page);
+        if (capture) await page.screenshot({ path: `${root}target/ui-rendering/commands.png` });
+        console.log(JSON.stringify({ label, history, disclosureShift, readingShift, scrollbackShift, retainedFence, completion, progress, commands, errors }));
         if (history.mounted !== 60 || history.faded !== 0) failures.push(`${label}: saved tool history replayed entrance motion`);
         if (Math.abs(disclosureShift) > 2) failures.push(`${label}: expanding a tool moved its header ${disclosureShift.toFixed(1)}px`);
         if (Math.abs(readingShift) > 2) failures.push(`${label}: new output pulled the reader away from the expanded tool`);
         if (Math.abs(scrollbackShift) > 2) failures.push(`${label}: new output interrupted scrollback`);
         if (!retainedFence) failures.push(`${label}: completion remounted the code fence`);
-        if (completion.intermediate > 1) failures.push(`${label}: completion animated transcript height across ${completion.intermediate} frames`);
+        if (Math.abs(completion.initial - completion.final) > 2 || completion.intermediate > 1) failures.push(`${label}: completing a short reply changed transcript geometry`);
+        if (progress.appendHeight < -2) failures.push(`${label}: adding a tool shrank the transcript ${progress.appendHeight.toFixed(1)}px`);
+        if (Math.abs(progress.statusHeightShift) > 2 || Math.abs(progress.statusAnchorShift) > 2) failures.push(`${label}: tool status moved the transcript ${progress.statusHeightShift.toFixed(1)}px`);
+        if (Math.abs(progress.finishHeightShift) > 2) failures.push(`${label}: finishing work collapsed the transcript ${progress.finishHeightShift.toFixed(1)}px`);
+        if (commands.overlap > 0.5 || commands.replaced || commands.duplicates || !commands.retainedTitles || commands.count !== 12 || commands.visible !== 12 || commands.frames < 12) failures.push(`${label}: command rows overlapped or replaced each other`);
         if (errors.length) failures.push(`${label}: ${errors.join("; ")}`);
+        const video = page.video();
         await context.close();
+        if (capture) copyFileSync(await video.path(), `${root}target/ui-rendering/commands.webm`);
       }
     } finally { await browser.close(); }
   }

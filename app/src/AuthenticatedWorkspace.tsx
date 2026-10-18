@@ -1,5 +1,6 @@
 import { AccountConnectionStatus } from "./surfaces/AccountConnectionStatus";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useFanOutStore } from "./store/fanOutStore";
@@ -423,41 +424,44 @@ export default function AuthenticatedWorkspace({
         )}
         <ConversationMutationTransition />
       </div>
-      {mcpOpen && (
-        <Suspense fallback={null}>
-          <McpSettings />
-        </Suspense>
-      )}
-      {sshOpen && (
-        <Suspense fallback={null}>
-          <SshSettings />
-        </Suspense>
-      )}
-      {newProjectOpen && (
-        <Suspense fallback={null}>
-          <NewProjectDialogLazy />
-        </Suspense>
-      )}
-      {settingsOpen && (
-        <PanelErrorBoundary
-          title="Settings needs to restart"
-          resetKey={settingsOpen ? 1 : 0}
-          onDismiss={() => useSessionStore.getState().setSettingsOpen(false)}
-        >
-          <Suspense fallback={null}>
-            <Settings
-              dark={dark}
-              onToggleTheme={onToggleTheme}
-              colorblind={colorblind}
-              onToggleColorblind={onToggleColorblind}
-              interfaceContrast={interfaceContrast}
-              onInterfaceContrastChange={onInterfaceContrastChange}
-              textSize={textSize}
-              onTextSizeChange={onTextSizeChange}
-            />
+      <AnimatePresence>
+        {mcpOpen && (
+          <Suspense key="mcp" fallback={null}>
+            <McpSettings />
           </Suspense>
-        </PanelErrorBoundary>
-      )}
+        )}
+        {sshOpen && (
+          <Suspense key="ssh" fallback={null}>
+            <SshSettings />
+          </Suspense>
+        )}
+        {newProjectOpen && (
+          <Suspense key="new-project" fallback={null}>
+            <NewProjectDialogLazy />
+          </Suspense>
+        )}
+        {settingsOpen && (
+          <PanelErrorBoundary
+            key="settings"
+            title="Settings needs to restart"
+            resetKey={settingsOpen ? 1 : 0}
+            onDismiss={() => useSessionStore.getState().setSettingsOpen(false)}
+          >
+            <Suspense fallback={null}>
+              <Settings
+                dark={dark}
+                onToggleTheme={onToggleTheme}
+                colorblind={colorblind}
+                onToggleColorblind={onToggleColorblind}
+                interfaceContrast={interfaceContrast}
+                onInterfaceContrastChange={onInterfaceContrastChange}
+                textSize={textSize}
+                onTextSizeChange={onTextSizeChange}
+              />
+            </Suspense>
+          </PanelErrorBoundary>
+        )}
+      </AnimatePresence>
       <ManagedWorktreeTransitionDialog />
       <CommandPalette dark={dark} onToggleTheme={onToggleTheme} />
     </div>

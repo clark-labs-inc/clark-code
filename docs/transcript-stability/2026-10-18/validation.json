@@ -1,0 +1,238 @@
+{
+  "status": "passed",
+  "evidence_kind": "synthetic_real_ui_browser_acceptance",
+  "base_revision": "99e0f5b53246150b19654738cdb1bdb0bf16387c",
+  "working_tree_modified": true,
+  "source_sha256": {
+    "app/src/index.css": "63fc0f6e8925a559f802ecc0c4fb1ab943fe57408bc78ee5791817c8a4c11baa",
+    "app/src/lib/activity.ts": "6f1309dbe79a43eeb3cf884ad12ae3fc93b8b9c8151e2815dcca4f67ee1765be",
+    "app/src/lib/motion.ts": "ff7553acf16ef1779a89107afbe863c8221b8a0bd8b2e98230b94f66cef84b65",
+    "app/src/surfaces/Conversation.tsx": "d7c8259bbe17b82779587249da15a6b0ea93d5460f34547042d407790c8237ab",
+    "app/src/surfaces/ConversationActivity.tsx": "971a79630444180e7be7f9c6fe49dfe1d2992f6cd8283556683bfb4d6ed850fc",
+    "app/src/surfaces/Message.tsx": "f9067c627f18aca0d4d0366ec155f8102d811dff64dabd9f080dbb67a6625418",
+    "harness/rendering-stability.mjs": "27cc52a7b457a2e8a0aa496c745414cefbfce9e851f1e0269a82c46e3373a6ee",
+    "harness/fixtures/conversation-progress.mjs": "9343327e6e0ba5ce1b894768f424428695ddbdd7fec2069e33c743bbc514754e"
+  },
+  "removed_source_files": [
+    "app/src/surfaces/StreamingReply.tsx"
+  ],
+  "before": {
+    "short_answer": {
+      "initial": 103.1875,
+      "final": 25.796875,
+      "intermediate": 0
+    },
+    "completed_tool_run_finish_height_shift": -115.1875,
+    "scope_note": "Only valid short-answer and completed-tool/run-end states are retained. The initial active-tool fixture status was corrected to in_progress before final acceptance."
+  },
+  "after": [
+    {
+      "label": "chromium no-preference",
+      "history": {
+        "mounted": 60,
+        "faded": 0
+      },
+      "disclosureShift": 0,
+      "readingShift": 0,
+      "scrollbackShift": 0,
+      "retainedFence": true,
+      "completion": {
+        "initial": 25.796875,
+        "final": 25.796875,
+        "intermediate": 0
+      },
+      "progress": {
+        "commentary": {
+          "height": 1053.484375,
+          "anchorTop": 658.25
+        },
+        "runningTool": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "completedTool": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "done": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "appendHeight": 32,
+        "statusHeightShift": 0,
+        "statusAnchorShift": 0,
+        "finishHeightShift": 0
+      },
+      "commands": {
+        "frames": 71,
+        "overlap": 0,
+        "replaced": 0,
+        "duplicates": 0,
+        "retainedTitles": true,
+        "count": 12,
+        "visible": 12
+      },
+      "errors": []
+    },
+    {
+      "label": "chromium reduce",
+      "history": {
+        "mounted": 60,
+        "faded": 0
+      },
+      "disclosureShift": 0,
+      "readingShift": 0,
+      "scrollbackShift": 0,
+      "retainedFence": true,
+      "completion": {
+        "initial": 25.796875,
+        "final": 25.796875,
+        "intermediate": 0
+      },
+      "progress": {
+        "commentary": {
+          "height": 1053.484375,
+          "anchorTop": 658.25
+        },
+        "runningTool": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "completedTool": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "done": {
+          "height": 1085.484375,
+          "anchorTop": 626.25
+        },
+        "appendHeight": 32,
+        "statusHeightShift": 0,
+        "statusAnchorShift": 0,
+        "finishHeightShift": 0
+      },
+      "commands": {
+        "frames": 71,
+        "overlap": 0,
+        "replaced": 0,
+        "duplicates": 0,
+        "retainedTitles": true,
+        "count": 12,
+        "visible": 12
+      },
+      "errors": []
+    },
+    {
+      "label": "webkit no-preference",
+      "history": {
+        "mounted": 60,
+        "faded": 0
+      },
+      "disclosureShift": 0,
+      "readingShift": 0,
+      "scrollbackShift": 0,
+      "retainedFence": true,
+      "completion": {
+        "initial": 25.796875,
+        "final": 25.796875,
+        "intermediate": 0
+      },
+      "progress": {
+        "commentary": {
+          "height": 1053.484375,
+          "anchorTop": 659.25
+        },
+        "runningTool": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "completedTool": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "done": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "appendHeight": 31.984375,
+        "statusHeightShift": 0,
+        "statusAnchorShift": 0,
+        "finishHeightShift": 0
+      },
+      "commands": {
+        "frames": 60,
+        "overlap": 0,
+        "replaced": 0,
+        "duplicates": 0,
+        "retainedTitles": true,
+        "count": 12,
+        "visible": 12
+      },
+      "errors": []
+    },
+    {
+      "label": "webkit reduce",
+      "history": {
+        "mounted": 60,
+        "faded": 0
+      },
+      "disclosureShift": 0,
+      "readingShift": 0,
+      "scrollbackShift": 0,
+      "retainedFence": true,
+      "completion": {
+        "initial": 25.796875,
+        "final": 25.796875,
+        "intermediate": 0
+      },
+      "progress": {
+        "commentary": {
+          "height": 1053.484375,
+          "anchorTop": 659.25
+        },
+        "runningTool": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "completedTool": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "done": {
+          "height": 1085.46875,
+          "anchorTop": 627.25
+        },
+        "appendHeight": 31.984375,
+        "statusHeightShift": 0,
+        "statusAnchorShift": 0,
+        "finishHeightShift": 0
+      },
+      "commands": {
+        "frames": 58,
+        "overlap": 0,
+        "replaced": 0,
+        "duplicates": 0,
+        "retainedTitles": true,
+        "count": 12,
+        "visible": 12
+      },
+      "errors": []
+    }
+  ],
+  "checks": {
+    "frontend_passed": 848,
+    "frontend_skipped": 3,
+    "typecheck": "passed",
+    "production_build": "passed",
+    "frozen_install": "passed",
+    "rust_fmt": "passed",
+    "strict_foundation_clippy": "passed",
+    "native_core_provider_passed": 802,
+    "native_core_provider_skipped": 8,
+    "agent_core_wasm": "passed"
+  },
+  "provider_model_calls": 0,
+  "limitations": [
+    "Does not qualify the installed native app, the user conversation, or a packaged release."
+  ]
+}

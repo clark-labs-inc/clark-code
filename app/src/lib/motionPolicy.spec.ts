@@ -148,18 +148,13 @@ describe("GUI motion policy", () => {
       .filter(({ source }) => source.includes('className="activity-dots'))
       .map(({ path }) => path);
 
-    expect(activityOwners).toEqual(["../surfaces/Conversation.tsx"]);
-    expect(conversationSource).toContain(
-      'key={awaitingReply ? "awaiting-reply" : "reply-started"}',
-    );
+    expect(activityOwners).toEqual(["../surfaces/ConversationActivity.tsx"]);
+    expect(conversationSource).toContain("<ConversationActivity");
     expect(cssSource).toMatch(
       /\.activity-dots > span\s*\{[^}]*animation: activity-dot-pulse/s,
     );
     expect(cssSource).toContain(".skeleton::after {");
     expect(cssSource).not.toMatch(/\.skeleton::after\s*\{[^}]*translateX/s);
-    expect(cssSource).not.toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.reply-skeleton\s*\{\s*display: none !important;/,
-    );
     expect(cssSource).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.skeleton,[\s\S]*animation: reduced-motion-breathe 3\.2s/,
     );

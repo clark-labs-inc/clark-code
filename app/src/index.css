@@ -904,8 +904,8 @@ svg.lucide {
 }
 .breathe { animation: breathe 1.6s ease-in-out infinite; }
 
-/* Conversation owns one live-work signal. Its three dots share the same CSS
-   motion policy as the reply skeleton, including the fallback below. */
+/* Conversation owns one live-work signal. CSS keeps the same pulse policy
+   across status changes, including the reduced-motion fallback below. */
 @keyframes activity-dot-pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 1; }
@@ -942,28 +942,6 @@ svg.lucide {
   background-color: var(--color-bg-hover);
 }
 
-/* The waiting row and the first streamed Markdown share the same four-line
-   geometry. As text grows, each real line consumes one placeholder line, so
-   the transcript fills in instead of replacing a tall loader with a short
-   first token. */
-.reply-stream-reserve,
-.streaming-reply-frame[data-streaming-reply="true"] {
-  min-height: calc(4 * 1.72em);
-}
-
-.streaming-reply-frame {
-  min-height: 0;
-}
-
-.reply-stream-line {
-  display: flex;
-  height: 1.72em;
-  align-items: center;
-}
-
-.reply-stream-bar {
-  height: 0.68rem;
-}
 .skeleton::after {
   position: absolute;
   inset: 0;
@@ -1015,11 +993,20 @@ svg.lucide {
    Large spatial travel, perpetual spin, and shimmer movement remain disabled. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    /* A nonzero duration with the default `all` property animates even
-       otherwise static layout. Limit reduced-motion cues to paint changes. */
-    transition-property: opacity, color, background-color, border-color, text-decoration-color, box-shadow !important;
-    transition-duration: var(--dur-fast) !important;
+    /* Motion owns its own fades. A universal nonzero CSS transition starts
+       a second fade when WebKit commits a finished WAAPI opacity to style. */
+    transition-duration: 0s !important;
     scroll-behavior: auto !important;
+  }
+
+  :where(.transition, [class*="transition-"]) {
+    transition-duration: var(--dur-fast) !important;
+  }
+
+  /* Keep explicit CSS cues, preserving narrower utilities such as
+     transition-colors. Broad/spatial utilities get paint-only motion. */
+  :where(.transition, .transition-transform, [class*="transition-["]) {
+    transition-property: opacity, color, background-color, border-color, text-decoration-color, box-shadow !important;
   }
 
   .skeleton::after {

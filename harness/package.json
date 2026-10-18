@@ -16,6 +16,7 @@
     "perf:stream": "node perf-stream.mjs",
     "perf:compare": "node perf-compare.mjs",
     "test:rendering-stability": "node rendering-stability.mjs",
+    "test:element-presence": "node element-presence.mjs",
     "test:highlight-staleness": "node highlight-staleness-probe.mjs"
   },
   "dependencies": {

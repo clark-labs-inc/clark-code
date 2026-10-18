@@ -19,7 +19,6 @@ import { emptySnapshot } from "../core-bridge/types";
 import type { Snapshot, TimelineItem, ToolCall } from "../core-bridge/types";
 import { mergeHistory } from "../store/sessionStore";
 import { summarizeEdits } from "../lib/diff";
-import { streamingReplyPlaceholderCount } from "../surfaces/StreamingReply";
 
 // Vitest runs in Node; the app tsconfig is browser-scoped, so reach the flag
 // without pulling in @types/node.
@@ -196,7 +195,6 @@ describe.skipIf(!enabled)("per-snapshot hot path", () => {
       const prefix = snapshotOf(Math.floor(turns / 2));
       const live = snapshotOf(Math.ceil(turns / 2));
       const editCalls = Object.values(snapshot.tool_calls);
-      const streamingText = PROSE.repeat(4);
 
       rows.push({
         turns,
@@ -208,8 +206,6 @@ describe.skipIf(!enabled)("per-snapshot hot path", () => {
           summarizeEdits(editCalls)).toFixed(3)),
         mergeHistoryMs: Number(timed("mergeHistory", 20, () =>
           mergeHistory(prefix, live)).toFixed(3)),
-        placeholderMs: Number(timed("placeholders", 50, () =>
-          streamingReplyPlaceholderCount(streamingText)).toFixed(4)),
         serializeMs: Number(timed("JSON.stringify", 10, () =>
           JSON.stringify(snapshot)).toFixed(3)),
       });

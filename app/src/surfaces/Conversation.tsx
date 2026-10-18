@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { ArrowDown, X } from "lucide-react";
@@ -7,7 +7,6 @@ import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { wouldAutoApprove } from "../lib/permissions";
 import {
   currentActivity,
-  isAwaitingAssistantReply,
   isThinkingOnlyMessage,
   shouldShowPending,
 } from "../lib/activity";
@@ -40,60 +39,13 @@ import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
 import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import { SpecialistConversationPresentationCard } from "./specialists/SpecialistConversationShowcase";
-import { ReplySkeleton, STREAMING_REPLY_RESERVE_LINES } from "./StreamingReply";
+import { ConversationActivity } from "./ConversationActivity";
 import type { Artifact, ToolCall, TranscriptPage } from "../core-bridge/types";
 import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
 import { specialistPresentationFromPayload } from "../lib/specialistPresentation";
 import { hasTerminalProviderIncident } from "../lib/providerIncidentPresentation";
 import { EarlierHistoryButton, NewerHistoryControls } from "../components/TranscriptPager";
 import { cloudCreds, cloudGetTranscriptPages } from "../lib/cloudHistory";
-
-/** The only live-work indicator in the transcript. CSS owns both its pulse and
- * reduced-motion fallback so the visual policy cannot diverge from skeletons. */
-const ActivityDots = memo(function ActivityDots() {
-  return (
-    <span className="activity-dots flex shrink-0 items-center gap-[3px]" aria-hidden>
-      <span className="size-1.5 rounded-full bg-accent" />
-      <span className="size-1.5 rounded-full bg-accent" />
-      <span className="size-1.5 rounded-full bg-accent" />
-    </span>
-  );
-});
-
-/** "Working now" — dots + label, plus a skeleton preview before the first
- *  tokens of the reply arrive. Hidden while a tool line shows its own spinner. */
-function Pending({
-  label,
-  detail,
-  skeleton,
-}: {
-  label: string;
-  detail?: string;
-  skeleton: boolean;
-}) {
-  const activity = (
-    <div className="flex items-center gap-2.5 text-sm text-ink-muted">
-      <ActivityDots />
-      <span className="truncate">
-        {label || "Thinking…"}
-        {detail && <span className="ml-1.5 font-mono text-xs text-ink-faint">{detail}</span>}
-      </span>
-    </div>
-  );
-
-  if (skeleton) {
-    return (
-      <div className="reply-stream-reserve text-base" data-qa="reply-skeleton-reserve">
-        <div className="reply-stream-line">{activity}</div>
-        <ReplySkeleton lines={STREAMING_REPLY_RESERVE_LINES - 1} startIndex={1} />
-      </div>
-    );
-  }
-
-  return (
-    activity
-  );
-}
 
 // `min-w-0` lets this flex child shrink to the column width (flex items default
 // to min-width:auto, so an unbreakable token — a long URL or a raw provider JSON
@@ -231,11 +183,9 @@ export function Conversation({
   const transientMotion = reduce ? EXPAND_REDUCED : EXPAND;
   // Long transcripts always render one bounded page. Streaming therefore never
   // makes layout or React reconciliation scale with total transcript length.
-  const awaitingReply = isAwaitingAssistantReply(visible);
   // Tool rows and actively streaming unphased responses own their live state;
   // completed commentary keeps this row visible until the run advances or ends.
   const showPending = !readOnly && shouldShowPending(snapshot);
-  const toolReplyReserve = !readOnly && awaitingReply && activity.busy && !showPending;
   // The "Run failed" banner reflects only the MOST RECENT run — so it clears
   // on its own once the next turn starts, instead of every past failure
   // lingering below the messages forever. It can also be dismissed outright.
@@ -397,31 +347,9 @@ export function Conversation({
           />
         )}
 
-        {toolReplyReserve && (
-          <div data-qa="reply-tool-reserve">
-            <ReplySkeleton lines={1} startIndex={STREAMING_REPLY_RESERVE_LINES - 1} />
-          </div>
-        )}
-
         {!readOnly && <FanOutPanel />}
 
-        {/* The waiting reserve and the first streamed reply intentionally share
-            the same four-line geometry. When prose begins, replace the reserve
-            in the same commit instead of retaining its exiting height beside
-            the new reply: that temporary double-height made a bottom-pinned
-            transcript jump up and then back down. Keeping this presence keyed
-            to the waiting phase still gives true no-reply exits (stop/failure)
-            the normal in-flow collapse. */}
-        <AnimatePresence
-          key={awaitingReply ? "awaiting-reply" : "reply-started"}
-          initial={false}
-        >
-          {showPending && (
-            <m.div key="pending" {...transientMotion}>
-              <Pending label={activity.label} detail={activity.detail} skeleton={awaitingReply} />
-            </m.div>
-          )}
-        </AnimatePresence>
+        <ConversationActivity show={showPending} label={activity.label} detail={activity.detail} />
 
         {/* Default (sync) mode, not popLayout: transient notices collapse in
             flow so they never float over a following notice or receipt. */}
