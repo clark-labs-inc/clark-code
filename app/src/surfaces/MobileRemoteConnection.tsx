@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useSessionStore } from "../store/sessionStore";
+import { authConnection } from "../lib/auth";
 import { cloudCreds } from "../lib/cloudHistory";
 import { CODE_REMOTE_CAPABILITIES, CODE_REMOTE_PROTOCOL_VERSION, pollCodeRemoteCommands, registerCodeRemoteHost } from "../lib/mobileRemote";
 import { discoverRepositories, projectKnowledgeEnabled, syncRepositoriesUnderRoot } from "../lib/repositoryKnowledge";
@@ -18,22 +19,22 @@ export function MobileRemoteAgent() {
   const [pollingFailed, setPollingFailed] = useState(false);
   const auth = useSessionStore((state) => state.auth);
   const cwd = useSessionStore((state) => state.localSettings.cwd);
-  const commandBusyRef = useRef(false);
-  const repositoryBusyRef = useRef(false);
-  const consecutiveFailuresRef = useRef(0);
-  const retryAtRef = useRef(0);
+  const owner = codeKeyAccountBinding(auth);
+  const connection = authConnection(auth);
 
   useEffect(() => {
     setRegistrationFailed(false);
     setPollingFailed(false);
-    if (!auth) return;
-    const effectOwner = codeKeyAccountBinding(auth);
+    if (!owner) return;
+    const effectOwner = owner;
     const identity = desktopIdentity;
     const instanceId = desktopInstanceId();
     let stopped = false;
     let appVersion: Promise<string> | null = null;
-    consecutiveFailuresRef.current = 0;
-    retryAtRef.current = 0;
+    let commandBusy = false;
+    let repositoryBusy = false;
+    let consecutiveFailures = 0;
+    let retryAt = 0;
 
     const accountStillCurrent = () => {
       const current = useSessionStore.getState().auth;
@@ -51,23 +52,26 @@ export function MobileRemoteAgent() {
       const root = useSessionStore.getState().localSettings.cwd.trim();
       const refreshRepositories = root
         && projectKnowledgeEnabled(creds.accountScope)
-        && !repositoryBusyRef.current
+        && !repositoryBusy
         ? async () => {
-            repositoryBusyRef.current = true;
+            repositoryBusy = true;
             try {
               await discoverRepositories(root, creds.accountScope);
               if (stopped || !accountStillCurrent()) return;
               const currentCreds = cloudCreds(useSessionStore.getState().auth);
               if (currentCreds) await syncRepositoriesUnderRoot(currentCreds, root);
             } finally {
-              repositoryBusyRef.current = false;
+              repositoryBusy = false;
             }
           }
         : undefined;
       try {
         await publishMobileRemotePresence(
           async () => {
-            appVersion ??= getVersion();
+            appVersion ??= getVersion().catch((error) => {
+              appVersion = null;
+              throw error;
+            });
             const version = await appVersion;
             const { id: hostId, name } = await identity();
             if (stopped || !accountStillCurrent()) return;
@@ -96,14 +100,14 @@ export function MobileRemoteAgent() {
     const presenceLoop = new MobileRemotePresenceLoop(refreshPresence);
 
     const pollCommands = async () => {
-      if (stopped || !accountStillCurrent() || commandBusyRef.current) return;
-      if (navigator.onLine === false || Date.now() < retryAtRef.current) return;
+      if (stopped || !accountStillCurrent() || commandBusy) return;
+      if (navigator.onLine === false || Date.now() < retryAt) return;
       const creds = cloudCreds(useSessionStore.getState().auth);
       if (!creds) {
         setRegistrationFailed(true);
         return;
       }
-      commandBusyRef.current = true;
+      commandBusy = true;
       try {
         const { id: hostId } = await identity();
         const response = await pollCodeRemoteCommands(
@@ -130,16 +134,16 @@ export function MobileRemoteAgent() {
             ),
           );
         }
-        consecutiveFailuresRef.current = 0;
+        consecutiveFailures = 0;
         if (!stopped && accountStillCurrent()) setPollingFailed(false);
-        retryAtRef.current = 0;
+        retryAt = 0;
       } catch {
-        consecutiveFailuresRef.current += 1;
-        if (!stopped && accountStillCurrent() && consecutiveFailuresRef.current >= 3) setPollingFailed(true);
-        retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
+        consecutiveFailures += 1;
+        if (!stopped && accountStillCurrent() && consecutiveFailures >= 3) setPollingFailed(true);
+        retryAt = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailures);
         /* Remote control is a background affordance; normal desktop use continues. */
       } finally {
-        commandBusyRef.current = false;
+        commandBusy = false;
       }
     };
 
@@ -147,8 +151,8 @@ export function MobileRemoteAgent() {
     void pollCommands();
     const timer = window.setInterval(() => void pollCommands(), LOOP_INTERVAL_MS);
     const resumeAfterOutage = () => {
-      consecutiveFailuresRef.current = 0;
-      retryAtRef.current = 0;
+      consecutiveFailures = 0;
+      retryAt = 0;
       presenceLoop.refreshNow();
       void pollCommands();
     };
@@ -166,11 +170,11 @@ export function MobileRemoteAgent() {
       window.removeEventListener("focus", resumeAfterOutage);
       document.removeEventListener("visibilitychange", resumeWhenVisible);
     };
-  }, [auth, cwd]);
+  }, [owner, connection, cwd]);
 
-  if (!auth || (!registrationFailed && !pollingFailed)) return null;
+  if (!auth || connection !== "ready" || (!registrationFailed && !pollingFailed)) return null;
   return <div role="status" className="border-b border-border bg-surface px-4 py-2 text-sm text-ink">
-    This computer is not connected to your phone. Clark Code is retrying. Check your connection and account in Settings.
+    Phone access to this computer is unavailable. Clark Code is retrying.
     <button className="ml-3 underline" onClick={() => useSessionStore.getState().setSettingsOpen(true)}>Settings</button>
   </div>;
 }

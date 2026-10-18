@@ -51,6 +51,8 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   warning: null,
   dismissedFailedRuns: [],
   auth: bootAuth,
+  authReconnecting: false,
+  authReconnectError: null,
   attachments: [],
   conversations: [],
   conversationsLoading: !!bootAuth,

@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
+import { AnimatePresence, useReducedMotion } from "motion/react";
+import * as m from "motion/react-m";
 import { cn } from "../lib/cn";
+import { FADE, accessibleMotion } from "../lib/motion";
 
 export const STREAMING_REPLY_RESERVE_LINES = 4;
 const APPROXIMATE_CHARACTERS_PER_LINE = 72;
@@ -31,18 +34,27 @@ export function ReplySkeleton({
   startIndex?: number;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
+  // Pop departing placeholders out of flow: they can fade as text arrives
+  // without interpolating the answer's height or pulling a reader's viewport.
   return (
-    <div className={cn("reply-skeleton", className)} aria-hidden>
-      {Array.from({ length: lines }, (_, index) => (
-        <div className="reply-stream-line" key={index}>
-          <div
-            className={cn(
-              "skeleton reply-stream-bar",
-              SKELETON_WIDTHS[(startIndex + index) % SKELETON_WIDTHS.length],
-            )}
-          />
-        </div>
-      ))}
+    <div className={cn("reply-skeleton relative pointer-events-none", className)} aria-hidden>
+      <AnimatePresence initial={false} mode="popLayout">
+        {Array.from({ length: lines }, (_, index) => (
+          <m.div
+            {...accessibleMotion(FADE, reduce)}
+            className="reply-stream-line"
+            key={startIndex + index}
+          >
+            <div
+              className={cn(
+                "skeleton reply-stream-bar",
+                SKELETON_WIDTHS[(startIndex + index) % SKELETON_WIDTHS.length],
+              )}
+            />
+          </m.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
@@ -69,7 +81,7 @@ export function StreamingReplyFrame({
       data-streaming-reply={streaming ? "true" : "false"}
     >
       {children}
-      {placeholders > 0 && <ReplySkeleton lines={placeholders} startIndex={revealed} />}
+      <ReplySkeleton lines={placeholders} startIndex={revealed} />
     </div>
   );
 }

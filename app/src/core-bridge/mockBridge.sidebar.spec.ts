@@ -14,7 +14,7 @@ describe("MockBridge sidebar fixture", () => {
       id: workspace.id, project: workspace.path, title: "New Quick Chat",
       provider: "local", createdAt: 1, updatedAt: 1,
     }));
-    const groups = groupSidebarProjects(conversations, [], () => 0, { pinned: [], aliases: {} });
+    const groups = groupSidebarProjects(conversations, [], () => 0, { removed: [], pinned: [], aliases: {} });
     expect(groups).toHaveLength(1);
     expect(groups[0].key).toBe("quick-chats");
     expect(groups[0].convos).toHaveLength(2);

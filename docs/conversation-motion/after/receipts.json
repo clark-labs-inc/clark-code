@@ -1,0 +1,82 @@
+[
+  {
+    "label": "chromium no-preference",
+    "hover": {
+      "transform": "matrix(1.015, 0, 0, 1.015, 0, -2)",
+      "width": 322.77001953125
+    },
+    "initialWidth": 318,
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 900
+    },
+    "exitOpacity": 0.304599,
+    "restoredFocus": true,
+    "trappedFocus": true,
+    "scrollShift": 0,
+    "attachmentExit": 0.625868,
+    "errors": []
+  },
+  {
+    "label": "chromium reduce",
+    "hover": {
+      "transform": "none",
+      "width": 318
+    },
+    "initialWidth": 318,
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 900
+    },
+    "exitOpacity": 0.520912,
+    "restoredFocus": true,
+    "trappedFocus": true,
+    "scrollShift": 0,
+    "attachmentExit": 0.637899,
+    "errors": []
+  },
+  {
+    "label": "webkit no-preference",
+    "hover": {
+      "transform": "matrix(1.015, 0, 0, 1.015, 0, -2)",
+      "width": 322.77001953125
+    },
+    "initialWidth": 318,
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 900
+    },
+    "exitOpacity": 0.133281,
+    "restoredFocus": true,
+    "trappedFocus": true,
+    "scrollShift": 0,
+    "attachmentExit": 0.655446,
+    "errors": []
+  },
+  {
+    "label": "webkit reduce",
+    "hover": {
+      "transform": "none",
+      "width": 318
+    },
+    "initialWidth": 318,
+    "viewport": {
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 900
+    },
+    "exitOpacity": 0.511651,
+    "restoredFocus": true,
+    "trappedFocus": true,
+    "scrollShift": 0,
+    "attachmentExit": 0.533077,
+    "errors": []
+  }
+]

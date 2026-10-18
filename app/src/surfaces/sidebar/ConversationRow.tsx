@@ -12,7 +12,7 @@
 import { memo, useEffect, useState } from "react";
 import * as m from "motion/react-m";
 import { useReducedMotion } from "motion/react";
-import { MoreHorizontal, Loader2, MessageSquare } from "lucide-react";
+import { MoreHorizontal, Loader2, MessageSquare, Check } from "lucide-react";
 import type React from "react";
 
 import { useSessionStore } from "../../store/sessionStore";
@@ -92,13 +92,13 @@ function ConversationRowImpl({
         }}
         aria-busy={mutating || undefined}
         className={cn(
-          "group relative flex min-h-8 items-center gap-1 rounded-lg border-l-2 px-2 py-0.5 text-base transition duration-fast ease-agent",
+          "group relative flex min-h-8 items-center gap-1 rounded-lg px-2 py-1 text-sm transition duration-fast ease-agent",
           mutating && "opacity-60",
           selected
-            ? "border-accent bg-bg-tertiary text-ink"
+            ? "bg-bg-tertiary text-ink"
             : active || opening
-              ? "border-accent bg-accent-subtle text-ink"
-              : "border-transparent text-ink-secondary hover:bg-bg-hover hover:text-ink",
+              ? "bg-bg-hover text-ink"
+              : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
         )}
       >
         {editing ? (
@@ -165,6 +165,7 @@ function ConversationRowImpl({
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             title={`${c.title} — Shift-click or Shift+Arrow selects a range`}
           >
+            <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
             {mutating || opening ? (
               <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" />
             ) : streaming ? (
@@ -177,15 +178,8 @@ function ConversationRowImpl({
                 <span className="size-2 rounded-full bg-info" />
               </span>
             ) : selected ? (
-              <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
-                <span className="size-2 rounded-sm bg-accent" />
-              </span>
-            ) : (
-              <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
-                <span className={cn("size-1.5 rounded-full", active ? "bg-accent" : "bg-ink-faint/55")} />
-              </span>
-            )}
-            <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
+              <Check className="size-3.5 shrink-0 text-ink-muted" aria-hidden="true" />
+            ) : null}
           </button>
         )}
         {!editing && (
@@ -195,7 +189,7 @@ function ConversationRowImpl({
             title="Conversation actions"
             aria-label={`Actions for ${c.title}`}
             aria-haspopup="menu"
-            className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink disabled:cursor-wait"
+            className="sidebar-row-action grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink disabled:cursor-wait"
           >
             <MoreHorizontal className="size-3.5" />
           </button>

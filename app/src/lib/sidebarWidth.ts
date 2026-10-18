@@ -1,16 +1,13 @@
 // Persisted width for the resizable left conversation sidebar.
 //
-// The sidebar starts at 17rem like the old fixed layout, can be dragged
-// narrower (rows truncate) or wider (up to a stored cap), and always leaves
-// enough room for the conversation pane by clamping against the current window
-// width. Mirrors the artifact-panel width helpers in artifactPanelWidth.ts.
+// Keep navigation compact while allowing enough width for project and chat names.
 
 export const SIDEBAR_WIDTH_KEY = "agent-desktop.sidebar-width";
-export const DEFAULT_SIDEBAR_WIDTH = 272; // 17rem — the historical fixed width
+export const DEFAULT_SIDEBAR_WIDTH = 288; // 18rem
 export const MIN_SIDEBAR_WIDTH = 200;
 /** Reserved for the conversation pane when the sidebar is constrained by the window. */
 export const MIN_CONVERSATION_PANEL_WIDTH = 360;
-const MAX_STORED_SIDEBAR_WIDTH = 640;
+const MAX_STORED_SIDEBAR_WIDTH = 400;
 
 interface StorageLike {
   getItem(key: string): string | null;

@@ -318,7 +318,6 @@ pub fn run_with_product_and_context(
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::with_product(product))
         .manage(terminal::Terminals::default())

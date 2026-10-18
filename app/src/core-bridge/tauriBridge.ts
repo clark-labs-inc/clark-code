@@ -113,6 +113,11 @@ export class TauriBridge implements CoreBridge {
     };
   }
 
+  onAccountStatusChanged(handler: () => void): () => void {
+    const unlisten = listen("product-account-status", () => handler());
+    return () => { void unlisten.then((fn) => fn()); };
+  }
+
   onCloudSyncWarning(handler: (message: string) => void): () => void {
     const unlisten = listen<string>("cloud-sync-warning", (event) => handler(event.payload));
     return () => {

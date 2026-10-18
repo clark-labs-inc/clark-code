@@ -1,5 +1,6 @@
 import type { RunOutcome } from "../core-bridge/types";
 import { productModule, productName } from "../product/productModule";
+import { productAuthFailure } from "../product/productAuthFailure";
 
 // Run failures use the typed provider contract below. `humanizeError` remains
 // only for non-run errors and legacy records that predate `failure_kind`.
@@ -8,6 +9,8 @@ import { productModule, productName } from "../product/productModule";
  * provider authentication errors. They mean the desktop's two process halves
  * no longer agree about which product account owns cloud state. */
 export function isAccountReconnectError(raw?: string | null): boolean {
+  const failure = productAuthFailure(raw);
+  if (failure) return failure.code === "reconnect_required";
   const value = (raw ?? "").trim();
   return value ? productModule().errors.isAccountReconnectError(value) : false;
 }

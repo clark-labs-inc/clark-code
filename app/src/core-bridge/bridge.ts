@@ -366,6 +366,7 @@ export interface CoreBridge {
   /** The native trajectory sync hit a 401. Returns an unsubscribe fn; refreshing
    *  through native Google exchange rotates the host-owned credential. */
   onCloudAuthExpired?(handler: () => void): () => void;
+  onAccountStatusChanged?(handler: () => void): () => void;
   /** Clear the native the agent credential and account binding during sign-out. */
   /** Best-effort cloud sync failed for part of a run (the run itself keeps
    *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */

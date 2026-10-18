@@ -46,6 +46,7 @@ export interface ProjectGroup {
 export interface ProjectSidebarPreferences {
   pinned: string[];
   aliases: Record<string, string>;
+  removed: string[];
 }
 
 const MANAGED_WORKTREE_PATH = /^(.*)\.(?:agent|clark)-worktrees\/([^/]+)$/;
@@ -89,6 +90,7 @@ export function managedCheckoutRepositoryName(path: string): string | undefined 
 export const EMPTY_PROJECT_SIDEBAR_PREFERENCES: ProjectSidebarPreferences = {
   pinned: [],
   aliases: {},
+  removed: [],
 };
 
 export function loadProjectSidebarPreferences(
@@ -103,6 +105,9 @@ export function loadProjectSidebarPreferences(
     if (!raw) return EMPTY_PROJECT_SIDEBAR_PREFERENCES;
     const parsed = JSON.parse(raw) as Partial<ProjectSidebarPreferences>;
     return {
+      removed: Array.isArray(parsed.removed)
+        ? parsed.removed.filter((key): key is string => typeof key === "string")
+        : [],
       pinned: Array.isArray(parsed.pinned)
         ? parsed.pinned.filter((key): key is string => typeof key === "string")
         : [],
@@ -175,15 +180,18 @@ export function withProjectAlias(
   return { ...preferences, aliases };
 }
 
-export function withoutProjectPreferences(
+/** Removal is a local navigation preference, independent of cloud archiving.
+ * Search still finds the chats, and opening one can restore the project. */
+export function withProjectRemoved(
   preferences: ProjectSidebarPreferences,
   key: string,
+  removed: boolean,
 ): ProjectSidebarPreferences {
-  const aliases = { ...preferences.aliases };
-  delete aliases[key];
+  const remaining = preferences.removed.filter((candidate) => candidate !== key);
   return {
+    ...preferences,
     pinned: preferences.pinned.filter((candidate) => candidate !== key),
-    aliases,
+    removed: removed ? [...remaining, key] : remaining,
   };
 }
 
@@ -275,6 +283,7 @@ export function groupSidebarProjects(
       convos: [...group.convos].sort((a, b) => rank(a.id) - rank(b.id)),
     }))
     .filter((group) => {
+      if (!query && preferences.removed.includes(group.key)) return false;
       if (!query || group.convos.length > 0) return true;
       return `${group.label} ${group.title}`.toLocaleLowerCase().includes(query);
     })
@@ -291,7 +300,7 @@ export function groupSidebarProjects(
 }
 
 /** Search the same labels the sidebar displays, including project-free chats. */
-export function sidebarConversationSearchText(conversation: ConversationMeta, preferences: ProjectSidebarPreferences): string {
+export function sidebarConversationSearchText(conversation: ConversationMeta, preferences: Pick<ProjectSidebarPreferences, "aliases">): string {
   const quick = isQuickChatProject(conversation.project, conversation.id);
   const key = quick ? "quick-chats" : conversation.remoteHost
     ? remoteProjectKey(conversation.remoteHost, conversation.project)

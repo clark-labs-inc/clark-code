@@ -3,6 +3,7 @@ import { readImageDataUrl } from "../lib/docs";
 import { localPathFromHref } from "../lib/fileLinks";
 import { useSessionStore } from "../store/sessionStore";
 import { ArtifactFileActions } from "./work/ArtifactFileActions";
+import { ZoomableImage } from "./ImageLightbox";
 
 /** Resolve agent-authored local Markdown images through the same confined
  * native reader as artifact images. A failed preview stays actionable. */
@@ -42,7 +43,7 @@ export function MarkdownImage({ src, alt, className, ...props }: ImgHTMLAttribut
 
   if (!path) {
     return resolvedSrc ? (
-      <img
+      <ZoomableImage
         {...props}
         src={resolvedSrc}
         alt={title}
@@ -57,7 +58,7 @@ export function MarkdownImage({ src, alt, className, ...props }: ImgHTMLAttribut
   return (
     <figure data-local-image={path} className="my-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/40">
       {resolvedSrc && !failed ? (
-        <img
+        <ZoomableImage
           {...props}
           src={resolvedSrc}
           alt={title}

@@ -16,6 +16,33 @@ paid provider runs are opt-in and require explicit authorization.
 6. Keep typed receipts and first failures; never infer success from UI state or
    a process exit alone.
 
+## Conversation motion — 2026-10-17
+
+`node harness/conversation-motion.mjs` exercises the actual UI with synthetic
+local conversations in Chromium and WebKit, each with normal and reduced
+motion. All four configurations passed: image hover policy, full-viewport
+viewer geometry, keyboard focus containment/return, viewer and final-attachment
+exit fades, Markdown/generated-image viewing, zero transcript displacement,
+and zero page errors. Retained [before/after GIFs, videos, receipts, and review
+notes](docs/conversation-motion/README.md) document the visual conclusions.
+The baseline exposed a viewer trapped by a transformed message row; the body
+portal fixes that boundary.
+
+Rendering-stability and workspace-navigation acceptance passed all four
+browser/motion configurations. The existing artifact-delivery lane passed its
+six image/PDF/download checks. The focused motion/message suite passed 43 tests;
+frozen install, typecheck, and production build passed. The full frontend suite
+initially passed 844 tests (3 skipped); a subsequent run during concurrent auth
+edits passed 843 and failed the unrelated cloud-lifecycle reconnect-state
+assertion. Foundation strict Clippy, 802 nextest tests (8 skipped; run
+`8188b912-bc33-4eee-ae29-8a8c539f27e7`), and core WASM check passed.
+Workspace formatting remains blocked by missing `src-tauri/src/product/tests.rs`.
+
+The canonical unsigned launcher built and started the exact local development
+executable. Native motion interaction and packaged/Windows/Linux behavior were
+not qualified. These are deterministic visual and interaction receipts, not
+frame-rate benchmarks or hosted-model evidence.
+
 ## Mobile permission validation — 2026-10-11
 
 The focused permission validation and Desktop-store parity gate passed 15/15
@@ -188,6 +215,36 @@ conversation read through the tool, real sleep/lock/restart, and alternate-tool
 isolation remain **not run**. User-assisted acceptance steps and schema limits
 are in [`crates/desktop-integrations/README.md`](crates/desktop-integrations/README.md).
 Do not promote deterministic receipts into a live iMessage claim.
+
+## Sidebar refresh and local project removal — 2026-10-17
+
+The sidebar now uses one neutral New chat action, on-demand search, a separate
+Add project chooser, plain folder/chat rows, hover/focus actions, and a compact
+288px default width (400px cap, including older persisted oversized widths).
+Worktree actions are grouped in the project menu.
+
+Remove project is an account-scoped local navigation preference. It no longer
+starts an unawaited cloud archive operation: active chats and files are retained,
+removed projects stay hidden when cloud history refreshes, and search can recover
+their chats. Choosing a folder or opening a chat restores its project. Archive
+all chats remains a separate cloud mutation.
+
+Retained [design QA and interaction conclusions](design-qa.md) and
+[desktop](docs/sidebar-refresh/01-desktop.png) /
+[narrow-window](docs/sidebar-refresh/02-narrow.png) captures use synthetic sidebar
+fixtures and the mock bridge in Codex's in-app browser. Verified populated and
+active-project removal, persistence after reload, search/reopen recovery,
+creation controls, rail search, menu keyboard focus, and the 600px drawer.
+The projectSidebar preference tests cover removal persistence despite unarchived
+chats and remembered folders, account isolation, exact SSH-root identity,
+recovery, and legacy/malformed preference loading.
+
+Frontend frozen install, typecheck, production build, and 844 tests passed
+(3 skipped). Rust format, strict four-crate Clippy, 802 nextest tests (8 skipped;
+run 8eacf5fc-ce8b-43a5-aa35-c81845a222fb), and core WASM check passed.
+The unsigned canonical launcher compiled and started the local debug executable.
+Native interaction, production auth failure, packaged/branded release, and live
+SSH were not qualified. No hosted-model calls or release deployment occurred.
 
 ## Sidebar navigation audit — 2026-09-04
 
@@ -458,3 +515,35 @@ its shared cloud project metadata. Rust format, strict Clippy, the 801-test thre
 nextest run, and agent-core WASM check passed. This is deterministic mock
 evidence; the other machine's account index, native picker, and packaged
 WebView remain unverified.
+
+
+## Native account recovery and phone presence — 2026-10-17
+
+The account boundary now carries explicit native failure codes for expired
+sessions, rejected credentials, service outages, cancellation, and account
+changes. Same-account renewal uses a credential/generation compare-and-write;
+it can complete inside an admitted cloud read without upgrading that read to
+an account lifecycle write lock. A stale completion cannot overwrite a newer
+session or restore an explicitly signed-out initial sign-in.
+
+Renderer recovery remains single-flight and replays an expired operation only
+once. Temporary outages retain offline local access without opening a browser;
+interactive reconnect preserves the active conversation, running ids, and draft.
+Pending, cancellation, and retry errors appear in the workspace and account
+menu. Phone command polling owns its busy/backoff state per account connection,
+so an old request's completion cannot change the replacement loop's state.
+
+Validation: frontend tests pass (849 passed, 3 skipped), typecheck and production
+build pass. Native host tests pass (155/155), provider/core Nextest passes
+(802 passed, 8 skipped), strict foundation Clippy, format check, and agent-core
+WASM check pass. Account ownership, outage, cancellation-before-browser,
+concurrent reconnect, exact replay, and live-work preservation have deterministic
+regressions in `sessionStore.authActions.spec.ts`, `productBridge.spec.ts`, and
+`src-tauri/src/product/tests.rs`.
+
+The [component preview](docs/account-recovery/cancelled.png) was exercised through
+browser controls with synthetic state. It proves the visible cancel/retry state
+and editable retained draft, not a live native browser sign-in. Branded identity
+provider, session transport, and product validation are recorded in the private
+product catalog. These local source checks do not verify a packaged desktop or
+physical Android build.

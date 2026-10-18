@@ -18,7 +18,7 @@ describe("sidebar project actions", () => {
   it("finds quick chats and aliases using their visible sidebar labels", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     const conversation = { id, title: "Explain recursion", provider: "local", project: `/mock/.agent/workspace/${id}`, createdAt: 1, updatedAt: 1 };
-    expect(sidebarConversationSearchText(conversation, { pinned: [], aliases: {} })).toContain("Quick chats");
-    expect(sidebarConversationSearchText({ ...conversation, project: "/work/api" }, { pinned: [], aliases: { "p:/work/api": "Backend" } })).toContain("Backend");
+    expect(sidebarConversationSearchText(conversation, { aliases: {} })).toContain("Quick chats");
+    expect(sidebarConversationSearchText({ ...conversation, project: "/work/api" }, { aliases: { "p:/work/api": "Backend" } })).toContain("Backend");
   });
 });

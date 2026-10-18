@@ -1,0 +1,14 @@
+[
+  {
+    "label": "chromium no-preference",
+    "hover": {
+      "transform": "none",
+      "width": 318
+    },
+    "initialWidth": 318,
+    "exitOpacity": 0.304599,
+    "restoredFocus": false,
+    "scrollShift": 0,
+    "errors": []
+  }
+]

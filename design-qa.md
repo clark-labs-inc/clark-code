@@ -248,3 +248,102 @@ No actionable P0, P1, or P2 visual differences remain. The serif heading and com
 - [x] Run frontend and foundation checks.
 
 final result: passed
+
+---
+
+# Clark Code sidebar refresh — 2026-10-17
+
+final result: passed
+
+The target is the user's request for a sidebar **more like Codex**, applied to the
+existing Clark Code product. It is an adaptation of the supplied navigation
+reference, not a pixel-for-pixel replacement of the full application.
+
+## Visual evidence
+
+- Source visual truth: user-supplied Screenshot 2026-10-17 at 12.27.35 PM.png,
+  originally under /var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_Gp6bUZ/
+  (the actual filename uses a narrow no-break space before PM).
+- Source pixels: 970 × 1894; normalized to 485 × 947 for the comparison.
+  This assumes the supplied macOS capture is at 2× density.
+- Implementation: [desktop sidebar and menu](docs/sidebar-refresh/01-desktop.png),
+  560 × 720 crop of the default 1280 × 720 browser viewport at 1× density.
+- Responsive evidence: [600 × 800 drawer](docs/sidebar-refresh/02-narrow.png).
+- Full-view comparison: source and implementation were placed side by side and
+  opened together in target/sidebar-refresh/comparison.png. That ignored
+  composite is disposable; this report records the conclusion.
+- Focused review: the readable paired capture includes the title/New chat
+  controls, project rows, indented conversations, selected chat, and open project
+  menu. Synthetic project names differ from the supplied reference. The source
+  is a cropped tall navigation panel; the implementation intentionally uses a
+  compact 288px default sidebar, capped at 400px.
+
+## Findings and accepted choices
+
+No remaining P0/P1/P2 findings in the scoped sidebar.
+
+- Typography: retained the existing DM Sans UI font. Quiet 14px folder/chat
+  labels, regular weight, one-line ellipsis, and 32–36px rows follow the
+  reference's hierarchy. The title remains Clark Code.
+- Spacing: one New chat row; search is a header icon that reveals a field.
+  Folder rows expand inline; idle dots, visible counts, tree rules, and accent
+  selection borders were removed. Actions appear on hover or keyboard focus
+  and remain visible on touch. The sidebar retains scrolling and resize controls.
+- Colors: retained Clark Code's existing dark/light semantic tokens. Neutral
+  hover and selected rows replace the prominent purple creation button.
+  Dark mode was inspected visually; light mode was inspected during the initial
+  reproduction. This is not measured contrast or full accessibility compliance.
+- Assets: existing Lucide library icons; no raster artwork is required.
+- Copy: New chat and Add project have separate purposes. Worktree operations
+  live behind one menu entry. Remove explains that chats stay searchable and
+  disk files are unchanged.
+- Expected differences: account menu and Archived remain Clark features; the
+  Codex pet, notifications, and custom sections are outside this request.
+
+## Interaction verification
+
+Performed in Codex's in-app browser with the development sidebar fixture and
+mock bridge; no hosted prompts or real project removal:
+
+1. Remove a populated project: row disappears immediately; chat archive count
+   remains unchanged. Reload: removed row stays absent.
+2. Search for the removed project's chats, open a result, and close search:
+   the project returns and the conversation opens.
+3. Remove the currently open project: its row disappears while its conversation
+   log remains mounted.
+4. Collapse the sidebar, invoke Search from the rail: expanded search receives
+   focus. Escape closes search and returns focus to the search control.
+5. Add project opens the New session folder/SSH chooser, including from a live
+   conversation. Cancel leaves that conversation in place.
+6. New chat creates a distinct mock Quick Chat workspace and focuses its composer.
+7. At 600px width, Expand sidebar opens the navigation drawer; Escape closes it.
+8. ArrowDown moves from Pin project to Rename project; Escape returns focus to
+   the originating project action button.
+9. Final clean-load console inspection found no errors. Earlier temporary HMR
+   import errors during extraction were resolved by the complete source and reload.
+
+## Comparison and repair history
+
+- Initial capture: permanent purple CTA, duplicate creation rows, counts, dots,
+  tree rules, and always-visible actions competed with chat titles. Replaced
+  them with the reference's neutral rows and on-demand controls.
+- First revised menu still exposed two worktree operations on the main level.
+  Consolidated these behind Worktrees; the saved desktop capture shows the
+  revised six-item menu.
+- Keyboard check found focus on BODY immediately after Escape. Moved focus
+  restoration to the frame after menu unmount; repeated DOM inspection verified
+  BUTTON / Project actions for northstar.
+- Rail search state originally belonged to a header that unmounts on expansion.
+  Moved it to Sidebar; browser check confirmed the field opens from the rail.
+
+## Validation limits
+
+Frontend typecheck, production build, 844 tests passed (3 skipped). Rust format,
+strict four-crate Clippy, 802 nextest tests (8 skipped), and agent-core WASM check
+passed. The unsigned canonical launcher compiled and started
+target/debug/clark-code. The computer-use adapter could not bind that raw
+development executable, so native interactions remain unverified. The installed
+branded release was not replaced; native OS folder picking, live SSH, cloud
+authentication, and release packaging were not exercised.
+
+Implementation checklist: complete. No P3 changes are required for this request.

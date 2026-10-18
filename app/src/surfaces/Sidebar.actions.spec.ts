@@ -6,12 +6,11 @@ import headerSource from "./sidebar/SidebarHeader.tsx?raw";
 import conversationRowSource from "./sidebar/ConversationRow.tsx?raw";
 
 describe("Sidebar creation actions", () => {
-  it("uses one folder chooser and a separate project-free quick chat action", () => {
-    expect(headerSource).toContain('aria-label="New session"');
-    expect(headerSource).toContain('useSpecialistStore.getState().close(); chooseProject(true)');
-    expect(headerSource).toContain('aria-label="New quick chat"');
+  it("uses a single New chat action and a separate Add project control", () => {
+    expect(headerSource).toContain('aria-label="New chat"');
     expect(headerSource).toContain("await quickChat()");
-    expect(headerSource).not.toContain('aria-label="New project"');
+    expect(sidebarSource).toContain('aria-label="Add project"');
+    expect(sidebarSource).toContain("setNewProjectOpen(true)");
   });
 
   it("renders a blue finished-not-yet-visited dot from unseen open rows", () => {

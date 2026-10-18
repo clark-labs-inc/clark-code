@@ -408,6 +408,21 @@ impl RuntimeRegistry {
         generation
     }
 
+    /// A completed renewal may publish only into the generation it observed.
+    /// A rejected late completion must not wake delivery as if a token rotated.
+    pub(crate) async fn cloud_account_generation_compare_write(
+        &self,
+        expected: u64,
+    ) -> Option<OwnedRwLockWriteGuard<Option<CloudAccountState>>> {
+        let generation = self.cloud_account.clone().write_owned().await;
+        if self.cloud_account_generation() != expected {
+            return None;
+        }
+        self.cloud_account_generation.fetch_add(1, Ordering::SeqCst);
+        Some(generation)
+    }
+
+    #[cfg(test)]
     pub(crate) async fn set_cloud_account(&self, account: Option<CloudAccountState>) {
         *self.cloud_account_generation_write().await = account;
     }

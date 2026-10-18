@@ -11,7 +11,7 @@ import {
   withProjectAlias,
   withProjectPinned,
   withPinnedProjectMoved,
-  withoutProjectPreferences,
+  withProjectRemoved,
 } from "./projectSidebar";
 
 class MemoryStorage {
@@ -52,7 +52,7 @@ describe("project sidebar preferences", () => {
         [conversation("managed", path)],
         [],
         () => 0,
-        { pinned: [], aliases: {} },
+        { removed: [], pinned: [], aliases: {} },
       )[0]?.label,
     ).toBe("session-1");
     expect(
@@ -60,7 +60,7 @@ describe("project sidebar preferences", () => {
         [conversation("managed", path)],
         [],
         () => 0,
-        { pinned: [], aliases: {} },
+        { removed: [], pinned: [], aliases: {} },
       )[0]?.repositoryLabel,
     ).toBe("example-desktop");
   });
@@ -71,7 +71,7 @@ describe("project sidebar preferences", () => {
     expect(projectDisplayTitle(path)).toContain("Isolated checkout of clark-twitter");
   });
 
-  it("persists pins and aliases and clears both when a project is removed", () => {
+  it("persists pins and aliases and unpins a removed project", () => {
     const storage = new MemoryStorage();
     let preferences = loadProjectSidebarPreferences(storage);
     preferences = withProjectPinned(preferences, "p:/repo/two", true);
@@ -79,22 +79,26 @@ describe("project sidebar preferences", () => {
     saveProjectSidebarPreferences(preferences, storage);
 
     expect(loadProjectSidebarPreferences(storage)).toEqual({
+      removed: [],
       pinned: ["p:/repo/two"],
       aliases: { "p:/repo/two": "Second repo" },
     });
-    expect(withoutProjectPreferences(preferences, "p:/repo/two")).toEqual({
+    expect(withProjectRemoved(preferences, "p:/repo/two", true)).toEqual({
+      removed: ["p:/repo/two"],
       pinned: [],
-      aliases: {},
+      aliases: { "p:/repo/two": "Second repo" },
     });
   });
 
   it("uses the same exact pinned-project movement for drag and menu actions", () => {
     const preferences = {
+      removed: [],
       pinned: ["p:/repo/one", "p:/repo/two", "p:/repo/three"],
       aliases: { "p:/repo/two": "Second repo" },
     };
 
     expect(withPinnedProjectMoved(preferences, "p:/repo/three", 0)).toEqual({
+      removed: [],
       pinned: ["p:/repo/three", "p:/repo/one", "p:/repo/two"],
       aliases: preferences.aliases,
     });
@@ -109,16 +113,18 @@ describe("project sidebar preferences", () => {
   it("keeps sidebar preferences separate between accounts", () => {
     const storage = new MemoryStorage();
     saveProjectSidebarPreferences(
-      { pinned: ["p:/previous"], aliases: { "p:/previous": "Previous" } },
+      { removed: [], pinned: ["p:/previous"], aliases: { "p:/previous": "Previous" } },
       storage,
       "id:previous",
     );
 
     expect(loadProjectSidebarPreferences(storage, "id:new")).toEqual({
+      removed: [],
       pinned: [],
       aliases: {},
     });
     expect(loadProjectSidebarPreferences(storage, "id:previous")).toEqual({
+      removed: [],
       pinned: ["p:/previous"],
       aliases: { "p:/previous": "Previous" },
     });
@@ -130,7 +136,7 @@ describe("project sidebar preferences", () => {
       conversations,
       ["/repo/two", "/repo/one"],
       (id) => (id === "one" ? 0 : 1),
-      { pinned: ["p:/repo/two"], aliases: { "p:/repo/two": "Second repo" } },
+      { removed: [], pinned: ["p:/repo/two"], aliases: { "p:/repo/two": "Second repo" } },
     );
 
     expect(groups.map((group) => [group.label, group.convos.length])).toEqual([
@@ -145,7 +151,7 @@ describe("project sidebar preferences", () => {
       [remoteConversation("remote", "ubuntu@cpu", "/home/ubuntu/project")],
       [],
       () => 0,
-      { pinned: [], aliases: { [key]: "Build server" } },
+      { removed: [], pinned: [], aliases: { [key]: "Build server" } },
     );
 
     expect(groups[0]).toMatchObject({
@@ -164,7 +170,7 @@ describe("project sidebar preferences", () => {
       ],
       [],
       (id) => id === "api" ? 0 : 1,
-      { pinned: [], aliases: {} },
+      { removed: [], pinned: [], aliases: {} },
     );
 
     expect(groups).toHaveLength(2);
@@ -181,7 +187,7 @@ describe("project sidebar preferences", () => {
       [conversation(id, path)],
       [],
       () => 0,
-      { pinned: [], aliases: {} },
+      { removed: [], pinned: [], aliases: {} },
     );
 
     expect(isQuickChatProject(path, id)).toBe(true);
@@ -196,4 +202,35 @@ describe("project sidebar preferences", () => {
     expect(isQuickChatProject(`/home/another-user/.agent/workspace/${id}`, id)).toBe(true);
     expect(isQuickChatProject(`/Users/alex/.agent/workspace/different-id`, id)).toBe(false);
   });
+  it("keeps removal after reload even when unarchived cloud chats and remembered folders return", () => {
+    const storage = new MemoryStorage();
+    const chats = [conversation("one", "/repo/one")];
+    const removed = withProjectRemoved(loadProjectSidebarPreferences(storage, "id:one"), "p:/repo/one", true);
+    saveProjectSidebarPreferences(removed, storage, "id:one");
+    const restored = loadProjectSidebarPreferences(storage, "id:one");
+
+    expect(groupSidebarProjects(chats, ["/repo/one"], () => 0, restored)).toEqual([]);
+    expect(chats[0].archived).toBeUndefined();
+    expect(groupSidebarProjects(chats, [], () => 0, loadProjectSidebarPreferences(storage, "id:two"))).toHaveLength(1);
+    expect(groupSidebarProjects(chats, [], () => 0, restored, "one")[0].convos).toEqual(chats);
+    expect(groupSidebarProjects(chats, [], () => 0, withProjectRemoved(restored, "p:/repo/one", false))).toHaveLength(1);
+  });
+
+  it("removes only the selected remote root and preserves aliases for recovery", () => {
+    const chats = [remoteConversation("api", "cpu", "/srv/api"), remoteConversation("web", "cpu", "/srv/web")];
+    const key = remoteProjectKey("cpu", "/srv/api");
+    const initial = withProjectAlias(loadProjectSidebarPreferences(), key, "Backend");
+    const removed = withProjectRemoved(initial, key, true);
+    expect(groupSidebarProjects(chats, [], () => 0, removed).map((g) => g.label)).toEqual(["web"]);
+    expect(groupSidebarProjects(chats, [], () => 0, removed, "Backend").map((g) => g.label)).toContain("Backend");
+  });
+
+  it("migrates existing preferences without a removal list and rejects malformed entries", () => {
+    const storage = new MemoryStorage();
+    storage.setItem("agent-desktop:project-sidebar", JSON.stringify({ pinned: [], aliases: {}, removed: [null, 3, "p:/repo"] }));
+    expect(loadProjectSidebarPreferences(storage).removed).toEqual(["p:/repo"]);
+    storage.setItem("agent-desktop:project-sidebar", JSON.stringify({ pinned: ["p:/repo"], aliases: {} }));
+    expect(loadProjectSidebarPreferences(storage)).toEqual({ pinned: ["p:/repo"], aliases: {}, removed: [] });
+  });
+
 });

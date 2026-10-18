@@ -77,6 +77,22 @@ Spread the full preset, then use the helpers for the parts that vary:
 | `EXPAND` | `{ opacity: 0, y: 6, height: 0 }` | `{ opacity: 0, height: 0 }` | base · inOut |
 | `OVERLAY` | `{ opacity: 0 }` | `{ opacity: 0 }` | fast · out |
 | `DIALOG` | `{ opacity: 0, translateY(6px) scale(0.99) }` | `{ opacity: 0, translateY(3px) scale(0.995) }` | base · out |
+| `IMAGE_REVEAL` | fade + 6px rise, scale 0.985 | fade + 3px drop, scale 0.99 | slow entry, fast exit |
+
+`IMAGE_INTERACTION` gives image thumbnails a 2px lift and 1.015 scale on hover,
+with a 0.99 press scale. Reduced motion omits these gestures. `ZoomableImage`
+owns the same interaction for user attachments, Markdown images, generated
+artifacts, and image previews in the artifact workspace.
+
+The image viewer portals to `document.body`: a message entry transform must
+never become the containing block for its fixed overlay. The scrim, media,
+and toolbar have coordinated presence; closing makes the viewer inert during
+its fade, then restores focus to the triggering thumbnail without scrolling.
+
+Reply skeleton lines fade out of flow using keyed `popLayout` presence. Their
+disappearance never interpolates the answer's height. Composer attachments
+use position-only layout animation, and the rail retains presence even when
+its last item is removed. See the [recorded motion review](conversation-motion/README.md).
 
 `EXPAND_REDUCED` is the reduced-motion counterpart to `EXPAND`: entry and
 exit use brief opacity-only fades without geometry animation. Use it with the same ternary as the transients in

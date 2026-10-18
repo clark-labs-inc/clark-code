@@ -7,6 +7,7 @@
 use agent_core::{Provider, ProviderConfig};
 use async_trait::async_trait;
 use code_host::CodingSessionExtensionRecipe;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +18,38 @@ use zeroize::Zeroizing;
 use crate::runtime_registry::{AccountKey, CloudAccountState, SessionKey};
 use crate::state::AppState;
 use crate::ProviderInfo;
+
+/// Stable native/renderer authentication failure contract.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductAuthFailureCode {
+    SessionExpired,
+    ReconnectRequired,
+    ServiceUnavailable,
+    Cancelled,
+    AccountChanged,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ProductAuthFailure {
+    pub code: ProductAuthFailureCode,
+    pub message: String,
+}
+
+impl ProductAuthFailure {
+    pub fn new(code: ProductAuthFailureCode, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for ProductAuthFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&serde_json::to_string(self).map_err(|_| std::fmt::Error)?)
+    }
+}
 
 pub struct ProductRequestContext<'a> {
     pub app: &'a AppHandle,
@@ -192,36 +225,29 @@ impl ProductRequestContext<'_> {
         self.state.credentials.retained_auth().await
     }
 
-    pub async fn bind_account(
+    pub fn account_generation(&self) -> u64 {
+        self.state.runtime_registry.cloud_account_generation()
+    }
+
+    pub async fn commit_account(
         &self,
+        expected_session: Option<&str>,
+        expected_generation: u64,
         service_base: String,
         account_id: String,
         bearer: String,
         retained_session: String,
     ) -> Result<(), String> {
-        let account = AccountKey::new(account_id)?;
-        let _switch = self.state.account_lifecycle.write().await;
-        if let Some(active) = self.state.runtime_registry.cloud_account().await {
-            if active.account != account || active.rest_base != service_base {
-                return Err(
-                    "account_mismatch: sign out before connecting a different product account"
-                        .into(),
-                );
-            }
-        }
-        self.state
-            .credentials
-            .set_retained_auth(retained_session)
-            .await?;
-        self.state
-            .runtime_registry
-            .set_cloud_account(Some(CloudAccountState {
-                rest_base: service_base,
-                account,
-                token: Zeroizing::new(bearer),
-            }))
-            .await;
-        Ok(())
+        commit_account_session(
+            self.state,
+            expected_session,
+            expected_generation,
+            service_base,
+            account_id,
+            bearer,
+            retained_session,
+        )
+        .await
     }
 
     pub async fn clear_account(&self) -> Result<(), String> {
@@ -266,6 +292,56 @@ impl ProductRequestContext<'_> {
         }
         Ok(())
     }
+}
+
+async fn commit_account_session(
+    state: &AppState,
+    expected_session: Option<&str>,
+    expected_generation: u64,
+    service_base: String,
+    account_id: String,
+    bearer: String,
+    retained_session: String,
+) -> Result<(), String> {
+    let account = AccountKey::new(account_id)?;
+    // Refresh can run inside an admitted cloud read. Use the atomic
+    // account generation (also held by sign-out), never upgrade that read
+    // lease to a lifecycle write lock across network recovery.
+    let account_changed = || {
+        ProductAuthFailure::new(
+            ProductAuthFailureCode::AccountChanged,
+            "The account changed while reconnecting. Retry for the current account.",
+        )
+        .to_string()
+    };
+    let mut generation = state
+        .runtime_registry
+        .cloud_account_generation_compare_write(expected_generation)
+        .await
+        .ok_or_else(account_changed)?;
+    let current_session = state.credentials.retained_auth().await?;
+    if current_session.as_deref().map(|raw| raw.as_str()) != expected_session {
+        return Err(account_changed());
+    }
+    if let Some(active) = generation.as_ref() {
+        if active.account != account || active.rest_base != service_base {
+            return Err(ProductAuthFailure::new(
+                ProductAuthFailureCode::AccountChanged,
+                "Sign out before connecting a different product account.",
+            )
+            .to_string());
+        }
+    }
+    state
+        .credentials
+        .set_retained_auth(retained_session)
+        .await?;
+    *generation = Some(CloudAccountState {
+        rest_base: service_base,
+        account,
+        token: Zeroizing::new(bearer),
+    });
+    Ok(())
 }
 
 #[async_trait]
@@ -398,3 +474,6 @@ impl ProductIntegration for NeutralProduct {
         Err("this build has no product integration".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;

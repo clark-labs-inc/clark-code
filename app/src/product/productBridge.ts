@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { productAuthFailure } from "./productAuthFailure";
 
 const PRODUCT_OPERATION = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const AUTH_CONTROL_OPERATIONS = new Set([
   "account.load",
   "account.refresh",
   "account.sign_in",
+  "account.cancel_sign_in",
   "account.sign_out",
 ]);
 
@@ -24,13 +26,10 @@ function errorText(error: unknown): string {
 }
 
 export function isProductAuthExpiredError(error: unknown): boolean {
+  const failure = productAuthFailure(error);
+  if (failure) return failure.code === "session_expired";
   const message = errorText(error);
-  return (
-    /\b401\b/.test(message) ||
-    /Unauthorized/i.test(message) ||
-    /ExpiredSignature/i.test(message) ||
-    /JWT validation failed/i.test(message)
-  );
+  return /\b401\b/.test(message);
 }
 
 /** Install the app-owned refresh boundary. Product calls retain no credential

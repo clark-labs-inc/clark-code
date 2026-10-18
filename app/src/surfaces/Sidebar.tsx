@@ -1,38 +1,26 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import {
-  Archive, Trash2, X,
-} from "lucide-react";
+import { FolderPlus } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { liveSessions, openRemote } from "../store/sessionStore.runtime";
-import { projectName, removeRecentProject } from "../lib/localAgent";
+import { liveSessions } from "../store/sessionStore.runtime";
+import { removeRecentProject } from "../lib/localAgent";
 import { codeKeyAccountBinding } from "../lib/account";
 import { useSidebarDrawer } from "./sidebar/useSidebarDrawer";
-import {
-  DEFAULT_SIDEBAR_WIDTH,
-  MIN_SIDEBAR_WIDTH,
-  constrainSidebarWidth,
-  loadSidebarWidth,
-  saveSidebarWidth,
-} from "../lib/sidebarWidth";
+import { MIN_SIDEBAR_WIDTH } from "../lib/sidebarWidth";
+import { useProjectSidebarPreferences } from "./sidebar/useProjectSidebarPreferences";
+import { useSidebarResize } from "./sidebar/useSidebarResize";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { stableProjectOrder, stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
-import { getBridge } from "../core-bridge/bridge";
-import { openProjectPath } from "../lib/openPath";
 import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
 import {
   groupSidebarProjects,
   sidebarConversationSearchText,
-  loadProjectSidebarPreferences,
-  saveProjectSidebarPreferences,
-  withProjectAlias,
-  withProjectPinned,
   withPinnedProjectMoved,
-  withoutProjectPreferences,
+  withProjectRemoved,
+  remoteProjectKey,
   type ProjectGroup,
-  type ProjectSidebarPreferences,
 } from "../lib/projectSidebar";
 import {
   adjacentConversationId,
@@ -44,18 +32,13 @@ import {
   DUR,
   EXPAND,
   EXPAND_REDUCED,
-  RISE,
   RISE_SMALL,
   accessibleMotion,
   staggeredTransition,
 } from "../lib/motion";
 import { ProfileMenu } from "./ProfileMenu";
-import {
-  ProjectActionsMenu,
-  ProjectHeader,
-  type ProjectMoveDestination,
-  type ProjectMenuPosition,
-} from "./ProjectActionsMenu";
+import { ProjectHeader } from "./ProjectHeader";
+import { SidebarProjectMenu, type SidebarProjectMenuState } from "./sidebar/SidebarProjectMenu";
 import { ProjectDragAndDrop, type ProjectDropEdge } from "./ProjectDragAndDrop";
 import { ConversationRow } from "./sidebar/ConversationRow";
 import { SidebarArchive } from "./sidebar/SidebarArchive";
@@ -64,6 +47,7 @@ import { newConversation } from "./sidebar/newSession";
 import { useSpecialistStore } from "../store/specialistStore";
 import { SpecialistNavigation } from "./specialists/SpecialistNavigation";
 import { ConversationContextMenu } from "./sidebar/ConversationContextMenu";
+import { SidebarSelectionToolbar } from "./sidebar/SidebarSelectionToolbar";
 import { SidebarHeader } from "./sidebar/SidebarHeader";
 import { announce } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 
@@ -72,25 +56,6 @@ interface SidebarScrollAnchor {
   offset: number;
   order: string[];
   index: number;
-}
-
-function projectMoveDestinations(
-  pinnedGroups: ProjectGroup[],
-  currentKey: string,
-  pinnedKeys: string[],
-): ProjectMoveDestination[] {
-  const currentIndex = pinnedKeys.indexOf(currentKey);
-  if (currentIndex < 0) return [];
-  const remainingKeys = pinnedKeys.filter((key) => key !== currentKey);
-  return [
-    { index: 0, label: "First", current: currentIndex === 0 },
-    ...pinnedGroups
-      .filter((group) => group.key !== currentKey)
-      .map((group) => {
-        const index = remainingKeys.indexOf(group.key) + 1;
-        return { index, label: `After ${group.label}`, current: index === currentIndex };
-      }),
-  ];
 }
 
 
@@ -113,18 +78,12 @@ export function Sidebar() {
   // blue "finished, not yet visited" dots.
   const unseenWorkIds = useSessionStore((s) => s.unseenWorkIds);
   const defaultProject = useSessionStore((s) => s.localSettings.cwd);
-  const localSettings = useSessionStore((s) => s.localSettings);
   const flashNotice = useSessionStore((s) => s.flashNotice);
   const selectProvider = useSessionStore((s) => s.selectProvider);
   const setProjectMode = useSessionStore((s) => s.setProjectMode);
   const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const setProjectFolder = useSessionStore((s) => s.setProjectFolder);
   const setSshOpen = useSessionStore((s) => s.setSshOpen);
-  const openProjectTerminalAction = useSessionStore((s) => s.openProjectTerminal);
-  const openProjectTerminal = async (path?: string) => {
-    useSpecialistStore.getState().close();
-    await openProjectTerminalAction(path);
-  };
   const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
   const recentProjects = useSessionStore((s) => s.recentProjects);
   const openConversation = useSessionStore((s) => s.openConversation);
@@ -139,20 +98,14 @@ export function Sidebar() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const finishRename = useCallback(() => setRenameId(null), []);
   const [filter, setFilter] = useState("");
-  const [expandedProjectKeys, setExpandedProjectKeys] = useState<Set<string>>(
-    () => new Set(["quick-chats"]),
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(
+    () => new Set(),
   );
   const [archivedOpen, setArchivedOpen] = useState(false);
-  useEffect(() => { if (filter.trim()) setArchivedOpen(true); }, [filter]);
   const [deleteConfirming, setDeleteConfirming] = useState(false);
-  const [projectPreferences, setProjectPreferences] = useState<ProjectSidebarPreferences>(
-    () => loadProjectSidebarPreferences(undefined, accountScope),
-  );
-  const [projectMenu, setProjectMenu] = useState<{
-    group: ProjectGroup;
-    position: ProjectMenuPosition;
-    trigger: HTMLButtonElement;
-  } | null>(null);
+  const { projectPreferences, commitProjectPreferences, revealProject } = useProjectSidebarPreferences(accountScope, defaultProject, conversations, navigatedConversationId);
+  const [projectMenu, setProjectMenu] = useState<SidebarProjectMenuState | null>(null);
   // The right-click menu: positioned at the cursor; acts on the selection when
   // the right-clicked row is in it, else just that row.
   const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
@@ -167,93 +120,13 @@ export function Sidebar() {
   const handledMutationFocusRef = useRef<number | null>(null);
   const deleteConfirmRef = useRef<HTMLButtonElement>(null);
   const reduceMotion = useReducedMotion();
-  // The conversation sidebar is horizontally resizable; the width persists per
-  // window and is clamped so the conversation pane keeps a usable minimum.
-  const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth());
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-  const [resizingSidebar, setResizingSidebar] = useState(false);
   const drawer = useSidebarDrawer(navigatedConversationId);
   const asideRef = drawer.ref;
-  const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
-  const sidebarDoubleClickRef = useRef<{ time: number; x: number } | null>(null);
-
-  const resizeSidebar = (clientX: number) => {
-    const left = asideRef.current?.getBoundingClientRect().left ?? 0;
-    setSidebarWidth(constrainSidebarWidth(clientX - left, window.innerWidth));
-  };
-  const finishSidebarResize = () => {
-    setResizingSidebar(false);
-    setSidebarWidth((current) => {
-      const constrained = constrainSidebarWidth(current, window.innerWidth);
-      saveSidebarWidth(constrained);
-      return constrained;
-    });
-  };
-  const handleSidebarResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    // preventDefault on mousedown suppresses the browser's dblclick (Chromium),
-    // so detect the double-click here: a repeat press at nearly the same x
-    // within the double-click window resets to the default width.
-    const now = Date.now();
-    const previous = sidebarDoubleClickRef.current;
-    sidebarDoubleClickRef.current = { time: now, x: event.clientX };
-    if (previous && now - previous.time < 400 && Math.abs(event.clientX - previous.x) <= 4) {
-      setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-      saveSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-      return;
-    }
-    sidebarResizeCleanupRef.current?.();
-    setResizingSidebar(true);
-    // Only resize once the pointer actually moves: a plain click (or a second
-    // click within the double-click window) must not shift the width.
-    let lastX = event.clientX;
-    const move = (moveEvent: MouseEvent) => {
-      moveEvent.preventDefault();
-      if (Math.abs(moveEvent.clientX - lastX) <= 1) return;
-      lastX = moveEvent.clientX;
-      resizeSidebar(moveEvent.clientX);
-    };
-    const stop = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", stop);
-      sidebarResizeCleanupRef.current = null;
-      finishSidebarResize();
-    };
-    sidebarResizeCleanupRef.current = stop;
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", stop, { once: true });
-  };
-  const handleSidebarResizeKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    let next = constrainSidebarWidth(sidebarWidth, window.innerWidth);
-    if (event.key === "ArrowRight") next += 24;
-    else if (event.key === "ArrowLeft") next -= 24;
-    else if (event.key === "Home") next = MIN_SIDEBAR_WIDTH;
-    else if (event.key === "End") next = constrainSidebarWidth(window.innerWidth, window.innerWidth);
-    else return;
-    event.preventDefault();
-    const constrained = constrainSidebarWidth(next, window.innerWidth);
-    setSidebarWidth(constrained);
-    saveSidebarWidth(constrained);
-  };
-
-  useEffect(() => {
-    const onResize = () =>
-      setViewportWidth(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      sidebarResizeCleanupRef.current?.();
-    };
-  }, []);
-
-  const renderedWidth = constrainSidebarWidth(sidebarWidth, viewportWidth);
-  const maxSidebarWidth = constrainSidebarWidth(window.innerWidth, window.innerWidth);
+  const { renderedWidth, maxSidebarWidth, resizingSidebar, handleSidebarResizeStart, handleSidebarResizeKey, resetSidebarWidth } = useSidebarResize(asideRef);
   const narrow = drawer.narrow;
   const closeDrawer = drawer.setOpen;
 
   useEffect(() => {
-    setProjectPreferences(loadProjectSidebarPreferences(undefined, accountScope));
     setProjectMenu(null);
   }, [accountScope]);
 
@@ -314,19 +187,18 @@ export function Sidebar() {
     [groups, navigatedConversationId],
   );
 
-  // Quick chats stay open by default, and navigating to a conversation reveals
-  // its project. Everything else remains collapsed until the user asks for it,
-  // which keeps large project libraries scannable without hiding active work.
+  // Folder rows begin expanded, like a file list. Navigation reveals a folder
+  // the user previously collapsed.
   useEffect(() => {
     if (!activeGroupKey) return;
-    setExpandedProjectKeys((current) => {
-      if (current.has(activeGroupKey)) return current;
-      return new Set([...current, activeGroupKey]);
+    setCollapsedProjectKeys((current) => {
+      if (!current.has(activeGroupKey)) return current;
+      const next = new Set(current); next.delete(activeGroupKey); return next;
     });
   }, [activeGroupKey]);
 
   const toggleProjectExpanded = useCallback((key: string) => {
-    setExpandedProjectKeys((current) => {
+    setCollapsedProjectKeys((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -351,11 +223,11 @@ export function Sidebar() {
   // Shift-click jump through invisible conversations.
   const activeConversationIds = useMemo(
     () => groups.flatMap((group) =>
-      filter || expandedProjectKeys.has(group.key)
+      filter || !collapsedProjectKeys.has(group.key)
         ? group.convos.map((conversation) => conversation.id)
         : []
     ),
-    [expandedProjectKeys, filter, groups],
+    [collapsedProjectKeys, filter, groups],
   );
   const activeConversationSignature = activeConversationIds.join("\u0000");
 
@@ -507,6 +379,10 @@ export function Sidebar() {
       selectionAnchorRef.current = id;
       setSelection(new Set());
       useSpecialistStore.getState().close();
+      const conversation = useSessionStore.getState().conversations.find((c) => c.id === id);
+      const key = conversation?.remoteHost ? remoteProjectKey(conversation.remoteHost, conversation.project)
+        : conversation?.project ? "p:" + conversation.project : null;
+      revealProject(key);
       void openConversation(id);
       return;
     }
@@ -523,7 +399,7 @@ export function Sidebar() {
     if (range.length === 0) return;
     if (!anchor || !activeConversationIds.includes(anchor)) selectionAnchorRef.current = id;
     setSelection(additive ? new Set([...selectedIds, ...range]) : new Set(range));
-  }, [closeDrawer, openConversation, setSelection]);
+  }, [closeDrawer, openConversation, revealProject, setSelection]);
 
   const extendSelectionWithKeyboard = useCallback((id: string, direction: -1 | 1) => {
     const { activeConversationIds } = latest.current;
@@ -565,18 +441,26 @@ export function Sidebar() {
       ? `${selectedIds.size} ${selectedIds.size === 1 ? "conversation" : "conversations"} selected.`
       : "";
 
-  const commitProjectPreferences = (next: ProjectSidebarPreferences) => {
-    saveProjectSidebarPreferences(next, undefined, accountScope);
-    setProjectPreferences(next);
+  const removeProject = (group: ProjectGroup) => {
+    if (group.path) {
+      if (defaultProject.trim() === group.path) setLocalSettings({ cwd: "" });
+      useSessionStore.setState({ recentProjects: removeRecentProject(group.path, accountScope) });
+    }
+    commitProjectPreferences(withProjectRemoved(projectPreferences, group.key, true));
+    setProjectMenu(null);
+    setFilter("");
+    setSearchOpen(false);
+    setSelection(new Set());
+    flashNotice("Removed " + group.label + " from the sidebar. Its chats are still in search.");
+    requestAnimationFrame(() => conversationListRef.current?.focus());
   };
 
   const movePinnedProjectTo = useCallback((key: string, index: number, label: string) => {
     const next = withPinnedProjectMoved(projectPreferences, key, index);
     if (next === projectPreferences) return;
-    saveProjectSidebarPreferences(next, undefined, accountScope);
-    setProjectPreferences(next);
+    commitProjectPreferences(next);
     announce(`Project ${label} moved to position ${index + 1} of ${next.pinned.length}.`);
-  }, [accountScope, projectPreferences]);
+  }, [commitProjectPreferences, projectPreferences]);
 
   const dropPinnedProject = useCallback((
     sourceKey: string,
@@ -599,7 +483,7 @@ export function Sidebar() {
     setMenu(null);
     const rect = button.getBoundingClientRect();
     const width = 240;
-    const estimatedHeight = group.path ? 212 : 152;
+    const estimatedHeight = 244;
     const left = Math.max(8, Math.min(rect.right + 6, window.innerWidth - width - 8));
     const top = Math.max(8, Math.min(rect.top - 8, window.innerHeight - estimatedHeight - 8));
     setProjectMenu({ group, position: { left, top }, trigger: button });
@@ -659,7 +543,7 @@ export function Sidebar() {
     }
   }, [setSelection]);
 
-  const archiveSection = <SidebarArchive archivedConvos={archivedConvos} open={archivedOpen}
+  const archiveSection = <SidebarArchive archivedConvos={archivedConvos} open={archivedOpen || Boolean(filter.trim())}
     onToggle={() => setArchivedOpen((open) => !open)} mutatingIds={mutatingIds}
     mutationKind={conversationMutation?.kind} onRestore={restoreAndOpenConversation} onDelete={deleteArchivedConversation} />;
 
@@ -667,7 +551,7 @@ export function Sidebar() {
     return (
       <div className="flex w-12 shrink-0 flex-col items-center gap-1 bg-bg-secondary py-2">
         <SidebarHeader rail onToggle={() => narrow ? drawer.setOpen(true) : setCollapsed(false)} filter={filter} onFilter={setFilter}
-          searchRef={searchInputRef} />
+          searchRef={searchInputRef} searchOpen={searchOpen} onSearchOpenChange={setSearchOpen} />
         <SpecialistNavigation rail />
         <div className="mt-auto">
           <ProfileMenu variant="rail" />
@@ -695,7 +579,7 @@ export function Sidebar() {
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-secondary">
       <SidebarHeader rail={false} onToggle={() => narrow ? drawer.setOpen(false) : setCollapsed(true)} filter={filter} onFilter={setFilter}
-        searchRef={searchInputRef} />
+        searchRef={searchInputRef} searchOpen={searchOpen} onSearchOpenChange={setSearchOpen} />
 
       <p id="sidebar-selection-help" className="sr-only">
         Use Shift-click or Shift+Arrow Up and Down to select a range. Command or Control-click toggles one conversation. Press Escape to clear the selection.
@@ -708,7 +592,7 @@ export function Sidebar() {
         ref={conversationListRef}
         aria-label="Conversations"
         tabIndex={-1}
-        className="min-h-0 flex-1 overflow-y-auto px-2 pb-14"
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
         onClick={(e) => {
           // A plain click on empty list space (not on a row) clears the
           // Shift-click selection.
@@ -721,11 +605,18 @@ export function Sidebar() {
           }
         }}
       >
-        <h2 className="px-2 pb-2 pt-1 text-xs font-semibold uppercase tracking-wider text-ink-muted">Projects & chats</h2>
+        <div className="group mb-1 flex h-8 items-center px-2">
+          <h2 className="flex-1 text-xs font-medium text-ink-muted">Projects</h2>
+          <button type="button" aria-label="Add project" title="Add project — choose a folder or remote host"
+            onClick={() => useSessionStore.getState().setNewProjectOpen(true)}
+            className="grid size-7 place-items-center rounded-md text-ink-muted hover:bg-bg-hover hover:text-ink">
+            <FolderPlus className="size-4" />
+          </button>
+        </div>
 
         {conversations.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-ink-faint">
-            {conversationsLoading ? "Loading conversations…" : "Choose New session to open a project, or start a quick chat."}
+            {conversationsLoading ? "Loading conversations…" : "Add a project folder, or choose New chat to get started."}
           </p>
         ) : visible.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-ink-faint">
@@ -735,7 +626,7 @@ export function Sidebar() {
           <div className="flex flex-col">
             <AnimatePresence initial={false} mode="popLayout">
               {groups.map((g) => {
-                const expanded = Boolean(filter) || expandedProjectKeys.has(g.key);
+                const expanded = Boolean(filter) || !collapsedProjectKeys.has(g.key);
                 const conversationPanelId = `project-conversations-${encodeURIComponent(g.key)}`;
                 return (
                   <ProjectDragAndDrop
@@ -767,13 +658,12 @@ export function Sidebar() {
                             <m.div
                               id={conversationPanelId}
                               {...(reduceMotion ? EXPAND_REDUCED : EXPAND)}
-                              className="ml-5 overflow-hidden border-l border-border-subtle pl-1"
+                              className="overflow-hidden pl-6"
                             >
                               {g.convos.length === 0 && <div className="px-2 py-2 text-sm text-ink-muted">
-                                <p>No sessions yet.</p>
-                                <button type="button" onClick={() => startProjectSession(g)} className="mt-1 text-accent hover:underline">Start a session</button>
+                                <button type="button" onClick={() => startProjectSession(g)} className="text-ink-muted hover:text-ink">Start a chat</button>
                               </div>}
-                              <div className="flex flex-col gap-0.5 py-0.5">
+                              <div className="flex flex-col py-0.5">
                                 {g.convos.map((c) => {
                                   const mutation = mutatingIds.has(c.id)
                                     ? conversationMutation?.kind ?? "archive"
@@ -824,70 +714,11 @@ export function Sidebar() {
       {!filter && archiveSection}
 
       <div className="relative shrink-0">
-        <AnimatePresence initial={false}>
-          {(selectedIds.size > 0 || conversationMutation) && (
-            <m.div
-              key="conversation-selection-toolbar"
-              {...accessibleMotion(RISE, reduceMotion)}
-              className="absolute inset-x-0 bottom-full z-10 bg-bg-secondary px-3 py-2 shadow-soft"
-            >
-              {deleteConfirming && selectedIds.size > 0 ? (
-                <div className="flex items-center gap-1.5 text-sm text-ink-muted">
-                  <span className="min-w-0 flex-1">Delete {selectedIds.size} permanently?</span>
-                  <button
-                    ref={deleteConfirmRef}
-                    onClick={() => {
-                      setDeleteConfirming(false);
-                      deleteSelectedWithFocus();
-                    }}
-                    className="rounded-lg bg-danger/10 px-2 py-1.5 font-medium text-danger transition hover:bg-danger/20"
-                  >
-                    Delete
-                  </button>
-                  <button
-                    onClick={() => setDeleteConfirming(false)}
-                    className="rounded-lg px-2 py-1.5 text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-sm text-ink-muted">
-                  <span className="min-w-0 flex-1 tabular-nums">{selectionStatus}</span>
-                  {selectedIds.size > 0 && (
-                    <>
-                      <button
-                        disabled={mutationInFlight}
-                        onClick={archiveSelectedWithFocus}
-                        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition hover:bg-accent-subtle hover:text-ink disabled:cursor-wait disabled:opacity-50"
-                        title="Archive selected"
-                      >
-                        <Archive className="size-3.5" /> Archive
-                      </button>
-                      <button
-                        disabled={mutationInFlight}
-                        onClick={() => setDeleteConfirming(true)}
-                        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition hover:bg-danger/10 hover:text-danger disabled:cursor-wait disabled:opacity-50"
-                        title="Delete selected permanently"
-                      >
-                        <Trash2 className="size-3.5" /> Delete
-                      </button>
-                      <button
-                        disabled={mutationInFlight}
-                        onClick={() => setSelection(new Set())}
-                        aria-label="Clear selection"
-                        title="Clear selection"
-                        className="grid size-7 place-items-center rounded-lg text-ink-faint transition hover:bg-bg-hover hover:text-ink disabled:cursor-wait disabled:opacity-50"
-                      >
-                        <X className="size-3.5" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </m.div>
-          )}
-        </AnimatePresence>
+        <SidebarSelectionToolbar selectedCount={selectedIds.size} hasMutation={Boolean(conversationMutation)}
+          reduceMotion={reduceMotion} deleteConfirming={deleteConfirming} deleteConfirmRef={deleteConfirmRef}
+          selectionStatus={selectionStatus} mutationInFlight={mutationInFlight} setDeleteConfirming={setDeleteConfirming}
+          deleteSelectedWithFocus={deleteSelectedWithFocus} archiveSelectedWithFocus={archiveSelectedWithFocus}
+          clearSelection={() => setSelection(new Set())} />
         <div className="px-2 py-1">
           <ProfileMenu variant="sidebar" />
         </div>
@@ -915,136 +746,16 @@ export function Sidebar() {
         />
       )}
 
-      {projectMenu && (
-        <ProjectActionsMenu
-          key={projectMenu.group.key}
-          group={projectMenu.group}
-          position={projectMenu.position}
-          pinned={projectPreferences.pinned.includes(projectMenu.group.key)}
-          moveDestinations={projectMoveDestinations(
-            pinnedGroups,
-            projectMenu.group.key,
-            projectPreferences.pinned,
-          )}
-          onClose={() => {
-            projectMenu.trigger.focus();
-            setProjectMenu(null);
-          }}
-          onPin={(pinned) =>
-            commitProjectPreferences(
-              withProjectPinned(projectPreferences, projectMenu.group.key, pinned),
-            )
-          }
-          onMove={(destinationIndex) => {
-            const { group, trigger } = projectMenu;
-            movePinnedProjectTo(group.key, destinationIndex, group.label);
-            requestAnimationFrame(() => {
-              if (trigger.isConnected) trigger.focus();
-            });
-          }}
-          onReveal={() => {
-            const path = projectMenu.group.path;
-            if (path) void openProjectPath(path, "", true);
-          }}
-          onCreateWorktree={async (name) => {
-            const path = projectMenu.group.path;
-            const bridge = await getBridge();
-            if (!bridge.createPermanentWorktree) {
-              throw new Error("Permanent worktrees are available in the desktop app.");
-            }
-            if (path) {
-              const createdPath = await bridge.createPermanentWorktree(path, name);
-              await openProjectTerminal(createdPath);
-              flashNotice(`Created worktree ${projectName(createdPath)}`);
-              return;
-            }
-            const group = projectMenu.group;
-            const hosts = loadSshHosts(accountScope);
-            const host = hosts.find((candidate) =>
-              candidate.host.trim() === group.remoteHost
-              && candidate.remoteRoot.trim() === group.remoteRoot
-            ) ?? hosts.find((candidate) => candidate.host.trim() === group.remoteHost);
-            if (!host) throw new Error(`Reconnect ${group.label} in Remote hosts first.`);
-            const connection = await openRemote(
-              host,
-              localSettings,
-              group.remoteRoot || host.remoteRoot,
-            );
-            const createdPath = await bridge.createPermanentWorktree(
-              connection.cwd,
-              name,
-              { id: connection.id },
-            );
-            saveSshHosts(
-              hosts.map((candidate) => candidate.id === host.id
-                ? { ...candidate, remoteRoot: createdPath }
-                : candidate),
-              accountScope,
-            );
-            selectProvider("local");
-            setProjectMode("remote");
-            setSelectedHostId(host.id);
-            newConversation();
-            flashNotice(`Created worktree ${projectName(createdPath)}`);
-          }}
-          onListManagedWorktrees={async () => {
-            const path = projectMenu.group.path;
-            if (!path) throw new Error("A local project folder is required.");
-            const bridge = await getBridge();
-            if (!bridge.listManagedWorktrees) {
-              throw new Error("Managed worktrees are available in the desktop app.");
-            }
-            return bridge.listManagedWorktrees(path);
-          }}
-          onUseManagedWorktree={(path) => {
-            selectProvider("local");
-            setProjectMode("local");
-            setProjectFolder(path);
-            newConversation();
-            flashNotice("Using isolated checkout " + projectName(path) + " for the next chat");
-          }}
-          onSaveManagedWorktreeBranch={async (id) => {
-            const path = projectMenu.group.path;
-            if (!path) throw new Error("A local project folder is required.");
-            const bridge = await getBridge();
-            if (!bridge.saveManagedWorktreeBranch) {
-              throw new Error("Saving managed worktree commits is available in the desktop app.");
-            }
-            const receipt = await bridge.saveManagedWorktreeBranch(path, id);
-            flashNotice("Saved detached commits as " + receipt.branch);
-            return receipt;
-          }}
-          onCleanupManagedWorktree={async (id) => {
-            const path = projectMenu.group.path;
-            if (!path) throw new Error("A local project folder is required.");
-            const bridge = await getBridge();
-            if (!bridge.cleanupManagedWorktree) {
-              throw new Error("Managed worktrees are available in the desktop app.");
-            }
-            await bridge.cleanupManagedWorktree(path, id);
-            flashNotice("Archived isolated checkout");
-          }}
-          activeWorktreePaths={activeWorktreePaths}
-          onRename={(name) =>
-            commitProjectPreferences(
-              withProjectAlias(projectPreferences, projectMenu.group.key, name),
-            )
-          }
-          onArchive={() => archiveProjectChats(projectMenu.group)}
-          onRemove={() => {
-            archiveProjectChats(projectMenu.group);
-            const path = projectMenu.group.path;
-            if (path) {
-              if (defaultProject.trim() === path) setLocalSettings({ cwd: "" });
-              const next = removeRecentProject(path, accountScope);
-              useSessionStore.setState({ recentProjects: next });
-            }
-            commitProjectPreferences(
-              withoutProjectPreferences(projectPreferences, projectMenu.group.key),
-            );
-          }}
-        />
-      )}
+      {projectMenu && <SidebarProjectMenu projectMenu={projectMenu} projectPreferences={projectPreferences}
+        pinnedGroups={pinnedGroups} activeWorktreePaths={activeWorktreePaths}
+        onClose={() => {
+          const trigger = projectMenu.trigger;
+          setProjectMenu(null);
+          requestAnimationFrame(() => { if (trigger.isConnected) trigger.focus(); });
+        }}
+        commitProjectPreferences={commitProjectPreferences} movePinnedProjectTo={movePinnedProjectTo}
+        archiveProjectChats={archiveProjectChats} onRemove={removeProject} />}
+
       </div>
       {!narrow && <div
         role="separator"
@@ -1055,10 +766,7 @@ export function Sidebar() {
         aria-valuenow={renderedWidth}
         tabIndex={0}
         title="Drag to resize sidebar · Double-click to reset"
-        onDoubleClick={() => {
-          setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-          saveSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
-        }}
+        onDoubleClick={resetSidebarWidth}
         onKeyDown={handleSidebarResizeKey}
         onMouseDown={handleSidebarResizeStart}
         className="group relative z-20 w-2 shrink-0 touch-none cursor-col-resize outline-none"

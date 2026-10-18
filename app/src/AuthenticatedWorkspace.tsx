@@ -1,3 +1,4 @@
+import { AccountConnectionStatus } from "./surfaces/AccountConnectionStatus";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useSessionStore } from "./store/sessionStore";
@@ -343,6 +344,7 @@ export default function AuthenticatedWorkspace({
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!activeSpecialist && <TopBar dark={dark} onToggleTheme={onToggleTheme} artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />}
         <OfflineBanner />
+        <AccountConnectionStatus />
         <MobileRemoteAgent />
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has

@@ -12,6 +12,7 @@ import { RISE, accessibleMotion } from "../../lib/motion";
 import { ArtifactFileActions } from "./ArtifactFileActions";
 import { useSessionStore } from "../../store/sessionStore";
 import { saveArtifactCopy } from "../../lib/fileLinks";
+import { ZoomableImage } from "../ImageLightbox";
 
 const KIND_ICON: Record<ArtifactKind, typeof Globe> = {
   website: Globe, video: Film, media: Film, image: ImageIcon,
@@ -75,7 +76,7 @@ export function LocalArtifactImage({
 
   if (!src) return null;
   return (
-    <img
+    <ZoomableImage
       src={src}
       alt={alt}
       loading="lazy"

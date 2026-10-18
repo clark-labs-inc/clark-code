@@ -7,15 +7,13 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
 import {
-  authAccountChanged,
   cloudRequestStillOwned,
-  handleCloudConversationDeleted,
-  handleCloudHistoryConflict,
 } from "./sessionStore.appActions";
+import { authAccountChanged } from "./sessionStore.authActions";
+import { handleCloudConversationDeleted, handleCloudHistoryConflict } from "./sessionStore.cloudLifecycle";
 import { liveSessions } from "./sessionStore.runtime";
 import { useSessionStore } from "./sessionStore";
 import { useSpecialistStore } from "./specialistStore";
-import { productRequest } from "../product/productBridge";
 
 const bridge = {
   closeSession: vi.fn(async () => {}),
@@ -36,6 +34,7 @@ function conversation(id: string) {
 
 beforeEach(() => {
   invoke.mockReset();
+  useSessionStore.setState({ authReconnecting: false, authReconnectError: null });
   liveSessions.clear();
   useSpecialistStore.getState().close();
   useSessionStore.setState({
@@ -70,132 +69,6 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   useSpecialistStore.getState().close();
-});
-
-describe("authenticated product recovery", () => {
-  it("refreshes the active native session and replays an expired access check", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const account = {
-      user: { id: "account-1", name: "Owner", method: "google" as const },
-    };
-    const refreshed = { ...account, connection: "ready" as const };
-    let accessAttempts = 0;
-    invoke.mockImplementation((command: string, args?: { operation?: string }) => {
-      if (command !== "product_request") throw new Error(`unexpected command ${command}`);
-      if (args?.operation === "account.refresh") return Promise.resolve(refreshed);
-      if (args?.operation === "access.snapshot" && accessAttempts++ === 0) {
-        return Promise.reject(new Error("401 ExpiredSignature"));
-      }
-      if (args?.operation === "access.snapshot") return Promise.resolve({ schema_version: 1 });
-      throw new Error(`unexpected operation ${args?.operation}`);
-    });
-    useSessionStore.setState({ auth: account, warning: null });
-
-    await expect(productRequest("access.snapshot")).resolves.toEqual({ schema_version: 1 });
-
-    expect(invoke.mock.calls.map(([, args]) => args?.operation)).toEqual([
-      "access.snapshot",
-      "account.refresh",
-      "access.snapshot",
-    ]);
-    expect(useSessionStore.getState().auth).toEqual(refreshed);
-    expect(useSessionStore.getState().warning).toBeNull();
-  });
-
-  it("marks the account reconnectable and does not replay when refresh fails", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const account = {
-      user: { id: "account-1", name: "Owner", method: "google" as const },
-    };
-    invoke.mockImplementation((command: string, args?: { operation?: string }) => {
-      if (command !== "product_request") throw new Error(`unexpected command ${command}`);
-      if (args?.operation === "access.snapshot") {
-        return Promise.reject(new Error("401 ExpiredSignature"));
-      }
-      if (args?.operation === "account.refresh") {
-        return Promise.reject(new Error("refresh revoked"));
-      }
-      throw new Error(`unexpected operation ${args?.operation}`);
-    });
-    useSessionStore.setState({ auth: account, warning: null });
-
-    await expect(productRequest("access.snapshot")).rejects.toThrow("refresh revoked");
-
-    expect(invoke.mock.calls.map(([, args]) => args?.operation)).toEqual([
-      "access.snapshot",
-      "account.refresh",
-    ]);
-    expect(useSessionStore.getState().auth?.connection).toBe("reconnect_required");
-    expect(useSessionStore.getState().warning).toContain("needs reconnecting");
-  });
-
-  it("does not publish or replay a refresh after the active account changes", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const accountOne = {
-      user: { id: "account-1", name: "One", method: "google" as const },
-    };
-    const accountTwo = {
-      user: { id: "account-2", name: "Two", method: "google" as const },
-    };
-    let releaseRefresh = () => {};
-    invoke.mockImplementation((command: string, args?: { operation?: string }) => {
-      if (command !== "product_request") throw new Error(`unexpected command ${command}`);
-      if (args?.operation === "access.snapshot") {
-        return Promise.reject(new Error("401 ExpiredSignature"));
-      }
-      if (args?.operation === "account.refresh") {
-        return new Promise((resolve) => {
-          releaseRefresh = () => resolve(accountOne);
-        });
-      }
-      throw new Error(`unexpected operation ${args?.operation}`);
-    });
-    useSessionStore.setState({ auth: accountOne, warning: null });
-
-    const access = productRequest("access.snapshot");
-    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
-    useSessionStore.setState({ auth: accountTwo });
-    releaseRefresh();
-
-    await expect(access).rejects.toThrow("active account changed");
-    expect(invoke.mock.calls.map(([, args]) => args?.operation)).toEqual([
-      "access.snapshot",
-      "account.refresh",
-    ]);
-    expect(useSessionStore.getState().auth).toEqual(accountTwo);
-    expect(useSessionStore.getState().warning).toBeNull();
-  });
-
-  it("manually reconnects through the shared refresh boundary before syncing", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const account = {
-      user: { id: "account-1", name: "Owner", method: "google" as const },
-      connection: "reconnect_required" as const,
-    };
-    const refreshed = { ...account, connection: "ready" as const };
-    const syncCloudIndex = vi.fn(async () => {});
-    invoke.mockImplementation((command: string, args?: { operation?: string }) => {
-      if (command !== "product_request") throw new Error(`unexpected command ${command}`);
-      if (args?.operation === "account.refresh") return Promise.resolve(refreshed);
-      throw new Error(`unexpected operation ${args?.operation}`);
-    });
-    useSessionStore.setState({
-      auth: account,
-      error: "prior error",
-      warning: "Your account needs reconnecting.",
-      syncCloudIndex,
-    });
-
-    await useSessionStore.getState().reconnectAuth();
-
-    expect(invoke.mock.calls.map(([, args]) => args?.operation)).toEqual([
-      "account.refresh",
-    ]);
-    expect(useSessionStore.getState().auth).toEqual(refreshed);
-    expect(useSessionStore.getState().error).toBeNull();
-    expect(useSessionStore.getState().warning).toBeNull();
-    expect(syncCloudIndex).toHaveBeenCalledOnce();
-  });
 });
 
 describe("cloud conversation index ownership", () => {

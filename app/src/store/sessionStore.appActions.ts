@@ -1,3 +1,7 @@
+import { useSpecialistStore } from "./specialistStore";
+import { readAuthStatus } from "../lib/auth";
+import { createAuthActions, refreshActiveProductAuthentication } from "./sessionStore.authActions";
+import { handleCloudConversationDeleted, handleCloudHistoryConflict } from "./sessionStore.cloudLifecycle";
 import { deferredSnapshotForPersistence } from "../lib/snapshotPersistence";
 import { sidebarFixtureConversations, sidebarFixtureEnabled } from "../lib/sidebarFixture";
 import {
@@ -9,11 +13,9 @@ import {
   UPDATE_DRAIN_POLL_MS,
   UPDATE_DRAIN_TIMEOUT_MS,
   addRecentProject,
-  authSignOut,
   beginUpdateDrain,
   cancelUpdateDrain,
   checkAndStageUpdate,
-  closeLiveSession,
   cloudCreds,
   cloudList,
   codeKeyAccountBinding,
@@ -22,7 +24,6 @@ import {
   delay,
   deriveTitle,
   effectiveApprovalPolicy,
-  emptySnapshot,
   epochStale,
   prepareCloudDurability,
   getBridge,
@@ -31,22 +32,9 @@ import {
   installStagedUpdate,
   isBusy,
   latestRunFailed,
-  loadApprovalPolicy,
-  loadApprovalPolicies,
-  loadBrowserEnabled,
-  loadChatModels,
-  loadCollaborationMode,
-  loadCollaborationModes,
-  loadLocalSettings,
-  loadMemoriesEnabled,
-  loadOrchestrationEnabled,
-  loadOutputStyle,
-  loadRecentProjects,
-  loadSshHosts,
   liveSessions,
   liveUpdateBlockerCount,
   markUnseenFinished,
-  markAuthReconnectRequired,
   mergeConversations,
   mergeHistory,
   minLoadDuration,
@@ -59,9 +47,7 @@ import {
   pickAllowOption,
   pickFolder,
   provisionCodeKey,
-  refreshAuthSession,
   refreshStagedUpdate,
-  resetCloudHistory,
   restoreQueuedAfterDispatchFailure,
   relaunchApp,
   saveBrowserEnabled,
@@ -70,16 +56,11 @@ import {
   saveOrchestrationEnabled,
   scheduleCloudPut,
   sessionEpoch,
-  settleRuns,
-  signInWithGoogle,
   snapshotCache,
   syncFanOut,
   wouldAutoApprove,
 } from "./sessionStore.runtime";
 import { SPECIALIST_CATALOG_SHA256 } from "../lib/specialists";
-import { composerDraftOwner, removeComposerDraft } from "../lib/composerDraft";
-import { useSpecialistStore } from "./specialistStore";
-import { resetStableOrder } from "../lib/stableOrder";
 import { authAccountMatches } from "../lib/account";
 import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 import {
@@ -116,6 +97,7 @@ type AppActions = Pick<
   | "setMemoryViewerOpen"
   | "signIn"
   | "reconnectAuth"
+  | "cancelAuthReconnect"
   | "signOutAuth"
 >;
 
@@ -127,247 +109,6 @@ export function cloudRequestStillOwned(
   current: SessionState["auth"],
 ): boolean {
   return authAccountMatches(startedWith, current);
-}
-
-/** Whether applying `next` would replace the account that owns local live
- * sessions and caches. The normal UI signs out before another account can sign
- * in, but keeping this boundary here makes the state safe for an auth handoff
- * or a programmatic re-auth too. A refreshed token for the same stable account
- * is deliberately not a switch. */
-export function authAccountChanged(
-  current: SessionState["auth"],
-  next: NonNullable<SessionState["auth"]>,
-): boolean {
-  if (!current) return false;
-  const currentOwner = codeKeyAccountBinding(current);
-  const nextOwner = codeKeyAccountBinding(next);
-  if (currentOwner && nextOwner) return currentOwner !== nextOwner;
-  return true;
-}
-
-/** Rotate the native credential for the account that still owns the store.
- * Every authenticated product surface and native cloud event shares this
- * boundary through productBridge's single-flight recovery. */
-export async function refreshActiveProductAuthentication(
-  set: SessionSet,
-  get: SessionGet,
-): Promise<void> {
-  const startedWith = get().auth;
-  if (!startedWith) throw new Error("Sign in again to restore product access.");
-
-  try {
-    const refreshed = await refreshAuthSession(
-      startedWith,
-      () => authAccountMatches(startedWith, get().auth),
-    );
-    if (!authAccountMatches(startedWith, get().auth)) {
-      throw new Error("The active account changed while Clark refreshed access.");
-    }
-    configureCloudHistoryCredentials(cloudCreds(refreshed));
-    set({ auth: refreshed });
-  } catch (error) {
-    const current = get().auth;
-    if (current && authAccountMatches(startedWith, current)) {
-      set({
-        auth: markAuthReconnectRequired(current),
-        warning: "Your account needs reconnecting. Local work remains available.",
-      });
-    }
-    throw error;
-  }
-}
-
-function activateSignedInAccount(
-  set: SessionSet,
-  get: SessionGet,
-  auth: NonNullable<SessionState["auth"]>,
-): void {
-  const replacingAccount = authAccountChanged(get().auth, auth);
-  const accountScope = codeKeyAccountBinding(auth);
-  resetCloudHistory();
-  resetStableOrder();
-  if (replacingAccount) {
-    get().endSession({ force: true });
-    snapshotCache.clear();
-  }
-  useSpecialistStore.getState().setAccountScope(accountScope);
-  configureCloudHistoryCredentials(cloudCreds(auth));
-  const accountLocalSettings = loadLocalSettings(accountScope);
-  set({
-    auth,
-    localSettings: accountLocalSettings,
-    managedWorktreeBase: loadManagedWorktreeBase(accountScope, accountLocalSettings.cwd),
-    chatModels: loadChatModels(accountScope),
-    approvalPolicies: loadApprovalPolicies(accountScope),
-    memoriesEnabled: loadMemoriesEnabled(accountScope),
-    browserEnabled: loadBrowserEnabled(accountScope),
-    orchestrationEnabled: loadOrchestrationEnabled(accountScope),
-    approvalPolicy: loadApprovalPolicy(accountScope),
-    collaborationMode: loadCollaborationMode(accountScope),
-    collaborationModes: loadCollaborationModes(accountScope),
-    outputStyle: loadOutputStyle(accountScope),
-    selectedHostId: loadSshHosts(accountScope)[0]?.id ?? null,
-    projectMode: "local",
-    recentProjects: loadRecentProjects(accountScope),
-    memoryStatus: null,
-    memoryViewerOpen: false,
-    loadingMemory: false,
-    memoryOverview: null,
-    globalMemoryOverview: null,
-    pendingManagedWorktreePath: null,
-    terminalLaunch: null,
-    mcpOpen: false,
-    sshOpen: false,
-    newProjectOpen: false,
-    paletteOpen: false,
-    error: null,
-    notice: null,
-    warning: null,
-    dismissedFailedRuns: [],
-    conversations: [],
-    conversationsLoading: true,
-    runningIds: [],
-    unseenWorkIds: [],
-    selectedConversationIds: new Set(),
-    mutatingConversationIds: new Set(),
-    conversationMutation: null,
-  });
-  void get().ensureCodeKey();
-  void get().syncCloudIndex();
-}
-
-export function handleCloudConversationDeleted(
-  set: SessionSet,
-  get: SessionGet,
-  bridge: NonNullable<SessionState["bridge"]>,
-  conversationId: string,
-): void {
-  const before = get();
-  const wasLive = liveSessions.has(conversationId);
-  const openingTarget = before.opening?.id === conversationId;
-  const restoringTarget =
-    before.conversationMutation?.kind === "restore"
-    && before.mutatingConversationIds.has(conversationId);
-  const viewTarget =
-    before.session?.id === conversationId
-    || before.unavailableConversation?.id === conversationId
-    || openingTarget;
-  const cleanupOwnsTarget =
-    before.unavailableConversation?.id === conversationId
-    && before.unavailableCleanupId === conversationId;
-
-  closeLiveSession(bridge, conversationId);
-  snapshotCache.delete(conversationId);
-  removeComposerDraft(composerDraftOwner(before.auth?.user ?? null), conversationId);
-  if (openingTarget || restoringTarget) nextSessionEpoch();
-  if (viewTarget && !cleanupOwnsTarget) useSpecialistStore.getState().close();
-
-  set((current) => {
-    const cleanupStillOwnsTarget =
-      current.unavailableConversation?.id === conversationId
-      && current.unavailableCleanupId === conversationId;
-    return {
-      conversations: current.conversations.filter(
-        (conversation) => conversation.id !== conversationId,
-      ),
-      runningIds: current.runningIds.filter((id) => id !== conversationId),
-      warning:
-        cleanupStillOwnsTarget
-          ? current.warning
-          : viewTarget || restoringTarget || wasLive
-          ? "This conversation was deleted on another device, so Clark Code stopped it here."
-          : current.warning,
-      ...(viewTarget
-        ? {
-            session: null,
-            unavailableConversation: cleanupStillOwnsTarget
-              ? current.unavailableConversation
-              : null,
-            unavailableCleanupId: cleanupStillOwnsTarget
-              ? current.unavailableCleanupId
-              : null,
-            opening: null,
-            connecting: false,
-            snapshot: settleRuns(emptySnapshot()),
-            attachments: [],
-            historyPrefix: null,
-            composerPrefill: null,
-            queued: [],
-            terminalOpen: false,
-            sideQuestion: null,
-            activeRemote: null,
-            activeRemoteHost: null,
-            activeProjectRoot: null,
-          }
-        : {}),
-    };
-  });
-}
-
-export function handleCloudHistoryConflict(
-  set: SessionSet,
-  get: SessionGet,
-  bridge: NonNullable<SessionState["bridge"]>,
-  conversationId: string,
-): void {
-  snapshotCache.delete(conversationId);
-  const before = get();
-  const wasLive = liveSessions.has(conversationId);
-  const cleanupOwnsTarget =
-    before.unavailableConversation?.id === conversationId
-    && before.unavailableCleanupId === conversationId;
-  if (wasLive) closeLiveSession(bridge, conversationId);
-
-  // An explicit deletion owns this target. A stale-write notification arriving
-  // during that deletion must not replace cleanup with an undeletable refresh
-  // screen while the durable delete is still in flight.
-  if (cleanupOwnsTarget) {
-    set({ runningIds: before.runningIds.filter((id) => id !== conversationId) });
-    return;
-  }
-
-  const targeted =
-    before.session?.id === conversationId
-    || before.opening?.id === conversationId
-    || before.unavailableConversation?.id === conversationId;
-  if (targeted) {
-    nextSessionEpoch();
-    const meta = before.conversations.find(
-      (conversation) => conversation.id === conversationId,
-    );
-    set({
-      session: null,
-      snapshot: emptySnapshot(),
-      connecting: false,
-      opening: null,
-      unavailableConversation: {
-        id: conversationId,
-        title: meta?.title || "Conversation",
-        detail: "Product cloud rejected a stale snapshot revision.",
-        kind: "refresh_required",
-      },
-      unavailableCleanupId: null,
-      attachments: [],
-      historyPrefix: null,
-      composerPrefill: null,
-      queued: [],
-      runningIds: before.runningIds.filter((id) => id !== conversationId),
-      terminalOpen: false,
-      sideQuestion: null,
-      activeRemote: null,
-      activeRemoteHost: null,
-      activeProjectRoot: null,
-      warning: null,
-    });
-    return;
-  }
-
-  set({
-    runningIds: before.runningIds.filter((id) => id !== conversationId),
-    warning: wasLive
-      ? "A conversation received a newer cloud revision, so Clark Code stopped its stale local session."
-      : before.warning,
-  });
 }
 
 export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
@@ -556,6 +297,15 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       bridge.onCloudAuthExpired?.(() => {
         void recoverProductAuthentication()
           .then(() => get().syncCloudIndex())
+          .catch(() => undefined);
+      });
+      bridge.onAccountStatusChanged?.(() => {
+        const owner = get().auth;
+        if (!owner) return;
+        void readAuthStatus(owner, () => authAccountMatches(owner, get().auth))
+          .then((auth) => {
+            if (auth) set({ auth, ...(auth.connection === "ready" ? { authReconnectError: null } : {}) });
+          })
           .catch(() => undefined);
       });
       // A network delivery warning means the SQLite prefix is safe and the run
@@ -986,92 +736,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
 
   setMemoryViewerOpen: (open) => set({ memoryViewerOpen: open }),
 
-  signIn: async () => {
-    const auth = await signInWithGoogle();
-    activateSignedInAccount(set, get, auth);
-  },
-
-  reconnectAuth: async () => {
-    const current = get().auth;
-    if (!current) return;
-    try {
-      await recoverProductAuthentication();
-      if (!authAccountMatches(current, get().auth)) return;
-      set({ error: null, warning: null });
-      await get().syncCloudIndex();
-      return;
-    } catch {
-      // A retained refresh token may no longer be usable. Re-authenticate the
-      // same account interactively without destroying its local task state.
-    }
-    if (!authAccountMatches(current, get().auth)) return;
-    const reauthenticated = await signInWithGoogle();
-    if (!authAccountMatches(reauthenticated, current)) {
-      activateSignedInAccount(set, get, reauthenticated);
-      return;
-    }
-    configureCloudHistoryCredentials(cloudCreds(reauthenticated));
-    set({ auth: reauthenticated, error: null, warning: null });
-    await get().syncCloudIndex();
-  },
-
-  signOutAuth: async () => {
-    // A Clark Code key is account-scoped. Removing the local binding prevents
-    // the next user from silently consuming access owned by this account.
-    resetCloudHistory();
-    resetStableOrder();
-    try {
-      await authSignOut();
-    } catch (error) {
-      set({ error: `Could not sign out safely: ${String(error)}` });
-      return;
-    }
-    get().endSession({ force: true });
-    useSpecialistStore.getState().setAccountScope(null);
-    // Drop the in-memory history entirely so the signed-out (and any next)
-    // account starts clean.
-    snapshotCache.clear();
-    const anonymousLocalSettings = loadLocalSettings(null);
-    set({
-      auth: null,
-      localSettings: anonymousLocalSettings,
-      managedWorktreeBase: loadManagedWorktreeBase(null, anonymousLocalSettings.cwd),
-      chatModels: loadChatModels(null),
-      approvalPolicies: loadApprovalPolicies(null),
-      memoriesEnabled: loadMemoriesEnabled(null),
-      browserEnabled: loadBrowserEnabled(null),
-      orchestrationEnabled: loadOrchestrationEnabled(null),
-      approvalPolicy: loadApprovalPolicy(null),
-      collaborationMode: loadCollaborationMode(null),
-      collaborationModes: loadCollaborationModes(null),
-      outputStyle: loadOutputStyle(null),
-      selectedHostId: loadSshHosts(null)[0]?.id ?? null,
-      projectMode: "local",
-      recentProjects: [],
-      memoryStatus: null,
-      memoryViewerOpen: false,
-      loadingMemory: false,
-      memoryOverview: null,
-      globalMemoryOverview: null,
-      pendingManagedWorktreePath: null,
-      terminalLaunch: null,
-      mcpOpen: false,
-      sshOpen: false,
-      sshOpenPurpose: "manage",
-      newProjectOpen: false,
-      paletteOpen: false,
-      error: null,
-      notice: null,
-      warning: null,
-      dismissedFailedRuns: [],
-      conversations: [],
-      conversationsLoading: false,
-      unseenWorkIds: [],
-      selectedConversationIds: new Set(),
-      mutatingConversationIds: new Set(),
-      conversationMutation: null,
-    });
-  },
+  ...createAuthActions(set, get),
 
   };
 }

@@ -128,6 +128,26 @@ export const DIALOG = {
   transition: TRANSITION,
 } satisfies MotionProps;
 
+/** Image feedback stays on the thumbnail, without reflowing its transcript. */
+export const IMAGE_INTERACTION = {
+  whileHover: { transform: "translate3d(0, -2px, 0) scale(1.015)" },
+  whileTap: { transform: "translate3d(0, 0, 0) scale(0.99)" },
+  transition: TRANSITION,
+} satisfies MotionProps;
+
+/** The media and its controls settle together inside the fading scrim. Keep
+ * this transform separate from the image's pointer-anchored zoom transform. */
+export const IMAGE_REVEAL = {
+  initial: { opacity: 0, transform: "translateY(6px) scale(0.985)" },
+  animate: { opacity: 1, transform: "translateY(0) scale(1)" },
+  exit: {
+    opacity: 0,
+    transform: "translateY(3px) scale(0.99)",
+    transition: REDUCED_TRANSITION,
+  },
+  transition: { duration: DUR.slow, ease: EASE.out },
+} satisfies MotionProps;
+
 /** Small directional slides for tab/stage panel swaps. Content that enters the
  * stage from the left uses SLIDE_LEFT (-5px); content entering from the right
  * uses SLIDE_RIGHT (+5px). A single transform string keeps them on the

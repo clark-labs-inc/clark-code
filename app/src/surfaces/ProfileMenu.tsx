@@ -1,11 +1,10 @@
+import { AccountConnectionStatus } from "./AccountConnectionStatus";
 import { useEffect, useRef, useState } from "react";
 import {
   LogOut, Brain, SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
-import { isAccountReconnectError } from "../lib/errors";
-import { authConnection } from "../lib/auth";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 import { codeKeyAccountBinding } from "../lib/account";
@@ -19,9 +18,7 @@ const ACTION =
  *  row in the sidebar footer (opens up). */
 export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail" | "sidebar" }) {
   const auth = useSessionStore((s) => s.auth);
-  const error = useSessionStore((s) => s.error);
   const signOut = useSessionStore((s) => s.signOutAuth);
-  const reconnect = useSessionStore((s) => s.reconnectAuth);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
@@ -49,9 +46,6 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
 
   if (!auth) return null;
   const user = auth.user;
-  const connection = authConnection(auth);
-  const accountNeedsReconnect = connection === "reconnect_required" || isAccountReconnectError(error);
-  const accountOffline = connection === "offline";
   return (
     <div ref={ref} className={cn("relative", variant === "sidebar" && "w-full")}>
       {variant === "sidebar" ? (
@@ -105,30 +99,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               {user.email && <div className="truncate text-sm text-ink-muted">{user.email}</div>}
             </div>
 
-            {(accountNeedsReconnect || accountOffline) && (
-              <div
-                role="alert"
-                className="mx-2 rounded-xl border border-danger/20 bg-danger/10 px-3 py-2.5"
-              >
-                <div className="text-base font-medium text-danger">
-                  {accountNeedsReconnect ? "Account needs reconnecting" : "Account service unavailable"}
-                </div>
-                <div className="mt-0.5 text-sm leading-4 text-ink-secondary">
-                  {accountNeedsReconnect
-                    ? "Local work is safe. Reconnect this account to restore cloud features."
-                    : "Local work remains available while Clark reconnects."}
-                </div>
-                {accountNeedsReconnect && (
-                  <button
-                    type="button"
-                    onClick={() => void reconnect()}
-                    className="mt-2 text-sm font-semibold text-accent hover:underline"
-                  >
-                    Reconnect account
-                  </button>
-                )}
-              </div>
-            )}
+            <AccountConnectionStatus />
 
             {AccountSlot && (
               <AccountSlot

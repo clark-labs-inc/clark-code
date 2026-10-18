@@ -89,10 +89,13 @@ export function authConnection(session: AuthSession | null): NonNullable<AuthSes
   return session ? session.connection ?? "ready" : null;
 }
 
-export function markAuthReconnectRequired(session: AuthSession): AuthSession {
-  const reconnecting = { ...session, connection: "reconnect_required" as const };
-  cachedSession = reconnecting;
-  return reconnecting;
+export function setAuthConnection(session: AuthSession, connection: NonNullable<AuthSession["connection"]>): AuthSession {
+  cachedSession = { ...session, connection };
+  return cachedSession;
+}
+
+export async function cancelAuthSignIn(): Promise<void> {
+  await productRequest("account.cancel_sign_in");
 }
 
 export async function signInWithGoogle(): Promise<AuthSession> {
@@ -120,6 +123,16 @@ export async function refreshAuthSession(
   if (!sessionStillActive()) {
     throw new Error("The active account changed while Clark refreshed access.");
   }
+  cachedSession = descriptor;
+  return descriptor;
+}
+
+export async function readAuthStatus(
+  session: AuthSession,
+  sessionStillActive: () => boolean,
+): Promise<AuthSession | null> {
+  const descriptor = await productRequest<AuthSession | null>("account.load");
+  if (!descriptor || descriptor.user.id !== session.user.id || !sessionStillActive()) return null;
   cachedSession = descriptor;
   return descriptor;
 }

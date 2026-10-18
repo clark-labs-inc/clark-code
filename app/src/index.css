@@ -1065,3 +1065,11 @@ svg.lucide {
     animation: none !important;
   }
 }
+
+
+/* Quiet sidebar controls remain discoverable on hover, keyboard focus and touch. */
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-row-action { opacity: 0; }
+  .group:hover > .sidebar-row-action,
+  .group:focus-within > .sidebar-row-action { opacity: 1; }
+}

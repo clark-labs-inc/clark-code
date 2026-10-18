@@ -86,7 +86,6 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 # Optional native Google sign-in surface for products that use a system-browser
 # OAuth flow. Product-owned code decides whether and how to exchange the token.
-tauri-plugin-google-auth = "0.5"
 # Product deep-link support. A branded configuration owns the URL scheme and
 # callback semantics; the neutral development bundle defines no auth callback.
 tauri-plugin-deep-link = "2"

@@ -135,4 +135,18 @@ describe("product bridge", () => {
     await expect(productRequest("access.snapshot")).rejects.toThrow("503");
     expect(recover).not.toHaveBeenCalled();
   });
+
+  it("uses typed failures and never replays rejected or cancelled authentication", async () => {
+    const recover = vi.fn(async () => {});
+    configureProductAuthRecovery(recover);
+    for (const code of ["reconnect_required", "service_unavailable", "cancelled", "account_changed"]) {
+      const error = JSON.stringify({code, message:"A diagnostic containing 401 must not override this code."});
+      invoke.mockRejectedValueOnce(error);
+      await expect(productRequest("access.snapshot")).rejects.toBe(error);
+    }
+    expect(recover).not.toHaveBeenCalled();
+    invoke.mockRejectedValueOnce(JSON.stringify({code:"session_expired", message:"Renew account"})).mockResolvedValueOnce({});
+    await productRequest("access.snapshot");
+    expect(recover).toHaveBeenCalledOnce();
+  });
 });

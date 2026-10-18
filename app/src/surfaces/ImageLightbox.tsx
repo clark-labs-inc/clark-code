@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
+import { useEffect, useRef, useState, type ImgHTMLAttributes } from "react";
+import { createPortal } from "react-dom";
+import { AnimatePresence, useIsPresent, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { Minus, Plus, RotateCcw, X } from "lucide-react";
-import { OVERLAY, accessibleMotion } from "../lib/motion";
+import {
+  IMAGE_INTERACTION, IMAGE_REVEAL, OVERLAY, RISE_SMALL, accessibleMotion,
+} from "../lib/motion";
 import { cn } from "../lib/cn";
 
 const MIN_ZOOM = 1;
@@ -29,6 +32,7 @@ interface LightboxProps {
  *  click closes. */
 export function Lightbox({ src, alt, onClose }: LightboxProps) {
   const reduce = useReducedMotion();
+  const present = useIsPresent();
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
@@ -49,8 +53,21 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
   }, []);
 
   useEffect(() => {
+    if (!present) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Tab") {
+        const buttons = Array.from(
+          rootRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [],
+        );
+        const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const next = index < 0 ? (event.shiftKey ? buttons.length - 1 : 0)
+          : (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+        event.preventDefault();
+        buttons[next]?.focus();
+        return;
+      }
+      if (["Escape", "+", "=", "-", "_", "0"].includes(event.key)) event.preventDefault();
       if (event.key === "Escape") onClose();
       else if (event.key === "+" || event.key === "=") setZoom((z) => clampZoom(z * BUTTON_ZOOM_STEP));
       else if (event.key === "-" || event.key === "_") setZoom((z) => clampZoom(z / BUTTON_ZOOM_STEP));
@@ -100,7 +117,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
     return () => el.removeEventListener("wheel", onWheel);
   });
 
-  return (
+  const viewer = (
     <m.div
       {...accessibleMotion(OVERLAY, reduce)}
       ref={rootRef}
@@ -108,11 +125,16 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       role="dialog"
       aria-modal="true"
       aria-label={alt ? `Image viewer: ${alt}` : "Image viewer"}
+      data-image-viewer
+      inert={!present}
       className="fixed inset-0 z-critical select-none bg-media-stage outline-none"
     >
       {/* Backdrop layer below the stage: clicks anywhere off the image close. */}
       <div aria-hidden onClick={onClose} className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 grid place-items-center p-8">
+      <m.div
+        {...accessibleMotion(IMAGE_REVEAL, reduce)}
+        className="pointer-events-none absolute inset-0 grid place-items-center p-8 pb-20"
+      >
         <img
           ref={imgRef}
           src={src}
@@ -160,8 +182,8 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
             zoomAt(CLICK_ZOOM_STEP, ax, ay);
           }}
         />
-      </div>
-      <div className="absolute inset-x-0 bottom-5 flex justify-center">
+      </m.div>
+      <m.div {...accessibleMotion(RISE_SMALL, reduce)} className="absolute inset-x-0 bottom-5 flex justify-center">
         <div className="flex items-center gap-1 rounded-full border border-border-subtle bg-bg-elevated/90 px-1.5 py-1 shadow-lg backdrop-blur-sm">
           <button
             type="button"
@@ -197,7 +219,7 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
             <RotateCcw className="size-3.5" />
           </button>
         </div>
-      </div>
+      </m.div>
       <button
         type="button"
         onClick={onClose}
@@ -209,24 +231,33 @@ export function Lightbox({ src, alt, onClose }: LightboxProps) {
       </button>
     </m.div>
   );
+  // Message entry transforms establish containing blocks for fixed children.
+  // A body portal keeps the viewer full-screen even inside an animated row.
+  return typeof document === "undefined" ? viewer : createPortal(viewer, document.body);
 }
 
 /** An image that opens the fullscreen lightbox when clicked. Drop-in for a
  *  bare <img>: styling travels via `className`. */
-export function ZoomableImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+export function ZoomableImage({
+  src, alt, className, ...imageProps
+}: ImgHTMLAttributes<HTMLImageElement> & { src: string; alt: string }) {
   const [open, setOpen] = useState(false);
+  const reduce = useReducedMotion();
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <button
+      <m.button
+        ref={trigger}
+        {...(reduce ? {} : IMAGE_INTERACTION)}
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`View ${alt} full size`}
         title="View full size"
-        className="group relative shrink-0 cursor-zoom-in overflow-visible rounded-[inherit]"
+        className="group/image relative inline-flex max-w-full shrink-0 cursor-zoom-in items-center justify-center overflow-visible rounded-[inherit] align-bottom outline-offset-4 focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <img src={src} alt={alt} draggable={false} className={className} />
-      </button>
-      <AnimatePresence>
+        <img {...imageProps} src={src} alt={alt} draggable={false} className={className} />
+      </m.button>
+      <AnimatePresence onExitComplete={() => trigger.current?.focus({ preventScroll: true })}>
         {open && <Lightbox src={src} alt={alt} onClose={() => setOpen(false)} />}
       </AnimatePresence>
     </>

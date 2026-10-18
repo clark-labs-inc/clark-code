@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProjectGroup } from "../lib/projectSidebar";
-import { ProjectHeader } from "./ProjectActionsMenu";
+import { ProjectHeader } from "./ProjectHeader";
 
 function group(overrides: Partial<ProjectGroup>): ProjectGroup {
   return {
@@ -77,7 +77,7 @@ describe("ProjectHeader", () => {
     expect(html).toContain("Project actions for Repo");
   });
 
-  it("exposes project expansion and the conversation count from the header", () => {
+  it("exposes project expansion without a visible conversation count", () => {
     const html = renderToStaticMarkup(
       <ProjectHeader
         group={group({
@@ -99,6 +99,6 @@ describe("ProjectHeader", () => {
 
     expect(html).toContain('aria-label="Collapse Quick chats"');
     expect(html).toContain('aria-controls="project-conversations-quick"');
-    expect(html).toContain(">2</span>");
+    expect(html).not.toContain(">2</span>");
   });
 });

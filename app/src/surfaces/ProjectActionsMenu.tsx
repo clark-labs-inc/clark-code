@@ -4,19 +4,13 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  FolderGit2,
   FolderOpen,
   GitBranchPlus,
   Loader2,
-  MessageSquare,
-  MoreHorizontal,
-  GripVertical,
   MoveVertical,
   Pencil,
   Pin,
   PinOff,
-  Server,
-  Plus,
   X,
 } from "lucide-react";
 import type { ProjectGroup } from "../lib/projectSidebar";
@@ -34,114 +28,6 @@ export interface ProjectMoveDestination {
   current: boolean;
 }
 
-export function ProjectHeader({
-  group,
-  expanded,
-  conversationPanelId,
-  menuOpen,
-  reorderable = false,
-  dragHandleRef,
-  onToggle,
-  onOpenMenu,
-  onNewSession,
-}: {
-  group: ProjectGroup;
-  expanded: boolean;
-  conversationPanelId: string;
-  menuOpen: boolean;
-  reorderable?: boolean;
-  dragHandleRef?: (element: HTMLElement | null) => void;
-  onToggle: () => void;
-  onOpenMenu: (button: HTMLButtonElement) => void;
-  onNewSession: () => void;
-}) {
-  const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
-  const canStartSession = Boolean(group.path || group.remoteHost);
-  const newSessionLabel =
-    group.kind === "remote"
-      ? `New session on ${group.label}`
-      : `New session in ${group.label}`;
-  return (
-    <div
-      title={group.title}
-      className="group mt-1 flex h-8 items-center gap-1 rounded-lg px-1 text-base font-medium text-ink-secondary hover:bg-bg-hover"
-    >
-      {reorderable && (
-        <span
-          ref={dragHandleRef}
-          data-project-drag-handle={group.key}
-          aria-hidden="true"
-          title={`Drag ${group.label} to reorder pinned projects`}
-          className="-ml-1 grid size-5 shrink-0 cursor-grab place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing"
-        >
-          <GripVertical className="size-3.5" />
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-controls={conversationPanelId}
-        aria-label={`${expanded ? "Collapse" : "Expand"} ${group.label}`}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-focus disabled:cursor-default"
-      >
-        <ChevronRight
-          className={`size-3 shrink-0 text-ink-faint transition-transform ${expanded ? "rotate-90" : ""}`}
-          aria-hidden="true"
-        />
-        <Icon className="size-3.5 shrink-0 text-ink-muted" />
-        <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
-          <span className="min-w-0 truncate">{group.label}</span>
-          {group.repositoryLabel && (
-            <span
-              className="shrink-0 text-sm font-normal text-ink-faint"
-              aria-label={`Repository ${group.repositoryLabel}`}
-            >
-              {group.repositoryLabel}
-            </span>
-          )}
-        </span>
-        {group.convos.length > 0 && (
-          <span className="shrink-0 text-sm font-normal tabular-nums text-ink-faint">
-            {group.convos.length}
-          </span>
-        )}
-      </button>
-      {canStartSession && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onNewSession();
-          }}
-          title={newSessionLabel}
-          aria-label={newSessionLabel}
-          className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink"
-        >
-          <Plus className="size-3.5" />
-        </button>
-      )}
-      {group.kind !== "none" && (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenMenu(event.currentTarget);
-          }}
-          title={`Project actions for ${group.label}`}
-          aria-label={`Project actions for ${group.label}`}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          className={`grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-sunken hover:text-ink focus-visible:opacity-100 ${
-            menuOpen ? "bg-bg-sunken text-ink opacity-100" : "opacity-100"
-          }`}
-        >
-          <MoreHorizontal className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
 
 function MenuItem({
   icon: Icon,
@@ -215,7 +101,7 @@ export function ProjectActionsMenu({
   onArchive: () => void;
   onRemove: () => void;
 }) {
-  const [mode, setMode] = useState<"menu" | "move" | "rename" | "worktree" | "managed" | "remove">("menu");
+  const [mode, setMode] = useState<"menu" | "worktrees" | "move" | "rename" | "worktree" | "managed" | "remove">("menu");
   const [name, setName] = useState(group.label);
   const [worktreeName, setWorktreeName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -253,8 +139,11 @@ export function ProjectActionsMenu({
   return (
     <div
       ref={ref}
-      onKeyDown={handleMenuNavigation}
-      role="menu"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+        else handleMenuNavigation(event);
+      }}
+      role={["menu", "move", "worktrees"].includes(mode) ? "menu" : "dialog"}
       aria-label={`Project actions for ${group.label}`}
       style={{
         left: position.left,
@@ -282,38 +171,19 @@ export function ProjectActionsMenu({
               Move project…
             </MenuItem>
           )}
-          {group.path && (
-            <>
-              <MenuItem
-                icon={FolderOpen}
-                onClick={() => {
-                  onReveal();
-                  onClose();
-                }}
-              >
-                Reveal in Finder
-              </MenuItem>
-              <MenuItem
-                icon={FolderOpen}
-                onClick={() => {
-                  setMode("managed");
-                }}
-              >
-                Manage isolated worktrees
-              </MenuItem>
-            </>
-          )}
-          {(group.path || group.remoteHost) && (
-            <MenuItem icon={GitBranchPlus} onClick={() => setMode("worktree")}>
-              Create permanent worktree
-            </MenuItem>
-          )}
           <MenuItem icon={Pencil} onClick={() => setMode("rename")}>
             Rename project
           </MenuItem>
+          {group.path && <MenuItem icon={FolderOpen} onClick={() => { onReveal(); onClose(); }}>
+            Reveal in Finder
+          </MenuItem>}
+          {(group.path || group.remoteHost) && <MenuItem icon={GitBranchPlus} onClick={() => setMode("worktrees")}>
+            <span className="flex items-center gap-6">Worktrees <ChevronRight className="ml-auto size-3.5" /></span>
+          </MenuItem>}
+          <div className="my-1 border-t border-border-subtle" />
           <MenuItem
             icon={Archive}
-                onClick={() => {
+            onClick={() => {
               onArchive();
               onClose();
             }}
@@ -325,6 +195,13 @@ export function ProjectActionsMenu({
           </MenuItem>
         </>
       )}
+
+      {mode === "worktrees" && <>
+        <MenuItem icon={ChevronLeft} autoFocus onClick={() => setMode("menu")}>Back to project actions</MenuItem>
+        <div className="my-1 border-t border-border-subtle" />
+        {group.path && <MenuItem icon={FolderOpen} onClick={() => setMode("managed")}>Manage isolated worktrees</MenuItem>}
+        <MenuItem icon={GitBranchPlus} onClick={() => setMode("worktree")}>Create permanent worktree</MenuItem>
+      </>}
 
       {mode === "move" && onMove && (
         <div className="p-1">
@@ -449,12 +326,11 @@ export function ProjectActionsMenu({
       {mode === "remove" && (
         <div className="p-1.5">
           <p className="text-sm leading-4 text-ink-muted">
-            Remove <span className="font-medium text-ink">{group.label}</span> from Projects?
-            {group.convos.length > 0 && ` Its ${group.convos.length} active chat${group.convos.length === 1 ? "" : "s"} will be archived.`}
+            Remove <span className="font-medium text-ink">{group.label}</span> from the sidebar?
           </p>
-          <p className="mt-1 text-sm leading-4 text-ink-faint">Files on disk won't be changed.</p>
+          <p className="mt-1 text-sm leading-4 text-ink-faint">Your chats stay available in search. Files on disk won't be changed.</p>
           <div className="mt-2 flex justify-end gap-1.5">
-            <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink">
+            <button type="button" autoFocus onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink">
               Cancel
             </button>
             <button
