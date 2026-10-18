@@ -554,3 +554,11 @@ matrix still clicked the retired `New quick chat` label. It now uses the visible
 specialist navigation and that subscription gates block dispatch. The complete
 local specialist matrix passed all 12 checks, including desktop/mobile history
 and provider continuity, with no console errors or failed requests.
+
+
+Active-stream recovery follow-up: renderer and native account preflight leave
+`voice.stream.send`, `voice.stream.finish`, and `voice.stream.cancel` independent
+of account renewal. These operations use their existing authenticated native
+connection; opening a new stream still renews account access. The renderer
+regression completes all three operations while renewal remains pending.
+Frontend validation passes 850 tests (3 skipped) and TypeScript typecheck.

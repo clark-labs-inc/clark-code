@@ -2,12 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { productAuthFailure } from "./productAuthFailure";
 
 const PRODUCT_OPERATION = /^[a-z0-9][a-z0-9._-]{0,127}$/;
-const AUTH_CONTROL_OPERATIONS = new Set([
+const AUTH_RECOVERY_INDEPENDENT_OPERATIONS = new Set([
   "account.load",
   "account.refresh",
   "account.sign_in",
   "account.cancel_sign_in",
   "account.sign_out",
+  // Existing voice streams own an authenticated connection. Sending or
+  // closing that connection must not wait for unrelated account renewal.
+  "voice.stream.send",
+  "voice.stream.finish",
+  "voice.stream.cancel",
 ]);
 
 type ProductAuthRecovery = () => Promise<void>;
@@ -57,7 +62,7 @@ export function recoverProductAuthentication(): Promise<void> {
 }
 
 function canRecoverAuthentication(operation: string): boolean {
-  return !AUTH_CONTROL_OPERATIONS.has(operation);
+  return !AUTH_RECOVERY_INDEPENDENT_OPERATIONS.has(operation);
 }
 
 function invokeProduct<T>(operation: string, payload: unknown): Promise<T> {

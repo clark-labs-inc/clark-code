@@ -112,6 +112,21 @@ describe("product bridge", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps an existing voice stream usable while account renewal is pending", async () => {
+    let finishRecovery = () => {};
+    const recover = vi.fn(() => new Promise<void>((resolve) => { finishRecovery = resolve; }));
+    configureProductAuthRecovery(recover);
+    const recovery = recoverProductAuthentication();
+    await vi.waitFor(() => expect(recover).toHaveBeenCalledOnce());
+    for (const operation of ["voice.stream.send", "voice.stream.finish", "voice.stream.cancel"]) {
+      invoke.mockResolvedValueOnce({});
+      await productRequest(operation, { id: "open-stream" });
+      expect(invoke).toHaveBeenLastCalledWith("product_request", { operation, payload: { id: "open-stream" } });
+    }
+    finishRecovery();
+    await recovery;
+  });
+
   it("does not replay after a failed refresh", async () => {
     const recover = vi.fn(async () => {
       throw new Error("refresh rejected");
