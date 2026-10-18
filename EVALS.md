@@ -547,3 +547,10 @@ and editable retained draft, not a live native browser sign-in. Branded identity
 provider, session transport, and product validation are recorded in the private
 product catalog. These local source checks do not verify a packaged desktop or
 physical Android build.
+
+Release qualification follow-up: hosted browser CI found that the specialist
+matrix still clicked the retired `New quick chat` label. It now uses the visible
+`New chat` action and retains the assertions that ordinary chat collapses the
+specialist navigation and that subscription gates block dispatch. The complete
+local specialist matrix passed all 12 checks, including desktop/mobile history
+and provider continuity, with no console errors or failed requests.

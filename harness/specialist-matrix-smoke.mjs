@@ -412,7 +412,7 @@ try {
     check(await freePage.getByLabel("Message Clark Code").count() === 0, `${specialist.label} free gate still exposed a runnable composer`);
   }
   await freePage.screenshot({ path: path.join(outDir, "subscription-access-gates.png"), animations: "disabled" });
-  await freePage.getByRole("button", { name: "New quick chat", exact: true }).click();
+  await freePage.getByRole("button", { name: "New chat", exact: true }).click();
   const specialistDisclosure = freePage.getByRole("button", { name: "Specialist lenses", exact: true });
   check(await specialistDisclosure.getAttribute("aria-expanded") === "false", "ordinary chat should collapse specialist navigation");
   check(await freePage.locator('[data-qa^="specialist-nav-"]').count() === 0, "collapsed specialist navigation should hide lens rows");
