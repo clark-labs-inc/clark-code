@@ -695,10 +695,9 @@ impl Provider for LocalAgentProvider {
         let parts = prompt_parts(&input);
         let knowledge_query = prompt_text(&input);
         let user_request = parts.user_request;
-        let sandbox = explicit_task_scope(&sandbox, &user_request)
-            .and_then(|scope| (*sandbox).clone().with_task_scope(&scope).ok())
-            .map(Arc::new)
-            .unwrap_or(sandbox);
+        // Only the host-selected project and approved roots define containment.
+        // Natural-language path mentions stay instructions for the model; they
+        // must not silently rewrite tool permissions as directories appear.
         // One immutable catalog snapshot governs validation, injection, and
         // `read_skill` for this run. A refresh can affect the next run but
         // cannot change capability meaning while the model is acting.

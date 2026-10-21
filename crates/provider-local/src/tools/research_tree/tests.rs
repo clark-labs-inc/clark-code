@@ -152,14 +152,7 @@ async fn resumed_active_work_is_not_success_and_cannot_be_selected_again() {
 async fn scoped_artifacts_stay_in_scope_and_unbound_sources_are_explicit() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir(temp.path().join("subdir")).unwrap();
-    let mut ctx = context(temp.path());
-    ctx.sandbox = Arc::new(
-        ctx.sandbox
-            .as_ref()
-            .clone()
-            .with_task_scope("subdir")
-            .unwrap(),
-    );
+    let ctx = context(&temp.path().join("subdir"));
     let mut request = begin();
     request["sources"] = json!([]);
     let result = ResearchTreeTool.invoke(request, &ctx).await;

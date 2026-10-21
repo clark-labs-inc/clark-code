@@ -60,10 +60,54 @@ pub(crate) fn replace_catalog_section(prompt: &mut String, replacement: Option<&
     if let Some(start) = prompt.find(CATALOG_START) {
         if let Some(relative_end) = prompt[start..].find(CATALOG_END) {
             let end = start + relative_end + CATALOG_END.len();
-            prompt.replace_range(start..end, "");
+            // The renderer owns one newline on either side of the markers.
+            // Replace that whole section in place so an unchanged refresh is
+            // byte-identical and later prompt sections keep their position.
+            let start = start - usize::from(prompt[..start].ends_with('\n'));
+            let end = end + usize::from(prompt[end..].starts_with('\n'));
+            prompt.replace_range(start..end, replacement.unwrap_or(""));
+            return;
         }
     }
     if let Some(replacement) = replacement {
         prompt.push_str(replacement);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog(body: &str) -> String {
+        format!("\n{CATALOG_START}\n{body}\n{CATALOG_END}\n")
+    }
+
+    #[test]
+    fn unchanged_refresh_preserves_the_entire_prompt_prefix() {
+        let section = catalog("stable catalog");
+        let mut prompt = "Base instructions.\n".to_string();
+        replace_catalog_section(&mut prompt, Some(&section));
+        prompt.push_str("Later host context.\n");
+        let expected = prompt.clone();
+        for _ in 0..1000 {
+            replace_catalog_section(&mut prompt, Some(&section));
+            assert_eq!(prompt, expected);
+        }
+    }
+
+    #[test]
+    fn catalog_updates_and_removal_preserve_surrounding_sections() {
+        let mut prompt = "Base instructions.\n".to_string();
+        replace_catalog_section(&mut prompt, Some(&catalog("old")));
+        prompt.push_str("Later host context.\n");
+        replace_catalog_section(&mut prompt, Some(&catalog("new")));
+        assert_eq!(
+            prompt,
+            format!("Base instructions.\n{}Later host context.\n", catalog("new"))
+        );
+        replace_catalog_section(&mut prompt, None);
+        assert_eq!(prompt, "Base instructions.\nLater host context.\n");
+        replace_catalog_section(&mut prompt, None);
+        assert_eq!(prompt, "Base instructions.\nLater host context.\n");
     }
 }

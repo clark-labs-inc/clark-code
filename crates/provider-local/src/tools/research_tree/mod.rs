@@ -71,11 +71,7 @@ impl ToolExecutor for ResearchTreeTool {
             Ok(value) => value,
             Err(error) => return ToolOutcome::error(error),
         };
-        let root = ctx
-            .sandbox
-            .task_scope()
-            .unwrap_or(ctx.sandbox.root())
-            .to_path_buf();
+        let root = ctx.sandbox.root().to_path_buf();
         let cancel = ctx.cancel.clone();
         let result = tokio::task::spawn_blocking(move || {
             if cancel.is_cancelled() {
@@ -172,11 +168,7 @@ impl ToolExecutor for ResearchTreeStatus {
             Ok(value) => value,
             Err(error) => return ToolOutcome::error(error.to_string()),
         };
-        let root = ctx
-            .sandbox
-            .task_scope()
-            .unwrap_or(ctx.sandbox.root())
-            .to_path_buf();
+        let root = ctx.sandbox.root().to_path_buf();
         outcome(
             tokio::task::spawn_blocking(move || {
                 let store = store::Store::new(&root, &request.tree_id)?;

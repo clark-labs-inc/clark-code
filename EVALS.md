@@ -652,3 +652,28 @@ of account renewal. These operations use their existing authenticated native
 connection; opening a new stream still renews account access. The renderer
 regression completes all three operations while renewal remains pending.
 Frontend validation passes 850 tests (3 skipped) and TypeScript typecheck.
+
+## Stable prompt refresh and host-owned project containment — 2026-10-21
+
+The private Clark Code DeepSeek investigation found that refreshing an unchanged
+skill catalog grew newlines in the first system message each turn. Catalog
+replacement now preserves its exact position and owned separators. A 1,000-cycle
+regression pins byte stability, plus update/removal of the section.
+
+The same investigation reproduced English-derived sandbox narrowing: permission
+to add tests under `tests/` blocked source files once that directory existed.
+Natural-language directory inference and the secondary scope state were removed;
+host-selected project roots and explicit approved roots remain authoritative.
+Subproject sibling reads/writes remain rejected. Research artifacts follow that
+same project root. An offline real-provider replay (zero hosted calls) proves
+successful source access after test-directory creation and append-only request
+prefixes across the follow-up.
+
+`cargo nextest run -p provider-local --lib`: 670 passed, 7 skipped, run
+`d314b5a6-fb46-406c-af62-8e29c51a62b2` on the release toolchain 1.97.1.
+Strict provider-local Clippy also passes on 1.97.1. The concurrent 1.99.1
+dependency-upgrade experiment remains excluded from this release.
+Live private product comparisons and their narrower claim boundaries belong to
+`../clark-desktop-product/crates/clark-desktop-product/EVALS.md`, not this
+foundation's public benchmark lanes. Detailed report in sibling backend:
+`../clark/docs/testing/2026-10-21-clark-code-deepseek-migration-investigation.md`.
