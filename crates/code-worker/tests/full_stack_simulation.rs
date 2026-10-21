@@ -67,10 +67,7 @@ fn assistant_turn(text: &str) -> ScriptedTurn {
     ScriptedTurn {
         stall: Duration::ZERO,
         body: [
-            format!(
-                "data: {}",
-                json!({"choices":[{"delta":{"content": text}}]})
-            ),
+            format!("data: {}", json!({"choices":[{"delta":{"content": text}}]})),
             r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#.into(),
             "data: [DONE]".into(),
         ]
