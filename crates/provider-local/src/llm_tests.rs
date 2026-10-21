@@ -283,9 +283,18 @@ fn clark_client_tool_loop_uses_explicit_openrouter_reasoning_capture() {
 #[test]
 fn tools_always_leave_selection_to_the_model() {
     let client = LlmClient::from_parts(
-        "https://api.example.test/v1", "test-model", None, Vec::new(), None,
-    ).unwrap();
-    let tools = [ToolSchema::function("read_file", "Read a file.", json!({"type": "object"}))];
+        "https://api.example.test/v1",
+        "test-model",
+        None,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    let tools = [ToolSchema::function(
+        "read_file",
+        "Read a file.",
+        json!({"type": "object"}),
+    )];
     assert_eq!(client.body(&[], &tools)["tool_choice"], json!("auto"));
     assert!(client.body(&[], &[]).get("tool_choice").is_none());
 }

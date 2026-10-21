@@ -23,7 +23,9 @@ fn includes_root_and_research_note_when_available() {
     assert!(p.contains("Clark Code will ask for a scoped approval"));
     assert!(p.contains("Plan Mode is read-only and cannot request escalation"));
     assert!(p.contains("final `# User request`"));
-    assert!(p.contains("call `deliver_files` with every deliverable path before the final response"));
+    assert!(
+        p.contains("call `deliver_files` with every deliverable path before the final response")
+    );
     assert!(p.contains("file-manager reveal"));
     assert!(p.contains("Finish each completed turn with an ordinary assistant response"));
     assert!(!p.contains("`final_answer`"));
@@ -300,6 +302,7 @@ fn evidence_and_dependency_rules_precede_completion_instructions() {
     assert!(p.find("# Durable and external effects").unwrap() < p.find("# Completion").unwrap());
     assert!(
         p.find("Batch only independent tool calls").unwrap()
-            < p.find("Finish each completed turn with an ordinary assistant response").unwrap()
+            < p.find("Finish each completed turn with an ordinary assistant response")
+                .unwrap()
     );
 }

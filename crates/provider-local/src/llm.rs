@@ -578,12 +578,7 @@ impl LlmClient {
         self.body_for_model(&self.model, messages, tools)
     }
 
-    fn body_for_model(
-        &self,
-        model: &str,
-        messages: &[ChatMessage],
-        tools: &[ToolSchema],
-    ) -> Value {
+    fn body_for_model(&self, model: &str, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
         let mut body = json!({
             "model": model,
             "messages": messages,

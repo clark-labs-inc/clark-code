@@ -176,7 +176,11 @@ impl ca::StreamFn for AgentLoopStream {
                             let incidents = incidents.clone();
                             move |context| {
                                 emit_model_attempt_receipt(
-                                    &events, &run, None, Some(&context), "retrying",
+                                    &events,
+                                    &run,
+                                    None,
+                                    Some(&context),
+                                    "retrying",
                                 );
                                 incidents.observe_retry(context);
                             }

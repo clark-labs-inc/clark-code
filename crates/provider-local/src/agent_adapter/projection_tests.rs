@@ -215,31 +215,54 @@ async fn desktop_sink_preserves_each_upstream_assistant_message_boundary() {
 async fn desktop_sink_streams_natural_answer_without_a_tool_row_or_duplicate() {
     let (send, receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(
-        send, RunId::new("run-1"), Arc::new(ToolRegistry::new(None)), None,
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None)),
+        None,
     );
-    ca::EventSink::emit(&sink, ca::AgentEvent::MessageStart {
-        message: empty_assistant(ca::StopReason::EndTurn, None),
-    }).await;
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageStart {
+            message: empty_assistant(ca::StopReason::EndTurn, None),
+        },
+    )
+    .await;
     for text in ["Fixed ", "and verified."] {
-        ca::EventSink::emit(&sink, ca::AgentEvent::MessageUpdate {
-            partial: empty_assistant(ca::StopReason::EndTurn, None),
-            chunk: ca::AssistantStreamChunk::Text { delta: text.to_string() },
-        }).await;
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::MessageUpdate {
+                partial: empty_assistant(ca::StopReason::EndTurn, None),
+                chunk: ca::AssistantStreamChunk::Text {
+                    delta: text.to_string(),
+                },
+            },
+        )
+        .await;
     }
-    ca::EventSink::emit(&sink, ca::AgentEvent::MessageEnd {
-        message: assistant_message(AssistantTurn {
-            text: "Fixed and verified.".into(), ..Default::default()
-        }),
-    }).await;
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageEnd {
+            message: assistant_message(AssistantTurn {
+                text: "Fixed and verified.".into(),
+                ..Default::default()
+            }),
+        },
+    )
+    .await;
     let events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
-    let chunks = events.iter().filter_map(|event| match event {
-        desktop::AgentEvent::MessageChunk {
-            delta: desktop::ContentBlock::Text { text }, ..
-        } => Some(text.as_str()),
-        _ => None,
-    }).collect::<Vec<_>>();
+    let chunks = events
+        .iter()
+        .filter_map(|event| match event {
+            desktop::AgentEvent::MessageChunk {
+                delta: desktop::ContentBlock::Text { text },
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(chunks, ["Fixed ", "and verified."]);
-    assert!(!events.iter().any(|event| matches!(event,
+    assert!(!events.iter().any(|event| matches!(
+        event,
         desktop::AgentEvent::ToolCall { .. } | desktop::AgentEvent::ToolCallUpdate { .. }
     )));
 }

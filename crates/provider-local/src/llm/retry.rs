@@ -12,8 +12,8 @@ use agent_core::{classify_provider_access_failure, RunFailureKind};
 
 use super::{
     drain_lines, output_quarantine, recovery, retry_after_from_metadata, Accumulator,
-    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext,
-    ToolSchema, WireToolCallDelta,
+    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext, ToolSchema,
+    WireToolCallDelta,
 };
 
 const MAX_RATE_LIMIT_RETRIES: usize = 12;
@@ -163,12 +163,7 @@ impl LlmClient {
         .await
     }
 
-    pub(crate) async fn stream_chat_with_observers<
-        OnText,
-        OnReasoning,
-        OnToolCall,
-        OnRetry,
-    >(
+    pub(crate) async fn stream_chat_with_observers<OnText, OnReasoning, OnToolCall, OnRetry>(
         &self,
         messages: &[ChatMessage],
         tools: &[ToolSchema],

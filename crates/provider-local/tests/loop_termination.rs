@@ -239,7 +239,11 @@ async fn file_delivery_precedes_a_natural_final_answer() {
     let server = tokio::spawn(serve(
         listener,
         vec![
-            tool_call_body("deliver-files", "deliver_files", json!({"files": ["parrot-emoji-pack.zip"]})),
+            tool_call_body(
+                "deliver-files",
+                "deliver_files",
+                json!({"files": ["parrot-emoji-pack.zip"]}),
+            ),
             text_body("The parrot emoji pack is ready."),
         ],
     ));
@@ -457,7 +461,10 @@ async fn unresolved_effect_blocks_final_answer_until_canonical_verification() {
     assert_eq!(outcome.failure_kind, None, "{outcome:?}");
     let visible_text = visible_text.concat();
     assert!(!visible_text.contains("premature answer"), "{visible_text}");
-    assert!(visible_text.contains("verified canonical read-back"), "{visible_text}");
+    assert!(
+        visible_text.contains("verified canonical read-back"),
+        "{visible_text}"
+    );
 
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), 5);

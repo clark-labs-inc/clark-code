@@ -50,12 +50,14 @@ impl StreamProgress {
         if let Some(text) = held {
             self.emit_text(tx, text);
         }
-        let _ = tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::ToolCallDelta {
-            index: delta.index,
-            id_delta: delta.id_delta,
-            name_delta: delta.name_delta,
-            arguments_delta: delta.arguments_delta,
-        }));
+        let _ = tx.send(ca::StreamEvent::Chunk(
+            ca::AssistantStreamChunk::ToolCallDelta {
+                index: delta.index,
+                id_delta: delta.id_delta,
+                name_delta: delta.name_delta,
+                arguments_delta: delta.arguments_delta,
+            },
+        ));
     }
 
     pub(super) fn finish_filter(&self, tx: &UnboundedSender<ca::StreamEvent>) {

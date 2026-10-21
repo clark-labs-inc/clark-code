@@ -43,11 +43,15 @@ fn write_batch_body() -> String {
 
 fn final_body() -> String {
     [
-        format!("data: {}", json!({"choices": [{"delta": {"content": "done"}}]})),
+        format!(
+            "data: {}",
+            json!({"choices": [{"delta": {"content": "done"}}]})
+        ),
         r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_string(),
         "data: [DONE]".to_string(),
         String::new(),
-    ].join("\n\n")
+    ]
+    .join("\n\n")
 }
 
 fn http_response(body: &str) -> Vec<u8> {

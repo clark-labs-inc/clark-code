@@ -42,7 +42,8 @@ impl ToolExecutor for DeliverFiles {
             Ok(files) => files,
             Err(error) => return ToolOutcome::error(error),
         };
-        let mut outcome = ToolOutcome::ok("Files delivered. Finish with an ordinary assistant response.");
+        let mut outcome =
+            ToolOutcome::ok("Files delivered. Finish with an ordinary assistant response.");
         for file in files {
             outcome = outcome.with_artifact(file);
         }

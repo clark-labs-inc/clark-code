@@ -53,11 +53,15 @@ fn final_body() -> String {
 
 fn final_answer_body(text: &str) -> String {
     [
-        format!("data: {}", json!({"choices": [{"delta": {"content": text}}]})),
+        format!(
+            "data: {}",
+            json!({"choices": [{"delta": {"content": text}}]})
+        ),
         r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_string(),
         "data: [DONE]".to_string(),
         String::new(),
-    ].join("\n\n")
+    ]
+    .join("\n\n")
 }
 
 fn compact_summary_body() -> String {
