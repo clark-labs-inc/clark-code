@@ -42,6 +42,13 @@ tool selection, validated file delivery, pending-effect rejection and repair,
 and 160 productive work turns. Core WASM compilation and all-targets provider
 compilation (including examples) pass against the published dependency.
 
+The real stdio worker replay also used the retired terminal tool in its fake
+provider. Both scenarios stalled on that stale fixture; after switching it to
+ordinary assistant SSE responses, the working-day/cancellation/replay and
+saturation/oversized-input journeys pass in 4.2 seconds (2/2, nextest
+`0509869c-66f6-4fce-b28d-e3469f04295d`). The oversized fixture is split into
+helper, journey, and saturation modules. No hosted provider was called.
+
 Strict Clippy remains blocked by the existing Rust 1.99 dependency-upgrade
 warnings: fixed-size `chunks_exact` in exec-sandbox-protocol, a pre-existing
 needless borrow in the engine, and large provider error variants. No lint
