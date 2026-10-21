@@ -14,13 +14,7 @@ pub async fn one_shot(
     let handle = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await?;
         let request = read_request_json(&mut socket).await?;
-        let body = final_body(
-            &response_text,
-            request
-                .get("tools")
-                .and_then(Value::as_array)
-                .is_some_and(|tools| !tools.is_empty()),
-        );
+        let body = final_body(&response_text);
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
@@ -59,35 +53,7 @@ fn message_text(content: &Value) -> Option<String> {
     )
 }
 
-fn final_body(text: &str, structured_tool_response: bool) -> String {
-    if structured_tool_response {
-        return [
-            format!(
-                "data: {}\n\n",
-                json!({
-                    "choices": [{
-                        "delta": {
-                            "tool_calls": [{
-                                "index": 0,
-                                "id": "call_final_answer",
-                                "type": "function",
-                                "function": {
-                                    "name": "final_answer",
-                                    "arguments": json!({"content": text}).to_string()
-                                }
-                            }]
-                        }
-                    }]
-                })
-            ),
-            format!(
-                "data: {}\n\n",
-                json!({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
-            ),
-            "data: [DONE]\n\n".to_string(),
-        ]
-        .concat();
-    }
+fn final_body(text: &str) -> String {
     [
         format!(
             "data: {}\n\n",

@@ -281,33 +281,13 @@ fn clark_client_tool_loop_uses_explicit_openrouter_reasoning_capture() {
 }
 
 #[test]
-fn forced_tool_choice_uses_auto_or_named_singleton_on_the_wire() {
+fn tools_always_leave_selection_to_the_model() {
     let client = LlmClient::from_parts(
-        "https://api.example.test/v1",
-        "test-model",
-        None,
-        Vec::new(),
-        None,
-    )
-    .unwrap();
-    let tools = [ToolSchema::function(
-        "final_answer",
-        "Deliver the answer.",
-        json!({"type": "object"}),
-    )];
-
+        "https://api.example.test/v1", "test-model", None, Vec::new(), None,
+    ).unwrap();
+    let tools = [ToolSchema::function("read_file", "Read a file.", json!({"type": "object"}))];
     assert_eq!(client.body(&[], &tools)["tool_choice"], json!("auto"));
-    assert_eq!(
-        client.body_forced_tool(&[], &tools)["tool_choice"],
-        json!("auto")
-    );
-    assert_eq!(
-        client.body_requiring_named_tool(&[], &tools, "final_answer")["tool_choice"],
-        json!({
-            "type": "function",
-            "function": { "name": "final_answer" },
-        })
-    );
+    assert!(client.body(&[], &[]).get("tool_choice").is_none());
 }
 
 #[test]

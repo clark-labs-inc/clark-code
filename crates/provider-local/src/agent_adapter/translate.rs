@@ -291,17 +291,6 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
             ca::stream::StreamErrorKind::Fatal,
             format!("provider_error:{message}"),
         ),
-        // clark-agent 0.4 exposes only a generic fatal stream seam for this
-        // permanent provider-contract failure. Preserve the typed prefix for
-        // the provider-local terminal mapper instead of collapsing it into a
-        // provider or transport error.
-        LlmError::ToolProtocolExhausted(message) => (
-            ca::stream::StreamErrorKind::Fatal,
-            format!(
-                "{}{message}",
-                crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
-            ),
-        ),
         LlmError::OutputQuarantined { .. } => (
             ca::stream::StreamErrorKind::Fatal,
             "provider_error:Clark Code blocked a response that failed its data-isolation checks. No output from that response was saved. Please retry."

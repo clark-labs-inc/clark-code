@@ -12,6 +12,10 @@ use tokio::task::JoinHandle;
 pub struct CapturedRequest(Value);
 
 impl CapturedRequest {
+    pub fn body(&self) -> &Value {
+        &self.0
+    }
+
     pub fn messages_for_role(&self, role: &str) -> Vec<String> {
         self.0
             .get("messages")
@@ -237,7 +241,7 @@ pub fn tool_call_body(id: &str, name: &str, arguments: Value) -> String {
 }
 
 pub fn final_body(text: &str) -> String {
-    tool_call_body("final-answer", "final_answer", json!({"content": text}))
+    plain_body(text)
 }
 
 pub fn plain_body(text: &str) -> String {

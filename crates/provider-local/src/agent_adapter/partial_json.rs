@@ -4,7 +4,7 @@
 //! OpenAI-compatible providers stream tool arguments as JSON fragments, so a
 //! payload that matters to the UI — a final answer, a document being written —
 //! is only readable by decoding the prefix that has arrived so far. Shared by
-//! `final_answer_stream` and `document_stream`.
+//! `document_stream`.
 
 /// Decode the currently complete prefix of a JSON string field. The input may
 /// end anywhere, including inside an escape or UTF-16 surrogate pair.

@@ -78,13 +78,13 @@ async fn forwards_openrouter_tool_arguments_as_provider_deltas() {
         (
             Duration::ZERO,
             frame(
-                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"answer-1","function":{"name":"final_","arguments":"{\"content\":\"Clark "}}]}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"answer-1","function":{"name":"test_","arguments":"{\"content\":\"Clark "}}]}}]}"#,
             ),
         ),
         (
             Duration::from_millis(20),
             frame(
-                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"answer","arguments":"streams\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"tool","arguments":"streams\"}"}}]},"finish_reason":"tool_calls"}]}"#,
             ),
         ),
         (Duration::ZERO, b"data: [DONE]\n\n".to_vec()),
@@ -94,14 +94,10 @@ async fn forwards_openrouter_tool_arguments_as_provider_deltas() {
     let cancel = CancellationToken::new();
     let mut callbacks = Vec::new();
     let turn = client
-        .stream_chat_observed_with_tool_choice(
+        .stream_chat_with_observers(
             &[ChatMessage::user("hello")],
             &[],
-            StreamChatOptions {
-                cancel: &cancel,
-                force_tool_call: true,
-                forced_tool_name: None,
-            },
+            &cancel,
             StreamObservers::new(
                 |_: &str| {},
                 |_: &str| {},
@@ -112,18 +108,18 @@ async fn forwards_openrouter_tool_arguments_as_provider_deltas() {
         .await
         .unwrap();
 
-    assert_eq!(turn.tool_calls[0].function.name, "final_answer");
+    assert_eq!(turn.tool_calls[0].function.name, "test_tool");
     assert_eq!(
         turn.tool_calls[0].function.arguments,
         r#"{"content":"Clark streams"}"#
     );
     assert_eq!(callbacks.len(), 2);
-    assert_eq!(callbacks[0].name_delta.as_deref(), Some("final_"));
+    assert_eq!(callbacks[0].name_delta.as_deref(), Some("test_"));
     assert_eq!(
         callbacks[0].arguments_delta.as_deref(),
         Some(r#"{"content":"Clark "#)
     );
-    assert_eq!(callbacks[1].name_delta.as_deref(), Some("answer"));
+    assert_eq!(callbacks[1].name_delta.as_deref(), Some("tool"));
     assert_eq!(callbacks[1].arguments_delta.as_deref(), Some("streams\"}"));
 }
 
@@ -141,7 +137,7 @@ async fn publishes_held_open_word_before_tool_fragments_cross() {
         (
             Duration::from_millis(20),
             frame(
-                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"final_answer","arguments":"{\"content\":\"done\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"test_tool","arguments":"{\"content\":\"done\"}"}}]},"finish_reason":"tool_calls"}]}"#,
             ),
         ),
         (Duration::ZERO, b"data: [DONE]\n\n".to_vec()),
@@ -154,14 +150,10 @@ async fn publishes_held_open_word_before_tool_fragments_cross() {
     let reasoning_events = events.clone();
     let tool_events = events.clone();
     let turn = client
-        .stream_chat_observed_with_tool_choice(
+        .stream_chat_with_observers(
             &[ChatMessage::user("hello")],
             &[],
-            StreamChatOptions {
-                cancel: &cancel,
-                force_tool_call: true,
-                forced_tool_name: None,
-            },
+            &cancel,
             StreamObservers::new(
                 move |delta: &str| text_events.borrow_mut().push(format!("text:{delta}")),
                 move |delta: &str| {
@@ -176,7 +168,7 @@ async fn publishes_held_open_word_before_tool_fragments_cross() {
         .await
         .unwrap();
 
-    assert_eq!(turn.tool_calls[0].function.name, "final_answer");
+    assert_eq!(turn.tool_calls[0].function.name, "test_tool");
     // The final narration word must cross before the tool fragment so the
     // projected tail stays attached to its sentence instead of landing below
     // the eagerly announced tool row.

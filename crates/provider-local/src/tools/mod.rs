@@ -32,7 +32,7 @@ mod deferred;
 pub mod diagnostics;
 pub mod document;
 pub mod effect;
-pub mod final_answer;
+pub mod deliver_files;
 pub mod fs;
 pub mod goal;
 pub mod grep;

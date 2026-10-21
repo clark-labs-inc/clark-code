@@ -1,6 +1,8 @@
 //! Thin launcher from agent-desktop's provider API into `agent_loop::run`.
 
 mod error;
+mod finish;
+use finish::finish_root;
 mod recovery;
 mod steering;
 
@@ -288,6 +290,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let steering = Arc::new(EngineSteering::with_execution(execution.clone()));
     // Keep the handle so request-time compaction can become canonical history.
     let compactor = CheckpointCompactor::new(tc.llm.clone(), tc.compaction.clone());
+    let effect_completion = Arc::new(crate::effects::EffectCompletionGuard::new(
+        tc.session.clone(),
+        run.clone(),
+    ));
     let mut builder = agent_loop::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools_arc(tools.clone())
@@ -295,10 +301,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .default_execution_mode(agent_loop::ExecutionMode::Parallel)
         .after_tool_call_arc(loop_advisory)
         .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
-        .follow_up(crate::effects::EffectCompletionGuard::new(
-            tc.session.clone(),
-            run.clone(),
-        ))
+        .follow_up_arc(effect_completion.clone())
+        .tool_gate_arc(effect_completion)
         .model_id(tc.model.clone())
         .steering_arc(steering.clone())
         // Project every oversized re-fetchable result before the first model
@@ -707,44 +711,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             .await;
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn finish_root(
-    tx: &Sender<AgentEvent>,
-    run: &RunId,
-    execution: &RootExecutionTrace,
-    context: &RootFinishContext,
-    status: RunStatus,
-    stop_reason: Option<String>,
-    error: Option<String>,
-    failure_kind: Option<RunFailureKind>,
-    usage: Option<RunUsage>,
-) {
-    let terminal = match status {
-        RunStatus::Done => agent_orchestration::ExecutionState::Completed,
-        RunStatus::Cancelled => agent_orchestration::ExecutionState::Cancelled,
-        RunStatus::Failed => agent_orchestration::ExecutionState::Failed,
-        _ => agent_orchestration::ExecutionState::Blocked,
-    };
-    let reason = error.clone().or_else(|| stop_reason.clone());
-    let execution_summary = execution
-        .finalize(context.executor.as_ref(), &context.root, terminal, reason)
-        .await;
-    context.session.lock().await.active_execution = None;
-    finish(
-        tx,
-        run,
-        RunOutcome {
-            status,
-            stop_reason,
-            error,
-            failure_kind,
-            usage,
-            execution: Some(execution_summary),
-        },
-    )
-    .await;
 }
 
 /// Stamp the engine's auto-compaction threshold onto the run usage so the UI

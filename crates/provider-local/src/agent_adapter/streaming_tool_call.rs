@@ -9,7 +9,6 @@ use agent_core::ids::{RunId, ToolCallId};
 use async_channel::Sender;
 use serde_json::Value;
 
-use crate::tools::final_answer::FINAL_ANSWER_TOOL;
 use crate::tools::ToolRegistry;
 
 use super::{redaction, tool_result_to_content, tool_title};
@@ -185,7 +184,6 @@ impl StreamingToolCalls {
             || !candidate.arguments_started
             || candidate.id.is_empty()
             || candidate.name.is_empty()
-            || candidate.name == FINAL_ANSWER_TOOL
         {
             return None;
         }
@@ -250,17 +248,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn never_announces_final_answer_as_a_tool_row() {
-        let mut calls = StreamingToolCalls::default();
-        assert_eq!(
-            calls.observe_delta(
-                0,
-                Some("answer-1"),
-                Some(FINAL_ANSWER_TOOL),
-                Some("{\"content\":"),
-            ),
-            None
-        );
-    }
 }

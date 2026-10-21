@@ -132,7 +132,7 @@ fn schema_property_order_survives_serialization() {
     wire_order(&reg, "tool_search", &["query"]);
     wire_order(&reg, "grep", &["pattern", "path"]);
     wire_order(&reg, "view_image", &["path"]);
-    wire_order(&reg, "final_answer", &["files", "content"]);
+    wire_order(&reg, "deliver_files", &["files"]);
     wire_order(
         &reg,
         "verify_effect",

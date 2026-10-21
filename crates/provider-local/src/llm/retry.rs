@@ -12,7 +12,7 @@ use agent_core::{classify_provider_access_failure, RunFailureKind};
 
 use super::{
     drain_lines, output_quarantine, recovery, retry_after_from_metadata, Accumulator,
-    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext, StreamChatOptions,
+    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext,
     ToolSchema, WireToolCallDelta,
 };
 
@@ -110,8 +110,6 @@ where
     tools: &'a [ToolSchema],
     cancel: &'a CancellationToken,
     request_model: &'a str,
-    force_tool_call: bool,
-    forced_tool_name: Option<&'a str>,
     idempotency_key: &'a str,
     on_text: &'a mut OnText,
     on_reasoning: &'a mut OnReasoning,
@@ -156,20 +154,16 @@ impl LlmClient {
         on_reasoning: impl FnMut(&str),
         on_retry: impl FnMut(ProviderFailureContext),
     ) -> Result<AssistantTurn, LlmError> {
-        self.stream_chat_observed_with_tool_choice(
+        self.stream_chat_with_observers(
             messages,
             tools,
-            StreamChatOptions {
-                cancel,
-                force_tool_call: false,
-                forced_tool_name: None,
-            },
+            cancel,
             StreamObservers::new(on_text, on_reasoning, |_| {}, on_retry),
         )
         .await
     }
 
-    pub(crate) async fn stream_chat_observed_with_tool_choice<
+    pub(crate) async fn stream_chat_with_observers<
         OnText,
         OnReasoning,
         OnToolCall,
@@ -178,7 +172,7 @@ impl LlmClient {
         &self,
         messages: &[ChatMessage],
         tools: &[ToolSchema],
-        options: StreamChatOptions<'_>,
+        cancel: &CancellationToken,
         mut observers: StreamObservers<OnText, OnReasoning, OnToolCall, OnRetry>,
     ) -> Result<AssistantTurn, LlmError>
     where
@@ -187,11 +181,6 @@ impl LlmClient {
         OnToolCall: FnMut(WireToolCallDelta),
         OnRetry: FnMut(ProviderFailureContext),
     {
-        let StreamChatOptions {
-            cancel,
-            force_tool_call,
-            forced_tool_name,
-        } = options;
         // One client key identifies an unchanged request body across transport
         // retries. Whether a configured gateway honors it is provider-specific,
         // so diagnostics keep it separate from the provider's own request ID.
@@ -209,8 +198,6 @@ impl LlmClient {
                     tools,
                     cancel,
                     request_model: &request_model,
-                    force_tool_call,
-                    forced_tool_name,
                     idempotency_key: &retry.idempotency_key,
                     on_text: &mut observers.on_text,
                     on_reasoning: &mut observers.on_reasoning,
@@ -379,8 +366,6 @@ impl LlmClient {
             tools,
             cancel,
             request_model,
-            force_tool_call,
-            forced_tool_name,
             idempotency_key,
             on_text,
             on_reasoning,
@@ -388,13 +373,7 @@ impl LlmClient {
         } = attempt;
         let url = format!("{}/chat/completions", self.base_url);
         let reasoning_replays = super::reasoning_receipt::summarize_replays(messages);
-        let request_body = self.body_for_model(
-            request_model,
-            messages,
-            tools,
-            force_tool_call,
-            forced_tool_name,
-        );
+        let request_body = self.body_for_model(request_model, messages, tools);
         let mut request = self.http.post(&url).json(&request_body);
         if let Some(session_id) = &self.session_id {
             request = request.header("x-session-id", session_id);
@@ -551,7 +530,7 @@ impl LlmClient {
                         // a retry would duplicate the assistant response.
                         // Tool-call deltas now cross the typed stream boundary
                         // too. Replaying after any such delta would append a
-                        // duplicate partial `final_answer` (or corrupt another
+                        // duplicate partial answer (or corrupt another
                         // observer's tool-call projection) to the same message.
                         retry_safe: !text_guard.borrow().published()
                             && !reasoning_guard.borrow().published()

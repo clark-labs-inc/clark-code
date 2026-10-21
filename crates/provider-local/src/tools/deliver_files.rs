@@ -4,21 +4,18 @@ use agent_core::domain::{ArtifactKind, ToolKind};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{arg_str, ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome};
+use super::{ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome};
 
-pub(crate) const FINAL_ANSWER_TOOL: &str = "final_answer";
-pub(crate) const FINAL_ANSWER_DETAILS_KEY: &str = "_agent_final_answer";
-
-pub struct FinalAnswer;
+pub struct DeliverFiles;
 
 #[async_trait]
-impl ToolExecutor for FinalAnswer {
+impl ToolExecutor for DeliverFiles {
     fn name(&self) -> &str {
-        FINAL_ANSWER_TOOL
+        "deliver_files"
     }
 
     fn description(&self) -> &str {
-        "Deliver the final user-facing answer and any generated files, then end the run. Call this only after the requested work, checks, and every effect verification are complete."
+        "Attach existing generated files for the user to open or save. Validate every path before publishing attachments. After this tool succeeds, finish with an ordinary assistant response."
     }
 
     fn parameters(&self) -> Value {
@@ -28,14 +25,11 @@ impl ToolExecutor for FinalAnswer {
                 "files": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "minItems": 1,
                     "description": "Existing user-facing deliverable file paths, relative to the active workspace when possible. List generated reports, archives, images, documents, and other files the user should be able to open or save. Omit ordinary source files changed as part of implementation work."
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Complete final answer to show the user."
                 }
             },
-            "required": ["content"]
+            "required": ["files"]
         })
     }
 
@@ -43,21 +37,12 @@ impl ToolExecutor for FinalAnswer {
         ToolKind::Other
     }
 
-    fn terminates_run(&self) -> bool {
-        true
-    }
-
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
-        let content = match arg_str(&args, "content") {
-            Ok(content) if !content.trim().is_empty() => content.trim().to_string(),
-            _ => return ToolOutcome::error("`content` must be a non-empty final answer"),
-        };
         let files = match deliverable_files(&args, ctx) {
             Ok(files) => files,
             Err(error) => return ToolOutcome::error(error),
         };
-        let mut outcome = ToolOutcome::ok("Final answer delivered.")
-            .with_details(json!({ FINAL_ANSWER_DETAILS_KEY: content }));
+        let mut outcome = ToolOutcome::ok("Files delivered. Finish with an ordinary assistant response.");
         for file in files {
             outcome = outcome.with_artifact(file);
         }
@@ -66,12 +51,15 @@ impl ToolExecutor for FinalAnswer {
 }
 
 fn deliverable_files(args: &Value, ctx: &ToolCtx) -> Result<Vec<ProducedArtifact>, String> {
-    let Some(files) = args.get("files") else {
-        return Ok(Vec::new());
-    };
+    let files = args
+        .get("files")
+        .ok_or_else(|| "`files` is required".to_string())?;
     let files = files
         .as_array()
         .ok_or_else(|| "`files` must be an array of existing file paths".to_string())?;
+    if files.is_empty() {
+        return Err("`files` must contain at least one existing file path".to_string());
+    }
     let mut seen = BTreeSet::new();
     let mut artifacts = Vec::with_capacity(files.len());
     for file in files {
@@ -174,32 +162,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preserves_the_complete_structured_answer() {
-        let root = tempfile::tempdir().unwrap();
-        let outcome = FinalAnswer
-            .invoke(
-                json!({"content": "  Done.\n\nEvidence: exact.  "}),
-                &context(root.path()),
-            )
-            .await;
-
-        assert!(!outcome.is_error);
-        assert_eq!(
-            outcome.details[FINAL_ANSWER_DETAILS_KEY],
-            "Done.\n\nEvidence: exact."
-        );
-    }
-
-    #[tokio::test]
     async fn turns_validated_deliverable_paths_into_typed_artifacts() {
         let root = tempfile::tempdir().unwrap();
         let archive = root.path().join("parrot-emoji-pack.zip");
         std::fs::write(&archive, b"PK fake archive").unwrap();
 
-        let outcome = FinalAnswer
+        let outcome = DeliverFiles
             .invoke(
                 json!({
-                    "content": "The emoji pack is ready.",
                     "files": ["parrot-emoji-pack.zip", "parrot-emoji-pack.zip"]
                 }),
                 &context(root.path()),
@@ -224,10 +194,9 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_claim_a_missing_deliverable() {
         let root = tempfile::tempdir().unwrap();
-        let outcome = FinalAnswer
+        let outcome = DeliverFiles
             .invoke(
                 json!({
-                    "content": "The emoji pack is ready.",
                     "files": ["missing.zip"]
                 }),
                 &context(root.path()),

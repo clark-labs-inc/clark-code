@@ -205,15 +205,6 @@ impl ToolSchema {
     }
 }
 
-pub(crate) struct StreamChatOptions<'a> {
-    pub(crate) cancel: &'a CancellationToken,
-    pub(crate) force_tool_call: bool,
-    /// After an auto-mode provider returns prose on a host-forced turn, the
-    /// adapter can retry with one named delivery tool. This remains `None` for
-    /// ordinary turns so the model is free to choose the next work tool.
-    pub(crate) forced_tool_name: Option<&'a str>,
-}
-
 /// Token/cost accounting from the final streamed chunk (OpenRouter shape,
 /// forwarded verbatim by Clark Code passthrough).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -312,10 +303,6 @@ pub enum LlmError {
     PlatformKeyRejected(String),
     /// The configured gateway or upstream provider returned an application-level failure.
     Provider(String),
-    /// The provider returned successful responses but repeatedly declined the
-    /// required structured-tool boundary, including the singleton named-tool
-    /// repair. This is deterministic protocol incompatibility, not transport.
-    ToolProtocolExhausted(String),
     /// Provider output failed the desktop isolation boundary before any of the
     /// response was published, persisted, or offered to a tool.
     OutputQuarantined {
@@ -351,7 +338,6 @@ impl std::fmt::Display for LlmError {
             LlmError::InsufficientCredits => f.write_str("insufficient_credits"),
             LlmError::PlatformKeyRejected(message)
             | LlmError::Provider(message)
-            | LlmError::ToolProtocolExhausted(message)
             | LlmError::ContextOverflow(message) => f.write_str(message),
             LlmError::OutputQuarantined { .. } => {
                 f.write_str("model response failed data-isolation validation")
@@ -589,22 +575,7 @@ impl LlmClient {
 
     #[cfg(test)]
     fn body(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
-        self.body_for_model(&self.model, messages, tools, false, None)
-    }
-
-    #[cfg(test)]
-    fn body_forced_tool(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
-        self.body_for_model(&self.model, messages, tools, true, None)
-    }
-
-    #[cfg(test)]
-    fn body_requiring_named_tool(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[ToolSchema],
-        tool_name: &str,
-    ) -> Value {
-        self.body_for_model(&self.model, messages, tools, true, Some(tool_name))
+        self.body_for_model(&self.model, messages, tools)
     }
 
     fn body_for_model(
@@ -612,8 +583,6 @@ impl LlmClient {
         model: &str,
         messages: &[ChatMessage],
         tools: &[ToolSchema],
-        _force_tool_call: bool,
-        forced_tool_name: Option<&str>,
     ) -> Value {
         let mut body = json!({
             "model": model,
@@ -622,18 +591,7 @@ impl LlmClient {
         });
         if !tools.is_empty() {
             body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
-            body["tool_choice"] = if let Some(tool_name) = forced_tool_name {
-                json!({
-                    "type": "function",
-                    "function": { "name": tool_name },
-                })
-            } else {
-                // `force_tool_call` remains a host-side typed recovery
-                // contract. Providers do not reliably implement the bare
-                // `required` mode, so broad catalogs stay on portable auto;
-                // a later named singleton may still be supplied explicitly.
-                json!("auto")
-            };
+            body["tool_choice"] = json!("auto");
         }
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
@@ -710,8 +668,7 @@ fn drain_lines(
 
 /// One provider-native tool-call delta, forwarded without waiting for the
 /// complete arguments object. The agent loop already has a typed streaming
-/// variant for this shape; retaining it here lets terminal tools such as
-/// `final_answer` render their string payload while OpenRouter generates it.
+/// variant for this shape; retaining it here lets document tools render their string payload while the provider generates it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WireToolCallDelta {
     pub index: usize,

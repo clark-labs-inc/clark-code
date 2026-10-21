@@ -16,6 +16,40 @@ paid provider runs are opt-in and require explicit authorization.
 6. Keep typed receipts and first failures; never infer success from UI state or
    a process exit alone.
 
+## Natural assistant completion — 2026-10-20
+
+The October 20 desktop incident returned successful provider streams with no
+structured tool calls at final delivery. An offline ordinary-response regression
+reproduced the old transport-local repair loop and timed out after 60 seconds
+(nextest `73ce4dde-9701-44b3-b5c1-e1d27bfedfb2`). The same test now completes
+on its first response. No private incident text is retained in the fixtures.
+
+The desktop now finishes through ordinary assistant responses in the canonical
+loop. The required terminal tool, named-tool repair, and duplicate answer-stream
+projection are removed. The nonterminal `deliver_files` producer validates all
+requested paths before emitting typed artifacts. Effect verification remains a
+canonical follow-up and tool gate: premature answers stay hidden, premature file
+delivery returns an ordinary error, and rejected answer text remains in model
+history for repair. Existing approved-plan and goal lifecycle guards remain.
+
+The foundation gate passed **789 tests, eight skipped** across agent-core,
+provider-acp, and provider-local (nextest
+`9299111e-f4c0-4556-bc3c-96e72553afdb`). The seven completion/termination
+regressions also passed against published `clark-agent =0.4.0`, with the local
+path override excluded (`74569adf-68bb-4814-be04-bb4abdf1d4cd`). They cover
+post-work prose, single answer projection, saved follow-up context, automatic
+tool selection, validated file delivery, pending-effect rejection and repair,
+and 160 productive work turns. Core WASM compilation and all-targets provider
+compilation (including examples) pass against the published dependency.
+
+Strict Clippy remains blocked by the existing Rust 1.99 dependency-upgrade
+warnings: fixed-size `chunks_exact` in exec-sandbox-protocol, a pre-existing
+needless borrow in the engine, and large provider error variants. No lint
+suppression or unrelated migration fix is included. This is deterministic
+source-path evidence; no hosted model call, installed-app replacement,
+packaged acceptance, deployment, or release was performed.
+
+
 ## Dialog appearance and presence — 2026-10-18
 
 `node harness/element-presence.mjs` samples first appearance, close, and rapid
@@ -125,7 +159,7 @@ boundary, and synthetic renderer receipts, not measured production WAN latency.
 | Mobile permission execution | frontend `mobileRemotePermission.spec.ts` and `MobileRemoteAgent.parity.spec.ts` | deterministic permission validation and real desktop-store bridge handoff | Accepts the pending tool's exact permission for a `running` or `awaiting_input` run, prefers one-time decisions, and rejects stale actions, terminal runs, different conversations/runs, ambiguous legacy ownership, and missing options. Native phone, hosted command delivery, and released app behavior require downstream evidence. |
 | Full deterministic Rust workspace CI | `cargo nextest run --workspace -E 'not test(attachment_benchmark_local)' --no-fail-fast` with cargo-nextest `0.9.143` | deterministic Rust unit, integration, native-host, sandbox, worker, orchestration, and computer-use contracts | Required on every push and pull request; the host-load-sensitive attachment benchmark remains in the benchmark lane rather than making integration CI timing-dependent |
 | Root-loop termination | provider-local `productive_turn_runs_past_128_model_tool_iterations_without_global_cap`, `provider_owns_stream_silence_and_the_user_can_still_cancel`, and agent-orchestration `root_recovery_has_no_implicit_attempt_ceiling` | deterministic provider-loop contracts | Proves productive root work has no implicit step, cumulative-token, stream-idle, wall-clock, empty-outcome, or recovery-attempt lifetime stop; user cancellation remains immediate |
-| Provider progress streaming | provider-local `required_tool_contract_violation_gets_one_isolated_repair`, `desktop_sink_announces_an_ordinary_tool_while_arguments_stream`, and the `agent_adapter::tool_call_stream` / `agent_adapter::streaming_tool_call` unit contracts | deterministic provider-stream and desktop-projection contracts | Proves typed reasoning remains visible while required-tool prose is quarantined, ordinary provider tool-call deltas create a pending human-readable row before execution, fragmented tool names are preserved, and a premature `final_answer` payload remains staged behind effect completion. It does not prove a deployed gateway route, a live hosted model, or packaged WebView rendering. |
+| Provider progress streaming and completion | provider-local `natural_completion`, `loop_termination`, and `agent_adapter::projection_tests` | deterministic provider-stream, completion, and desktop-projection contracts | Ordinary assistant responses finish through the canonical loop and remain in follow-up history. Tools always use automatic selection. Generated files are validated by the nonterminal `deliver_files` producer; pending effects block premature answer/file publication until canonical verification. Ordinary tool deltas still stream as activity. These fixtures do not prove a hosted provider or packaged application. |
 | Provider reasoning continuity | provider-local reasoning receipt, retry, accumulator, and full-history translation contracts; downstream ignored `live_reasoning_continuity` | deterministic hash-only capture/replay contracts plus an explicitly authorized live Clark Code source-path sample | The focused deterministic gate passed 19/19 (nextest `db3fb4d3-5a49-4666-b347-995846f82e4e`). The 2026-08-26 Ox Alpha sample passed 2/2 turns after four provider responses, retained exact structured reasoning across the full canonical history, and matched capture to replay at SHA-256 `78cc3a2d6c33dcb467b61dec4a5ea0c8d3c275205b42518de8b076119a3b344f`; safe traces contain hashes and counts, never raw private reasoning. Receipt: `/Users/stan/Documents/evals/clark-client-shape-reasoning-20260826_045507/clark-code/clark-code-summary.json`. This proves the current source path, not a packaged or released Clark Code build. |
 | Delegated-run lifecycle | agent-orchestration `unbounded_provider_harness_remains_cancellable_while_the_stream_is_idle` and `default_budget_accounts_without_imposing_a_lifetime_ceiling`, plus provider-local `production_harness_path_is_parallel_isolated_reviewed_and_replayed` | deterministic child-provider and isolated-worktree contracts | Productive local, ACP, writer, reviewer, and integrator attempts have no foundation-owned response deadline or default shared-token lifetime ceiling; explicit cancellation wakes an idle stream and reaches the provider. Optional caller-owned deadlines and budgets remain available for bounded tests, evals, and brokered services. This does not prove live delegated-model quality. |
 | Tool-result retention and overflow recovery | provider-local `giant_tool_output_is_preserved_before_the_next_model_call`, `bounds_broad_results_and_tells_the_model_how_to_refine`, `broad_grep_reports_complete_count_without_flooding_the_next_prompt`, `hierarchical_compaction_covers_every_oversized_source_byte`, and `oversized_context_recovers_through_hierarchical_compaction`; sibling `../clark-agent` `clips_old_results_but_preserves_the_entire_fresh_batch`, `useful_excerpt_keeps_head_and_tail_within_cap`, and `bounded_excerpt_never_exceeds_a_tiny_cap` | deterministic provider-loop, tool-output, and history-transform contracts | Proves every accepted tool result in the newest batch reaches the next model request verbatim; broad grep itself returns a complete match count with at most 64 KiB of result rows and explicit refinement guidance; compaction partitions an oversized transcript into provider-safe UTF-8 segments covering every source byte, sends summarization policy in the system role with each segment isolated as quoted evidence, and recursively reduces ordered handoffs instead of resending the rejected prompt or silently dropping a prefix. The public provider-loop reproduction completes an overflowed turn through two map calls and one reduction. Older oversized results retain bounded head/tail evidence with the middle omitted. It does not prove live summarization quality or a packaged recovery journey. |

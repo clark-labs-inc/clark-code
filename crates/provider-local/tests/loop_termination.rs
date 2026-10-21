@@ -37,48 +37,8 @@ fn tool_call_body(call_id: &str, name: &str, args: Value) -> String {
     .join("\n\n")
 }
 
-fn tool_call_body_with_usage(
-    call_id: &str,
-    name: &str,
-    args: Value,
-    prompt_tokens: u64,
-    completion_tokens: u64,
-) -> String {
-    let arguments = serde_json::to_string(&args).expect("tool arguments serialize");
-    [
-        format!(
-            "data: {}",
-            json!({
-                "choices": [{
-                    "delta": {
-                        "tool_calls": [{
-                            "index": 0,
-                            "id": call_id,
-                            "function": {"name": name, "arguments": arguments}
-                        }]
-                    }
-                }]
-            })
-        ),
-        format!(
-            "data: {}",
-            json!({
-                "choices": [{"delta": {}, "finish_reason": "tool_calls"}],
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens
-                }
-            })
-        ),
-        "data: [DONE]".to_string(),
-        String::new(),
-    ]
-    .join("\n\n")
-}
-
 fn text_body(text: &str) -> String {
-    tool_call_body("final-answer", "final_answer", json!({"content": text}))
+    plain_text_body(text)
 }
 
 fn plain_text_body(text: &str) -> String {
@@ -88,29 +48,6 @@ fn plain_text_body(text: &str) -> String {
             json!({"choices": [{"delta": {"content": text}}]})
         ),
         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}".to_string(),
-        "data: [DONE]".to_string(),
-        String::new(),
-    ]
-    .join("\n\n")
-}
-
-fn reasoning_body_with_usage(text: &str, prompt_tokens: u64, completion_tokens: u64) -> String {
-    [
-        format!(
-            "data: {}",
-            json!({"choices": [{"delta": {"reasoning": text}}]})
-        ),
-        format!(
-            "data: {}",
-            json!({
-                "choices": [{"delta": {}, "finish_reason": "stop"}],
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens
-                }
-            })
-        ),
         "data: [DONE]".to_string(),
         String::new(),
     ]
@@ -259,7 +196,7 @@ async fn terminal_outcome(
 }
 
 #[tokio::test]
-async fn structured_final_answer_is_terminal_after_one_model_response() {
+async fn natural_final_answer_is_terminal_after_one_model_response() {
     let root = tempfile::tempdir().expect("temporary project");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -286,12 +223,12 @@ async fn structured_final_answer_is_terminal_after_one_model_response() {
     assert_eq!(
         requests.len(),
         1,
-        "the typed final-answer tool is the natural completion boundary"
+        "ordinary assistant text is the natural completion boundary"
     );
 }
 
 #[tokio::test]
-async fn structured_final_answer_delivers_an_existing_file_as_an_artifact() {
+async fn file_delivery_precedes_a_natural_final_answer() {
     let root = tempfile::tempdir().expect("temporary project");
     let archive = root.path().join("parrot-emoji-pack.zip");
     std::fs::write(&archive, b"PK fake archive").expect("write deliverable");
@@ -301,14 +238,10 @@ async fn structured_final_answer_delivers_an_existing_file_as_an_artifact() {
     let address = listener.local_addr().expect("model endpoint address");
     let server = tokio::spawn(serve(
         listener,
-        vec![tool_call_body(
-            "final-answer",
-            "final_answer",
-            json!({
-                "content": "The parrot emoji pack is ready.",
-                "files": ["parrot-emoji-pack.zip"]
-            }),
-        )],
+        vec![
+            tool_call_body("deliver-files", "deliver_files", json!({"files": ["parrot-emoji-pack.zip"]})),
+            text_body("The parrot emoji pack is ready."),
+        ],
     ));
     let mut provider = connect(address, root.path(), json!({})).await;
     let session = new_session(&mut provider, root.path()).await;
@@ -330,7 +263,7 @@ async fn structured_final_answer_delivers_an_existing_file_as_an_artifact() {
     };
 
     assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
-    let artifact = delivered.expect("final answer emitted a typed artifact");
+    let artifact = delivered.expect("producer emitted a typed artifact");
     assert_eq!(artifact.id, "deliverable:parrot-emoji-pack.zip");
     assert_eq!(artifact.title, "parrot-emoji-pack.zip");
     assert_eq!(artifact.kind, ArtifactKind::File);
@@ -339,7 +272,7 @@ async fn structured_final_answer_delivers_an_existing_file_as_an_artifact() {
         artifact.uri.as_deref(),
         Some(archive.canonicalize().unwrap().to_string_lossy().as_ref())
     );
-    assert_eq!(server.await.expect("model server task").len(), 1);
+    assert_eq!(server.await.expect("model server task").len(), 2);
 }
 
 #[tokio::test]
@@ -398,196 +331,6 @@ async fn one_failed_run_does_not_override_the_goal_blocker_contract() {
     assert_eq!(goal.status, GoalStatus::Active);
     assert_eq!(goal.blocker_reason, None);
     assert_eq!(server.await.expect("model server task").len(), 4);
-}
-
-#[tokio::test]
-async fn broad_auto_prose_gets_one_isolated_tool_protocol_repair() {
-    const DISCARDED: &str = "I am done, but I forgot the final-answer tool.";
-    const DELIVERED: &str = "The structured final answer was repaired.";
-    let root = tempfile::tempdir().expect("temporary project");
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind model endpoint");
-    let address = listener.local_addr().expect("model endpoint address");
-    let server = tokio::spawn(serve(
-        listener,
-        vec![
-            reasoning_body_with_usage(DISCARDED, 100, 5),
-            tool_call_body_with_usage(
-                "final-answer",
-                "final_answer",
-                json!({"content": DELIVERED}),
-                110,
-                6,
-            ),
-        ],
-    ));
-    let mut provider = connect(address, root.path(), json!({})).await;
-    let session = new_session(&mut provider, root.path()).await;
-    let mut stream = provider
-        .prompt(
-            &session.id,
-            PromptInput::text("Return a structured answer."),
-        )
-        .await
-        .expect("start prompt");
-    let mut visible_text = String::new();
-    let mut visible_thinking = String::new();
-    let outcome = loop {
-        match stream.next().await.expect("run reaches terminal event") {
-            AgentEvent::MessageChunk {
-                delta: ContentBlock::Text { text },
-                ..
-            } => visible_text.push_str(&text),
-            AgentEvent::MessageChunk {
-                delta: ContentBlock::Thinking { text },
-                ..
-            } => visible_thinking.push_str(&text),
-            AgentEvent::RunFinished { outcome, .. } => break outcome,
-            _ => {}
-        }
-    };
-
-    assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
-    let usage = outcome.usage.expect("repair usage is retained");
-    assert_eq!(usage.input_tokens, 210, "{outcome:?}");
-    assert_eq!(usage.output_tokens, 11, "{outcome:?}");
-    assert_eq!(usage.context_tokens, 110, "{outcome:?}");
-    assert!(!visible_text.contains(DISCARDED), "{visible_text}");
-    assert!(visible_thinking.contains(DISCARDED), "{visible_thinking}");
-    assert!(visible_text.contains(DELIVERED), "{visible_text}");
-    let requests = server.await.expect("model server task");
-    assert_eq!(requests.len(), 2);
-    let request_text = requests
-        .iter()
-        .map(|request| String::from_utf8_lossy(request))
-        .collect::<Vec<_>>();
-    for request in &requests {
-        assert!(
-            String::from_utf8_lossy(request).contains(r#""tool_choice":"auto""#),
-            "portable auto tool choice missing"
-        );
-    }
-    let idempotency_key = |request: &str| {
-        request.lines().find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("idempotency-key")
-                .then(|| value.trim().to_string())
-        })
-    };
-    assert!(idempotency_key(&request_text[0]).is_none());
-    assert!(idempotency_key(&request_text[1]).is_none());
-    assert!(
-        request_text[1].contains("previous response did not call a structured tool"),
-        "repair request lacked a precise contract correction"
-    );
-}
-
-#[tokio::test]
-async fn unstructured_provider_output_is_quarantined_before_visible_history() {
-    const MALFORMED: &str = "?: yes please -> @9ff4... drawn.";
-    let root = tempfile::tempdir().expect("temporary project");
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind model endpoint");
-    let address = listener.local_addr().expect("model endpoint address");
-    let server = tokio::spawn(serve(
-        listener,
-        vec![
-            plain_text_body(MALFORMED),
-            plain_text_body(MALFORMED),
-            plain_text_body(MALFORMED),
-        ],
-    ));
-    let mut provider = connect(address, root.path(), json!({})).await;
-    let session = new_session(&mut provider, root.path()).await;
-    let mut stream = provider
-        .prompt(
-            &session.id,
-            PromptInput::text("Return a structured answer."),
-        )
-        .await
-        .expect("start prompt");
-    let mut events = Vec::new();
-    while let Some(event) = stream.next().await {
-        let done = matches!(event, AgentEvent::RunFinished { .. });
-        events.push(event);
-        if done {
-            break;
-        }
-    }
-
-    assert!(!events.iter().any(|event| matches!(
-        event,
-        AgentEvent::MessageChunk {
-            delta: ContentBlock::Text { text },
-            ..
-        } if text.contains(MALFORMED)
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        AgentEvent::Trace { source, .. }
-            if source == "model_tool_protocol_recovery"
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        AgentEvent::RunFinished { outcome, .. }
-            if outcome.status == RunStatus::Failed
-                && outcome.failure_kind == Some(RunFailureKind::ToolProtocolExhausted)
-    )));
-    let final_repair = events
-        .iter()
-        .find_map(|event| match event {
-            AgentEvent::Trace {
-                source, payload, ..
-            } if source == "model_tool_protocol_recovery"
-                && payload["repair_attempt"] == json!(2) =>
-            {
-                Some(payload)
-            }
-            _ => None,
-        })
-        .expect("final repair trace");
-    assert_eq!(
-        final_repair["tool_choice"],
-        json!({
-            "type": "function",
-            "function": { "name": "final_answer" },
-        })
-    );
-    assert_eq!(final_repair["advertised_tools"], json!(["final_answer"]));
-    let requests = server.await.expect("model server task");
-    assert_eq!(requests.len(), 3);
-    assert!(
-        String::from_utf8_lossy(&requests[1])
-            .contains("previous response did not call a structured tool"),
-        "second provider request was not an isolated contract repair"
-    );
-    let final_request = String::from_utf8_lossy(&requests[2]);
-    let final_body: Value = serde_json::from_str(
-        final_request
-            .split_once("\r\n\r\n")
-            .expect("HTTP request body")
-            .1,
-    )
-    .expect("final recovery JSON body");
-    assert_eq!(
-        final_body["tool_choice"],
-        json!({
-            "type": "function",
-            "function": { "name": "final_answer" },
-        }),
-        "final recovery request did not pin the typed delivery tool"
-    );
-    assert_eq!(
-        final_body["tools"].as_array().map(Vec::len),
-        Some(1),
-        "final recovery advertised unrelated tools"
-    );
-    assert_eq!(
-        final_body["tools"][0]["function"]["name"],
-        json!("final_answer")
-    );
 }
 
 #[tokio::test]
@@ -712,18 +455,15 @@ async fn unresolved_effect_blocks_final_answer_until_canonical_verification() {
     assert_eq!(tool_calls, 3);
     assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
     assert_eq!(outcome.failure_kind, None, "{outcome:?}");
-    assert!(
-        !visible_text
-            .iter()
-            .any(|text| text.contains("premature answer")),
-        "unverified final answer reached the UI: {visible_text:?}"
-    );
-    assert!(visible_text
-        .iter()
-        .any(|text| text.contains("verified canonical read-back")));
+    let visible_text = visible_text.concat();
+    assert!(!visible_text.contains("premature answer"), "{visible_text}");
+    assert!(visible_text.contains("verified canonical read-back"), "{visible_text}");
 
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), 5);
+    let repair_context = String::from_utf8_lossy(&requests[2]);
+    assert!(repair_context.contains("This premature answer must be rejected."));
+    assert!(repair_context.contains("cannot finish yet"));
     let first_follow_up = String::from_utf8_lossy(&requests[1]);
     assert!(
         first_follow_up.contains("verify_effect"),

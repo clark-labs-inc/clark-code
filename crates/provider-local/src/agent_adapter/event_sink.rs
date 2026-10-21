@@ -1,5 +1,9 @@
 //! Projection of typed agent-loop events into desktop events.
 
+#[path = "completed_transcript.rs"]
+mod completed_transcript;
+use completed_transcript::CompletedRunTranscript;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -18,12 +22,10 @@ fn transcript_chars(messages: &[ca::AgentMessage]) -> usize {
         .sum()
 }
 
-use crate::tools::final_answer::{FINAL_ANSWER_DETAILS_KEY, FINAL_ANSWER_TOOL};
 use crate::tools::ToolRegistry;
 
 use super::{
     document_stream::{DocumentStreams, SettledDocument},
-    final_answer_stream::FinalAnswerStreams,
     locations_from_details, markdown_artifact, mobile_screenshot_artifact, reasoning_stream,
     streaming_tool_call::{
         emit_execution_start, execution_update_event, streamed_tool_event, ExecutionStart,
@@ -42,7 +44,6 @@ pub(crate) struct DesktopEventSink {
     /// the summary at the checkpoint boundary so only a genuinely new
     /// checkpoint produces another user-visible notice.
     last_compaction_checkpoint: std::sync::Mutex<Option<String>>,
-    final_answer_streams: std::sync::Mutex<FinalAnswerStreams>,
     document_streams: std::sync::Mutex<DocumentStreams>,
     streaming_tool_calls: std::sync::Mutex<StreamingToolCalls>,
     /// Whether the current upstream assistant message has emitted its durable
@@ -67,7 +68,6 @@ impl DesktopEventSink {
             completed_transcript: CompletedRunTranscript::default(),
             execution: None,
             last_compaction_checkpoint: std::sync::Mutex::new(None),
-            final_answer_streams: std::sync::Mutex::new(FinalAnswerStreams::default()),
             document_streams: std::sync::Mutex::new(DocumentStreams::default()),
             streaming_tool_calls: std::sync::Mutex::new(StreamingToolCalls::default()),
             message_stream_announced: std::sync::Mutex::new(false),
@@ -135,81 +135,6 @@ impl DesktopEventSink {
     }
 }
 
-/// Canonical messages that reached a complete commit boundary during a run.
-///
-/// `agent_loop::run` returns its message tail only on success. On an error it
-/// still emits typed lifecycle events, so retain the initial prompt/steering
-/// messages plus complete `TurnEnd` assistant/tool-result groups. Assistant
-/// `MessageEnd` alone is not a commit boundary: it can be a discarded
-/// max-token attempt, a transport error, or a tool turn that never completed.
-#[derive(Clone, Default)]
-pub(crate) struct CompletedRunTranscript {
-    messages: Arc<std::sync::Mutex<Vec<ca::AgentMessage>>>,
-}
-
-impl CompletedRunTranscript {
-    fn observe(&self, event: &ca::AgentEvent) {
-        let mut messages = self.messages.lock().expect("run transcript lock");
-        match event {
-            ca::AgentEvent::MessageEnd { message }
-                if !matches!(message, ca::AgentMessage::Assistant { .. }) =>
-            {
-                messages.push(message.clone());
-            }
-            ca::AgentEvent::TurnEnd {
-                message,
-                tool_results,
-            } if !matches!(
-                message,
-                ca::AgentMessage::Assistant {
-                    stop_reason: ca::StopReason::Error | ca::StopReason::Aborted,
-                    ..
-                }
-            ) =>
-            {
-                messages.push(message.clone());
-                messages.extend(tool_results.iter().cloned());
-            }
-            _ => {}
-        }
-    }
-
-    #[cfg(test)]
-    pub fn snapshot(&self) -> Vec<ca::AgentMessage> {
-        self.messages.lock().expect("run transcript lock").clone()
-    }
-
-    /// Whether this run already committed a user-visible final answer. A
-    /// later hidden follow-up (for example effect verification) must not turn
-    /// that answer into an "empty model response" if the follow-up itself
-    /// produces no output.
-    pub fn has_final_answer(&self) -> bool {
-        self.messages
-            .lock()
-            .expect("run transcript lock")
-            .iter()
-            .any(|message| {
-                matches!(
-                    message,
-                    ca::AgentMessage::Assistant {
-                        content,
-                        stop_reason: ca::StopReason::EndTurn,
-                        ..
-                    } if !content.plain_text().trim().is_empty()
-                        && content.tool_calls().is_empty()
-                )
-            })
-    }
-
-    /// Take everything observed so far, leaving the tracker empty. The
-    /// engine's overflow recovery folds progress into the session transcript
-    /// mid-run; draining (instead of snapshotting) means a later fold after
-    /// the retry can't duplicate the same messages.
-    pub fn drain(&self) -> Vec<ca::AgentMessage> {
-        std::mem::take(&mut *self.messages.lock().expect("run transcript lock"))
-    }
-}
-
 #[async_trait]
 impl ca::EventSink for DesktopEventSink {
     async fn emit(&self, event: ca::AgentEvent) {
@@ -255,10 +180,6 @@ impl ca::EventSink for DesktopEventSink {
                     .message_stream_announced
                     .lock()
                     .expect("message stream boundary lock") = false;
-                self.final_answer_streams
-                    .lock()
-                    .expect("final answer stream lock")
-                    .reset_message();
                 self.streaming_tool_calls
                     .lock()
                     .expect("streaming tool calls lock")
@@ -338,15 +259,6 @@ impl ca::EventSink for DesktopEventSink {
             } => {
                 let (index, id_delta, name_delta, arguments_delta) =
                     private_tool_delta.unwrap_or((index, id_delta, name_delta, arguments_delta));
-                let delta = self
-                    .final_answer_streams
-                    .lock()
-                    .expect("final answer stream lock")
-                    .observe_delta(index, name_delta.as_deref(), arguments_delta.as_deref());
-                if let Some(delta) = delta {
-                    self.emit_agent_message_chunk(desktop::ContentBlock::text(delta))
-                        .await;
-                }
                 let document_delta = self
                     .document_streams
                     .lock()
@@ -429,13 +341,6 @@ impl ca::EventSink for DesktopEventSink {
                 tool_name,
                 args,
             } => {
-                if tool_name == FINAL_ANSWER_TOOL {
-                    self.final_answer_streams
-                        .lock()
-                        .expect("final answer stream lock")
-                        .begin(&tool_call_id, &args);
-                    return;
-                }
                 // Complete the streamed document from the validated arguments.
                 // This still precedes the write, so it is the earliest point a
                 // reader can have the whole thing. A faithful stream gets its
@@ -493,38 +398,10 @@ impl ca::EventSink for DesktopEventSink {
             }
             ca::AgentEvent::ToolExecutionEnd {
                 tool_call_id,
-                tool_name,
                 result,
                 is_error,
                 ..
             } => {
-                if tool_name == FINAL_ANSWER_TOOL {
-                    if !is_error {
-                        if let Some(answer) = result
-                            .details
-                            .get(FINAL_ANSWER_DETAILS_KEY)
-                            .and_then(serde_json::Value::as_str)
-                        {
-                            let _ = self
-                                .events
-                                .send(desktop::AgentEvent::MessagePhase {
-                                    run: self.run.clone(),
-                                    phase: desktop::MessagePhase::FinalAnswer,
-                                })
-                                .await;
-                            let suffix = self
-                                .final_answer_streams
-                                .lock()
-                                .expect("final answer stream lock")
-                                .finish(&tool_call_id, answer);
-                            if !suffix.is_empty() {
-                                self.emit_agent_message_chunk(desktop::ContentBlock::text(suffix))
-                                    .await;
-                            }
-                        }
-                    }
-                    return;
-                }
                 let locations = locations_from_details(&result.details);
                 if let Some(execution) = &self.execution {
                     execution.tool_finished(

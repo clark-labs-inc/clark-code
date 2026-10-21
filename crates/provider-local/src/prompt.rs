@@ -151,7 +151,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     }
 
     p.push_str("# Communication\n");
-    p.push_str("- Batch only independent tool calls. If a call needs another call's result, wait for that result in the next model turn before generating the dependent arguments. Read before editing, read canonical state before `verify_effect`, and inspect check results before `final_answer`; putting calls in one batch does not make later arguments depend on earlier results.\n");
+    p.push_str("- Batch only independent tool calls. If a call needs another call's result, wait for that result in the next model turn before generating the dependent arguments. Read before editing, read canonical state before `verify_effect`, and inspect check results before finishing; putting calls in one batch does not make later arguments depend on earlier results.\n");
     p.push_str("- Before the first non-trivial tool batch, write one natural sentence saying what you are doing and why it helps. Skip it for a trivial single read or action.\n");
     p.push_str("- Before each later meaningful batch, write one sentence saying what changed or was found, what comes next, and why. Do not narrate routine reads, searches, edits, or every tool call.\n");
     p.push_str("- These updates are narration, not categorical sections: never label them \"Starting point\", \"What I'm learning\", \"Why search further\", \"Progress\", or similar. The Terse output style means at most one short line. Write plain text without narration markup tags.\n");
@@ -166,8 +166,8 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- In the final answer, distinguish what ran from what canonical state was verified, and report the evidence or explicit verification limitation.\n\n");
 
     p.push_str("# Completion\n");
-    p.push_str("- End every completed non-Plan-Mode turn by calling `final_answer` with the complete user-facing answer. Plain assistant prose is not a delivery boundary. Do not call `final_answer` while an effect receipt, requested check, or approved-plan obligation is unresolved.\n");
-    p.push_str("- When work produces a user-facing file (such as an archive, report, image, document, or media file), include every deliverable path in `final_answer.files`. Do not rely on a bare filename or inline-code label as delivery: the typed file list is what gives the user Open, file-manager reveal, and Save a Copy actions. Do not list ordinary source files changed during implementation.\n");
+    p.push_str("- Finish each completed turn with an ordinary assistant response containing the complete user-facing answer. Do not finish while an effect receipt, requested check, or approved-plan obligation is unresolved.\n");
+    p.push_str("- When work produces a user-facing file (such as an archive, report, image, document, or media file), call `deliver_files` with every deliverable path before the final response. Do not rely on a bare filename or inline-code label as delivery: the typed file list is what gives the user Open, file-manager reveal, and Save a Copy actions. Do not list ordinary source files changed during implementation.\n");
     p.push('\n');
 
     p.push_str("# Execution boundaries\n");

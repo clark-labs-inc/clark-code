@@ -236,20 +236,9 @@ fn typed_llm_failures_map_to_typed_stream_errors() {
 }
 
 #[test]
-fn tool_protocol_exhaustion_does_not_become_provider_transport_failure() {
-    let (kind, message) = stream_error(LlmError::ToolProtocolExhausted(
-        "model ignored named final_answer".into(),
-    ));
-
-    assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
-    assert!(message.starts_with(crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX));
-    assert!(!message.starts_with("provider_error:"));
-}
-
-#[test]
 fn model_tool_result_preserves_large_text_byte_for_byte() {
     let expected = format!("begin:{}:end", "0123456789abcdef".repeat(8_000));
-    let result = tool_result_from_outcome(
+    let result = super::tools::tool_result_from_outcome(
         crate::tools::ToolOutcome::ok(expected.clone()),
         false,
         false,
@@ -265,7 +254,7 @@ fn model_visible_typed_details_survive_tool_result_translation() {
     let run_id = "019c9a79-72ba-7192-bd1b-8a2d3ad24dc1";
     let outcome = crate::tools::ToolOutcome::ok("Started scan.")
         .with_model_visible_details(serde_json::json!({"run_id": run_id}));
-    let result = tool_result_from_outcome(outcome, false, false);
+    let result = super::tools::tool_result_from_outcome(outcome, false, false);
 
     assert!(matches!(
         result.content.as_slice(),

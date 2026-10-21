@@ -52,21 +52,12 @@ fn final_body() -> String {
 }
 
 fn final_answer_body(text: &str) -> String {
-    let arguments = json!({"content": text}).to_string();
     [
-        format!(
-            "data: {}",
-            json!({"choices":[{"delta":{"tool_calls":[{
-                "index": 0,
-                "id": "final-answer",
-                "function": {"name": "final_answer", "arguments": arguments}
-            }]}}]})
-        ),
-        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#.to_string(),
+        format!("data: {}", json!({"choices": [{"delta": {"content": text}}]})),
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#.to_string(),
         "data: [DONE]".to_string(),
         String::new(),
-    ]
-    .join("\n\n")
+    ].join("\n\n")
 }
 
 fn compact_summary_body() -> String {

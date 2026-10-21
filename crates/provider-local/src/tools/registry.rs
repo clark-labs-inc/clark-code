@@ -87,7 +87,7 @@ impl ToolRegistry {
             Arc::new(plan::EnterPlanMode),
             Arc::new(plan::UpdatePlan),
             Arc::new(diagnostics::CheckDiagnostics),
-            Arc::new(final_answer::FinalAnswer),
+            Arc::new(deliver_files::DeliverFiles),
             Arc::new(deferred::ToolSearch::new(deferred_catalog)),
         ] {
             registry.register_eager(tool);

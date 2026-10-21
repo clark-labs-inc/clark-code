@@ -33,11 +33,6 @@ pub(super) fn map_loop_error_with_completion_state(
     goal_completed: bool,
     unresolved_effects: &[String],
 ) -> MappedLoopError {
-    let completion_delivery_failed = matches!(
-        &error,
-        agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(message))
-            if tool_protocol_exhausted_message(message).is_some()
-    );
     let mapped = map_loop_error(error);
 
     // `update_goal(complete)` is a typed terminal receipt emitted before the
@@ -52,7 +47,7 @@ pub(super) fn map_loop_error_with_completion_state(
         return MappedLoopError::completed();
     }
 
-    if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) && !completion_delivery_failed {
+    if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) {
         return mapped;
     }
 
@@ -85,18 +80,6 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
             MappedLoopError::failed(
                 RunFailureKind::PlatformKeyRejected,
                 "platform_key_rejected",
-                message,
-            )
-        }
-        agent_loop::StreamError::Fatal(message)
-            if tool_protocol_exhausted_message(&message).is_some() =>
-        {
-            let message = tool_protocol_exhausted_message(&message)
-                .unwrap_or(&message)
-                .to_string();
-            MappedLoopError::failed(
-                RunFailureKind::ToolProtocolExhausted,
-                "tool_protocol_exhausted",
                 message,
             )
         }
@@ -136,12 +119,6 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
             "model returned an empty response".to_string(),
         ),
     }
-}
-
-fn tool_protocol_exhausted_message(message: &str) -> Option<&str> {
-    message
-        .strip_prefix(crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX)
-        .map(str::trim)
 }
 
 impl MappedLoopError {
@@ -205,13 +182,6 @@ mod tests {
             (
                 agent_loop::StreamError::Fatal("provider_error:upstream failed".into()),
                 RunFailureKind::ProviderError,
-            ),
-            (
-                agent_loop::StreamError::Fatal(format!(
-                    "{}model ignored named final_answer",
-                    crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
-                )),
-                RunFailureKind::ToolProtocolExhausted,
             ),
             (
                 agent_loop::StreamError::ContextOverflow("too large".into()),
@@ -294,23 +264,6 @@ mod tests {
             agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
                 "provider returned no content".into(),
             )),
-            false,
-            true,
-            &[],
-        );
-        assert_eq!(mapped.status, RunStatus::Done);
-        assert_eq!(mapped.failure_kind, None);
-        assert_eq!(mapped.run_error, None);
-        assert_eq!(mapped.ui_error, None);
-    }
-
-    #[test]
-    fn completed_goal_stays_done_when_tool_protocol_repair_is_exhausted() {
-        let mapped = map_loop_error_with_completion_state(
-            agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(format!(
-                "{}model returned no structured tool call",
-                crate::agent_adapter::TOOL_PROTOCOL_EXHAUSTED_PREFIX
-            ))),
             false,
             true,
             &[],
