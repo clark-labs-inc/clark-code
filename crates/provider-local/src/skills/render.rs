@@ -103,7 +103,10 @@ mod tests {
         replace_catalog_section(&mut prompt, Some(&catalog("new")));
         assert_eq!(
             prompt,
-            format!("Base instructions.\n{}Later host context.\n", catalog("new"))
+            format!(
+                "Base instructions.\n{}Later host context.\n",
+                catalog("new")
+            )
         );
         replace_catalog_section(&mut prompt, None);
         assert_eq!(prompt, "Base instructions.\nLater host context.\n");
