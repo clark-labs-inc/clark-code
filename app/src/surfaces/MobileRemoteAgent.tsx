@@ -1,22 +1,15 @@
 import { useSessionStore } from "../store/sessionStore";
 import { isBusy, liveSessions, mergedOf } from "../store/sessionStore.runtime";
 import type { PromptReceipt } from "../core-bridge/bridge";
-import { codeKeyAccountBinding } from "../lib/account";
 import { type CloudCreds } from "../lib/cloudHistory";
 import {
   ackCodeRemoteCommand,
   downloadCodeRemoteAttachment,
   type CodeRemoteCommand,
-  type CodeRemoteProjectRegistration,
 } from "../lib/mobileRemote";
 import type { PendingAttachment } from "../lib/attachments";
-import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { mobileRemotePermissionResponse } from "../lib/mobileRemotePermission";
 import { notify } from "../lib/notify";
-import {
-  repositoryIdentityForRoot,
-  repositoriesUnderRoot,
-} from "../lib/repositoryKnowledge";
 import {
   mobileRemoteModelSettings,
   type MobileRemoteModelSettings,
@@ -28,62 +21,10 @@ import {
 import { mobileRemoteCommandWaitsForIdle } from "../lib/mobileRemoteCommandScheduling";
 
 
+import { applyProject, startMobileRemoteSession } from "../lib/mobileRemoteProjects";
+export { currentProjects } from "../lib/mobileRemoteProjects";
+
 import { remoteFailure, remoteFailureReceipt } from "../lib/mobileRemoteFailure";
-
-function leaf(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() || path || "Project";
-}
-
-function localProjectId(root: string): string {
-  return `local:${encodeURIComponent(root)}`;
-}
-
-function sshProjectId(hostId: string, root: string): string {
-  return `ssh:${encodeURIComponent(hostId)}:${encodeURIComponent(root)}`;
-}
-
-export function currentProjects(): CodeRemoteProjectRegistration[] {
-  const state = useSessionStore.getState();
-  const projects: CodeRemoteProjectRegistration[] = [];
-  const cwd = state.localSettings.cwd.trim();
-  if (cwd) {
-    const repositories = repositoriesUnderRoot(cwd);
-    if (repositories.length > 0) {
-      for (const repository of repositories) {
-        projects.push({
-          id: localProjectId(repository.root),
-          kind: "local",
-          display_name: leaf(repository.root),
-          root: repository.root,
-          trusted: true,
-          repository_fingerprint: repository.fingerprint,
-        });
-      }
-    } else {
-      const repository = repositoryIdentityForRoot(cwd);
-      projects.push({
-        id: localProjectId(cwd),
-        kind: "local",
-        display_name: leaf(cwd),
-        root: cwd,
-        trusted: true,
-        repository_fingerprint: repository?.fingerprint ?? null,
-      });
-    }
-  }
-  const accountScope = codeKeyAccountBinding(useSessionStore.getState().auth);
-  for (const host of loadSshHosts(accountScope).filter(hostReady)) {
-    projects.push({
-      id: sshProjectId(host.id, host.remoteRoot.trim()),
-      kind: "ssh",
-      display_name: hostLabel(host),
-      root: host.remoteRoot.trim(),
-      ssh_alias: host.host.trim(),
-      trusted: true,
-    });
-  }
-  return projects;
-}
 
 function commandText(command: CodeRemoteCommand): string {
   const value = command.request.text;
@@ -234,52 +175,22 @@ export function commandWaitsForTargetIdle(command: CodeRemoteCommand): boolean {
   );
 }
 
-function projectFor(command: CodeRemoteCommand): CodeRemoteProjectRegistration | null {
-  if (!command.project_id) return null;
-  return currentProjects().find((project) => project.id === command.project_id) ?? null;
-}
-
-async function applyProject(command: CodeRemoteCommand): Promise<void> {
-  const project = projectFor(command);
-  if (!project) {
-    remoteFailure("project_unavailable", "Project is not available on this desktop host.");
-  }
-  const state = useSessionStore.getState();
-  state.selectProvider("local");
-  if (project.kind === "local") {
-    state.setProjectMode("local");
-    state.setProjectFolder(project.root);
-    return;
-  }
-  const host = loadSshHosts(codeKeyAccountBinding(state.auth)).find((item) => sshProjectId(item.id, item.remoteRoot.trim()) === project.id);
-  if (!host) {
-    remoteFailure(
-      "project_unavailable",
-      "SSH project is no longer configured on this desktop host.",
-    );
-  }
-  state.setProjectMode("remote");
-  state.setSelectedHostId(host.id);
-}
-
 async function submitPrompt(
   creds: CloudCreds,
   command: CodeRemoteCommand,
 ): Promise<{
   modelSettings: MobileRemoteModelSettings | null;
-  promptReceipt: PromptReceipt;
+  promptReceipt: PromptReceipt | null;
 }> {
   const text = commandText(command);
   const attachments = await commandAttachments(creds, command);
   const modelSettings = mobileRemoteModelSettings(command);
-  if (!text && attachments.length === 0) {
+  if (command.command_type !== "start_session" && !text && attachments.length === 0) {
     remoteFailure("invalid_command", "Clark Code command has no prompt or attachments.");
   }
-  await applyProject(command);
-  const state = useSessionStore.getState();
+  if (command.command_type !== "start_session") await applyProject(command);
   if (command.command_type === "start_session") {
-    state.endSession();
-    await useSessionStore.getState().startSession();
+    await startMobileRemoteSession(command);
   } else if (!command.desktop_id) {
     remoteFailure(
       "invalid_command",
@@ -308,7 +219,7 @@ async function submitPrompt(
   if (modelSettings) {
     await useSessionStore.getState().updateModelSettings(modelSettings);
   }
-  const promptReceipt = await sendRemotePrompt(text, attachments);
+  const promptReceipt = text || attachments.length ? await sendRemotePrompt(text, attachments) : null;
   return { modelSettings, promptReceipt };
 }
 
@@ -406,6 +317,7 @@ export async function runCommand(
   instanceId: string,
   command: CodeRemoteCommand,
   stillCurrent: () => boolean,
+  publishProjects: () => Promise<void>,
 ): Promise<void> {
   const accepted = await ackCodeRemoteCommand(
     creds,
@@ -427,7 +339,8 @@ export async function runCommand(
     if (command.command_type === "start_session" || command.command_type === "send_message") {
       const submitted = await submitPrompt(creds, command);
       modelSettings = submitted.modelSettings;
-      runId = submitted.promptReceipt.runId;
+      runId = submitted.promptReceipt?.runId ?? null;
+      if (command.command_type === "start_session") await publishProjects();
     } else if (command.command_type === "cancel_run") {
       await cancelRun(command);
     } else if (command.command_type === "resolve_permission") {
@@ -443,7 +356,9 @@ export async function runCommand(
       remoteFailure("invalid_command", `Unsupported Clark Code command: ${command.command_type}`);
     }
     if (!stillCurrent()) return;
-    const sessionId = command.desktop_id ?? useSessionStore.getState().session?.id ?? null;
+    const sessionId = command.command_type === "start_session"
+      ? useSessionStore.getState().session?.id ?? null
+      : command.desktop_id ?? useSessionStore.getState().session?.id ?? null;
     const completed = await ackCodeRemoteCommand(
       creds,
       hostId,

@@ -10,7 +10,9 @@ import { productRequest } from "../product/productBridge";
 
 export type CodeRemoteProjectKind = "local" | "ssh";
 export const CODE_REMOTE_PROTOCOL_VERSION = 2;
-export const CODE_REMOTE_CAPABILITIES: CodeRemoteCommand["command_type"][] = [
+export type CodeRemoteCapability = CodeRemoteCommand["command_type"] | "session_creation";
+export const CODE_REMOTE_CAPABILITIES: CodeRemoteCapability[] = [
+  "session_creation",
   "start_session",
   "send_message",
   "cancel_run",
@@ -37,7 +39,7 @@ export interface CodeRemoteHostRegistration {
   arch: string;
   appVersion: string;
   protocolVersion: number;
-  capabilities: CodeRemoteCommand["command_type"][];
+  capabilities: CodeRemoteCapability[];
   models: { id: string; label: string; reasoning_effort: string }[];
   projects: CodeRemoteProjectRegistration[];
 }

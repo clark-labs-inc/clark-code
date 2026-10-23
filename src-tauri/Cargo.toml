@@ -49,7 +49,7 @@ perf-profiling-tauri-spans = [
 ]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
 agent-core = { path = "../crates/agent-core", features = ["native"] }
@@ -64,8 +64,8 @@ desktop-integrations = { path = "../crates/desktop-integrations" }
 diagnostic-capture = { package = "clark-capture", path = "../vendor/clark-capture", features = ["tracing"], optional = true }
 libreoffice-pure = "0.5.5"
 
-tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
+tauri = { version = "2.12.4", features = [] }
+tauri-plugin-shell = "2.5.0"
 # Fast, interactive in-app terminal: a real PTY (colors, resize, interactive
 # programs) streamed to an xterm.js view in the chat.
 portable-pty = "0.9"
@@ -76,19 +76,19 @@ exec-sandbox = { path = "../crates/exec-sandbox" }
 exec-sandbox-windows = { path = "../crates/exec-sandbox-windows" }
 base64 = "0.23"
 # Native folder picker for selecting the local coding project root.
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = "2.8.3"
 # Native OS notifications — fire when a run finishes/fails or blocks on a
 # permission gate while the window is in the background.
-tauri-plugin-notification = "2"
+tauri-plugin-notification = "2.7.0"
 # Secure in-app auto-update: checks a signed manifest on the downloads CDN,
 # verifies the Ed25519 signature, swaps the bundle, and relaunches.
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
+tauri-plugin-updater = "2.14.0"
+tauri-plugin-process = "2.4.0"
 # Optional native Google sign-in surface for products that use a system-browser
 # OAuth flow. Product-owned code decides whether and how to exchange the token.
 # Product deep-link support. A branded configuration owns the URL scheme and
 # callback semantics; the neutral development bundle defines no auth callback.
-tauri-plugin-deep-link = "2"
+tauri-plugin-deep-link = "2.6.2"
 # Generic native HTTP support used by foundation-owned artifact reads.
 reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "query", "cookies", "rustls"] }
 # Percent-encode desktop conversation ids in REST sync URLs.
@@ -121,8 +121,8 @@ glob = "0.3"
 # feature re-emits the URL to the running instance so `on_open_url` still fires.
 # macOS delivers deep links to the running app natively, so this is desktop-only.
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
-tauri-plugin-autostart = "2"
-tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-autostart = "2.7.0"
+tauri-plugin-single-instance = { version = "2.5.4", features = ["deep-link"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

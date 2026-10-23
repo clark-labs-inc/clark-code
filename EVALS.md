@@ -56,6 +56,79 @@ suppression or unrelated migration fix is included. This is deterministic
 source-path evidence; no hosted model call, installed-app replacement,
 packaged acceptance, deployment, or release was performed.
 
+## Rendering flicker follow-up — 2026-10-19
+
+No new flicker was reproduced on the existing rendering fixes with the current
+uncommitted dependency candidate. All 22 prior rendering/harness source hashes
+match. [Fresh frames, recordings, and validation](docs/element-presence/2026-10-19/README.md)
+retain 2,037 samples across 20 dialog cases in Chromium/WebKit with both motion
+preferences: zero entry-opacity reversals, competing CSS opacity transitions,
+rapid-reopen replacements, settled displacement, or page errors; every exit has
+intermediate frames. The four transcript configurations retain 12 commands
+without overlap, replacement, duplicates, or status/finish height shift.
+
+Frozen frontend installation, typecheck, 848 tests (3 skipped), and production
+build pass. No app or harness source changed. Existing dirty work is preserved
+apart from this additive catalog entry. Historical failing traces still identify
+destroyed presence ownership and the WebKit WAAPI-to-CSS opacity handoff as the
+original boundaries. Installed-native/OS-window creation, arbitrary popovers,
+packaged acceptance, and the pending Rust upgrade Clippy migration are outside
+this follow-up. No active app restart, paid tests, commit, or release occurred.
+
+2026-10-20 replay: the same 25 rendering/dependency source hashes still match.
+[Fresh retained observations](docs/element-presence/2026-10-20/README.md)
+pass all 20 dialog cases (2,041 frame samples) and four transcript configurations
+with zero entry reversals, competing opacity transitions, node replacements,
+overlap, or status/finish height shift. Frozen install, typecheck, 856 frontend
+tests (3 skipped), and production build pass. Current mobile-project work and
+all other existing changes are preserved; only evidence and this catalog entry
+were added. No new app/harness patch or native-app interaction occurred; the
+same native, packaged, untested-popover, and Rust-migration limits apply.
+
+2026-10-21 replay at `921f564a`: all 32 sources in the previous rendering
+receipt remain identical. [Fresh frame evidence](docs/element-presence/2026-10-21/README.md)
+passes 20 dialog cases (2,044 samples) and four transcript configurations with
+zero opacity reversals, competing CSS fades, node replacements, overlap, or
+status/finish height shift. Frozen install, typecheck, 856 frontend tests
+(3 skipped), and production build pass. No app/harness patch was needed; all
+29 existing changed/untracked files are preserved apart from this additive
+catalog update. The prior native/packaged/paint-coverage limits still apply.
+
+2026-10-22 replay at `fde7f2db`: the same 32 monitored sources and all existing
+frontend/harness dirty files match the previous receipt; no intervening commits
+change those trees. [Fresh observations](docs/element-presence/2026-10-22/README.md)
+pass 20 dialog cases (2,041 samples) and four transcript configurations, with
+zero opacity reversals, competing CSS fades, replacements, overlap, or
+status/finish height shift. Full frontend gates were not repeated on unchanged
+sources; the prior 856-test/build receipt remains separately identified.
+No app/harness patch was made. All 33 prior changed/untracked files are
+preserved except for this additive catalog entry; native/packaged/paint limits
+remain unchanged.
+
+## Dependency upgrade candidate — 2026-10-18
+
+The [upgrade review](docs/dependency-upgrades/2026-10-18.md) and
+[source-bound receipt](docs/dependency-upgrades/2026-10-18/validation.json)
+record Rust 1.99.1, React 19.3.1, Tauri 2.12.4 with matching frontend/native
+plugins, Vite 8.3.4, and 32 compatible direct Rust dependency release updates.
+Frozen frontend installation, typecheck, 848 frontend tests (3 skipped), and
+production build pass; a downstream extension composition passes 873 tests
+(3 skipped) and its build. Isolated CI-pinned pnpm 10.34.5 frozen installation
+passes with lifecycle scripts disabled.
+
+All 20 dialog presence cases and all four transcript geometry configurations
+pass in Chromium/WebKit with normal/reduced motion: no entry-opacity reversal,
+command overlap/replacement, or status/finish height shift. Rust format, 802
+Nextest tests (8 skipped), core WASM check, macOS native all-targets compilation,
+and 13 public-boundary checks pass. Existing local agent path overrides apply.
+
+**This candidate is not fully qualified:** strict Rust 1.99.1 Clippy fails on
+new fixed-chunk iteration warnings in the protocol and capture crates. A diagnostic probe
+also identifies provider needless-borrow and large-error warnings. Minimal
+source migration permission remains pending under the shared-file rules; no
+lint suppression is committed. This is not exact-source hosted CI, Linux or
+Windows native qualification, a packaged app, or a release. Downstream source
+pins and compiler/cache identities still require coordinated consumption.
 
 ## Dialog appearance and presence — 2026-10-18
 

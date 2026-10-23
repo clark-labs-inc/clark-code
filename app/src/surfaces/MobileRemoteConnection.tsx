@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useSessionStore } from "../store/sessionStore";
 import { authConnection } from "../lib/auth";
@@ -19,6 +19,8 @@ export function MobileRemoteAgent() {
   const [pollingFailed, setPollingFailed] = useState(false);
   const auth = useSessionStore((state) => state.auth);
   const cwd = useSessionStore((state) => state.localSettings.cwd);
+  const activeProjectRoot = useSessionStore((state) => state.activeProjectRoot);
+  const refreshPresenceRef = useRef<(() => void) | null>(null);
   const owner = codeKeyAccountBinding(auth);
   const connection = authConnection(auth);
 
@@ -98,6 +100,7 @@ export function MobileRemoteAgent() {
     };
 
     const presenceLoop = new MobileRemotePresenceLoop(refreshPresence);
+    refreshPresenceRef.current = () => presenceLoop.refreshNow();
 
     const pollCommands = async () => {
       if (stopped || !accountStillCurrent() || commandBusy) return;
@@ -132,6 +135,7 @@ export function MobileRemoteAgent() {
             () => !stopped && (
               cloudCreds(useSessionStore.getState().auth)?.accountScope === creds.accountScope
             ),
+            refreshPresence,
           );
         }
         consecutiveFailures = 0;
@@ -164,13 +168,17 @@ export function MobileRemoteAgent() {
     document.addEventListener("visibilitychange", resumeWhenVisible);
     return () => {
       stopped = true;
+      refreshPresenceRef.current = null;
       presenceLoop.stop();
       window.clearInterval(timer);
       window.removeEventListener("online", resumeAfterOutage);
       window.removeEventListener("focus", resumeAfterOutage);
       document.removeEventListener("visibilitychange", resumeWhenVisible);
     };
-  }, [owner, connection, cwd]);
+  }, [owner, connection]);
+
+  // Folder changes must publish choices without abandoning an accepted command.
+  useEffect(() => { refreshPresenceRef.current?.(); }, [cwd, activeProjectRoot]);
 
   if (!auth || connection !== "ready" || (!registrationFailed && !pollingFailed)) return null;
   return <div role="status" className="border-b border-border bg-surface px-4 py-2 text-sm text-ink">

@@ -35,6 +35,10 @@ src-tauri/binaries/
 # Demo recordings (local only)
 videos/
 
+# Generated visual QA media; keep compact JSON receipts and written conclusions.
+/docs/element-presence/**/*.png
+/docs/element-presence/**/*.webm
+
 # Local QA, prototypes, marketing exports, and screen-capture output — never
 # commit generated or machine-specific evidence here.
 .test-ui-screenshots/

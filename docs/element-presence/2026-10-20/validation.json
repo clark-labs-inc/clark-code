@@ -1,0 +1,121 @@
+{
+  "recorded_at": "2026-10-20T16:02:52.304212+00:00",
+  "head": "5b4a6b26b5b357ff7b7e33ae7aed86551efecac8",
+  "conclusion": "No current rendering flicker reproduced; no app or harness patch.",
+  "scope": "Isolated random-port Vite fixtures using Chromium/WebKit, synthetic local accounts, and mock bridge. No production-app restart, user-tab control, hosted-provider tests, commit, signing or release.",
+  "source_sha256": {
+    "app/src/AuthenticatedWorkspace.tsx": "226cf4c9e70c60b7d38229d1be3f830cee58ec54de740d112427719c47a3d10a",
+    "app/src/index.css": "60389edeb76d44dc0d8e72ba35e86a8ca9ab30449975a7a3f1de20ab1c0c7626",
+    "app/src/lib/activity.spec.ts": "135715d49c4b61c7008db1c4f663fd8b65deeddc4070d3a70a284f73e33ec15a",
+    "app/src/lib/activity.ts": "6f1309dbe79a43eeb3cf884ad12ae3fc93b8b9c8151e2815dcca4f67ee1765be",
+    "app/src/lib/motion.spec.ts": "a81ac8ef9ff849c8c4ac28e4512b98dfec923d34d3d47374ed0fab28185333d1",
+    "app/src/lib/motion.ts": "ff7553acf16ef1779a89107afbe863c8221b8a0bd8b2e98230b94f66cef84b65",
+    "app/src/lib/motionPolicy.spec.ts": "839bfd783f5702da7a20e1e6c2dd2340062ff34840ca89caaf771326273d81dd",
+    "app/src/perf/hotPath.perf.spec.ts": "79b409817417e188ce1acba39809894be230ff504d7ecab164fe0e807981155b",
+    "app/src/surfaces/CommandPalette.tsx": "c31a266747e8a8ed41d70de71dc3ce816646b4ad3753a9bc2aca1a0112913b74",
+    "app/src/surfaces/Conversation.tsx": "d7c8259bbe17b82779587249da15a6b0ea93d5460f34547042d407790c8237ab",
+    "app/src/surfaces/ConversationActivity.tsx": "971a79630444180e7be7f9c6fe49dfe1d2992f6cd8283556683bfb4d6ed850fc",
+    "app/src/surfaces/McpSettings.tsx": "3e5ad05f23fee8bb431221bc389bf7bd5740b9a9b9bae9914c0b88646c3efde8",
+    "app/src/surfaces/Message.spec.tsx": "965a715631a2d0fdda7d332df0e99d6d92ec763c0bb315a0dea32ae2b6d582ed",
+    "app/src/surfaces/Message.tsx": "f9067c627f18aca0d4d0366ec155f8102d811dff64dabd9f080dbb67a6625418",
+    "app/src/surfaces/NewProjectDialog.tsx": "525da94156dcdbba3c540f6fc04945d3ba31561e4e27e88400645882f5c363de",
+    "app/src/surfaces/Settings.tsx": "0b48a6b5edfcc67e02f38c9262dc8efbb0b93d9be429be4e00246ef27c1d6c20",
+    "app/src/surfaces/SshSettings.tsx": "a9590094b197aa2cefa6595f50c2fe2b1f43d1c6ffc0e57d5a8d96267de6acfc",
+    "harness/element-presence.mjs": "94e1f0ddbf37a62d6b2591bd6fed545b52a77d8320e102b4e28c86ba78af20d0",
+    "harness/fixtures/conversation-progress.mjs": "9343327e6e0ba5ce1b894768f424428695ddbdd7fec2069e33c743bbc514754e",
+    "harness/package.json": "493bc5e2f97e893e12f5a688afdfa9fb102816f0dfd3a30c921c2ed0452736fa",
+    "harness/rendering-stability.mjs": "27cc52a7b457a2e8a0aa496c745414cefbfce9e851f1e0269a82c46e3373a6ee",
+    "harness/conversation-motion.mjs": "eb6d37cf15a0860cf1e60fb9b522ef4e001244fab5dafad99471436efcbea83a",
+    "app/package.json": "eba6dc730dbfaf237eb7fa5fd4e671455a85695e6417ae2cc9fa4eb95b2f33f0",
+    "app/pnpm-lock.yaml": "92f276ebb4caab335f2adfbb1892a60bbfb7fe66aeb131488fd28d16b1276181",
+    "harness/pnpm-lock.yaml": "bb72f52def8116fbb5108ac70b116c9b2281d2137b62ee365658edb3c38c2f6b",
+    "app/src/lib/mobileRemote.spec.ts": "e22a84058d846000f34a89d00b9afa8975d941a0187fc720fe0f813cee50ecdc",
+    "app/src/lib/mobileRemote.ts": "00ba7f912414082afa547250271ea4894c0839575375bd7a8625bc50606b7d0f",
+    "app/src/lib/mobileRemoteProjects.spec.ts": "6ebea664f5ef6358d15030822c3025686f2a975724f5734c68cfda170ba4925c",
+    "app/src/lib/mobileRemoteProjects.ts": "a336c4ac24bb14d50f0dc1ab75eda5e10ef3e6bbdfa888b33d0bf92b20dacf98",
+    "app/src/surfaces/MobileRemoteAgent.creation.spec.ts": "d1bbbeca645451fdc49578353bf84fd806c5491691d63a39774777618b592bcf",
+    "app/src/surfaces/MobileRemoteAgent.tsx": "afb1ded9232168c0436d9c3bd30dcfbc109ba9e8fad987c9ba29d57179f07f35",
+    "app/src/surfaces/MobileRemoteConnection.tsx": "069e4e798ce81f48d9ad22a2296f4438abbcc56c89d28a17a56bc714c9488952"
+  },
+  "previous_source_hashes_unchanged": 25,
+  "preserved_existing_changes": {
+    ".github/workflows/ci.yml": "b78b10f1c84a59314f7829d2726a5f39e70cd9e5b4394df360de4e3ad27d1e99",
+    ".github/workflows/sandbox.yml": "a1dd231df38adcb6b7998ac585f096f65d166188bf28401df1a38121118b329e",
+    ".github/workflows/windows-native-containment.yml": "e014b6aaabe04ce9fdc7cd896ad86419987b9bcadaf9feeb53ac7b7ef4363270",
+    "Cargo.lock": "abe96acf1dfe4c7d628a0d1d4920902ac0114947b240ef172526e8c7be15d30c",
+    "EVALS.md": "e9ec814e4f6d231f1aee1deca628aae70280ed0fdb31c736c188fbd83f470f16",
+    "app/package.json": "eba6dc730dbfaf237eb7fa5fd4e671455a85695e6417ae2cc9fa4eb95b2f33f0",
+    "app/pnpm-lock.yaml": "92f276ebb4caab335f2adfbb1892a60bbfb7fe66aeb131488fd28d16b1276181",
+    "app/src/lib/mobileRemote.spec.ts": "e22a84058d846000f34a89d00b9afa8975d941a0187fc720fe0f813cee50ecdc",
+    "app/src/lib/mobileRemote.ts": "00ba7f912414082afa547250271ea4894c0839575375bd7a8625bc50606b7d0f",
+    "app/src/lib/mobileRemoteProjects.spec.ts": "6ebea664f5ef6358d15030822c3025686f2a975724f5734c68cfda170ba4925c",
+    "app/src/lib/mobileRemoteProjects.ts": "a336c4ac24bb14d50f0dc1ab75eda5e10ef3e6bbdfa888b33d0bf92b20dacf98",
+    "app/src/surfaces/MobileRemoteAgent.creation.spec.ts": "d1bbbeca645451fdc49578353bf84fd806c5491691d63a39774777618b592bcf",
+    "app/src/surfaces/MobileRemoteAgent.tsx": "afb1ded9232168c0436d9c3bd30dcfbc109ba9e8fad987c9ba29d57179f07f35",
+    "app/src/surfaces/MobileRemoteConnection.tsx": "069e4e798ce81f48d9ad22a2296f4438abbcc56c89d28a17a56bc714c9488952",
+    "docs/dependency-upgrades/2026-10-18.md": "d397f7de1311a57d1b45eea0c37d55fd72039d32bf50a348193a655d2e7c7442",
+    "docs/dependency-upgrades/2026-10-18/validation.json": "5cc1efe5e1e95a3440fac0f3939651d0cf45b08334832db94041b4fe4d1345d7",
+    "docs/element-presence/2026-10-19/README.md": "49113943de93c996903d86b0a85fbc4d56105cd101b7d9ad234f20d0ea34b27c",
+    "docs/element-presence/2026-10-19/chromium-no-preference.webm": "0509ace810d5ca5e454f20e6dbd80fd56c3e48f93490e44ba1e9763f86907b4a",
+    "docs/element-presence/2026-10-19/frames.json": "5d103d744b5fd737a3640023bfec67ba0c36e7f33c96f146fabb1d78279c54ae",
+    "docs/element-presence/2026-10-19/session.png": "22cf79011b1296653e3a69c8013f0352218f9949262cc5bc6f4d8862b10daec4",
+    "docs/element-presence/2026-10-19/transcript-results.json": "23086383eb14dc14038a9766b9bf1f21c635ac6c9b7101879d577851729f2526",
+    "docs/element-presence/2026-10-19/validation.json": "5259fca1d300443e69a126adc46c20dbea032bba4a6b27fca0b35d84bf9c3648",
+    "docs/element-presence/2026-10-19/webkit-reduce.webm": "d57128fc2b7f3e2858cb6e2745b1c2a5edbb4009c78d08e6dbb4664fe804041d",
+    "rust-toolchain.toml": "ca67e66659a82661386e5a08471c913cb8b3f7c7ce37592207d3f513589a41c2",
+    "src-tauri/Cargo.toml": "37aa11f2c6e528668b96a52dbda9b2506cca29b7780cf5f58f7e4f5daab33dfb"
+  },
+  "dialog_summary": {
+    "cases": 20,
+    "configurations": 4,
+    "sampled_frames": 2041,
+    "entry_reversals": 0,
+    "competing_css_opacity_transition_samples": 0,
+    "rapid_node_replacements": 0,
+    "minimum_intermediate_exit_frames": 3,
+    "maximum_settled_displacement_px": 0,
+    "page_errors": 0
+  },
+  "transcript_summary": {
+    "configurations": 4,
+    "commands_per_configuration": 12,
+    "sampled_command_frames": [
+      72,
+      72,
+      59,
+      60
+    ],
+    "maximum_overlap_px": 0,
+    "node_replacements": 0,
+    "duplicates": 0,
+    "maximum_status_height_shift_px": 0,
+    "maximum_finish_height_shift_px": 0,
+    "page_errors": 0
+  },
+  "checks": {
+    "frozen_frontend_install": "passed",
+    "typecheck": "passed",
+    "frontend_tests": {
+      "passed": 856,
+      "skipped": 3
+    },
+    "production_build": "passed",
+    "element_presence": "passed",
+    "rendering_stability": "passed"
+  },
+  "limitations": [
+    "No native OS-window creation or packaged WebView journey.",
+    "Untested popovers and frame-rate performance are not qualified.",
+    "Known Rust upgrade Clippy blockers are outside this replay and unchanged.",
+    "Today's raw videos stay disposable in target; durable evidence is the retained frame samples and conclusion."
+  ],
+  "preservation_verification": {
+    "existing_non_catalog_files_unchanged": true,
+    "catalog_original_bytes_preserved_by_addition_only": true
+  },
+  "artifact_sha256": {
+    "README.md": "f81905af139f99691e6b562391089e4113eb37c2049776c85314a19f4e3be822",
+    "frames.json": "460540d63d691373fe55a920b72e87b61ebc7a5b07213e6e25f73a1d8bac97b2",
+    "transcript-results.json": "b7dccf67300ac6e7357a73124688d8c74f1d65e0edb5d82cffde3cb88365c901"
+  }
+}

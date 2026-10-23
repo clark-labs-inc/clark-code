@@ -43,6 +43,7 @@ describe("registerCodeRemoteHost", () => {
         appVersion: "0.1.92",
         protocolVersion: 2,
         capabilities: [
+          "session_creation",
           "start_session",
           "send_message",
           "cancel_run",

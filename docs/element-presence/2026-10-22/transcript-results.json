@@ -1,0 +1,194 @@
+[
+  {
+    "label": "chromium no-preference",
+    "history": {
+      "mounted": 60,
+      "faded": 0
+    },
+    "disclosureShift": 0,
+    "readingShift": 0,
+    "scrollbackShift": 0,
+    "retainedFence": true,
+    "completion": {
+      "initial": 25.796875,
+      "final": 25.796875,
+      "intermediate": 0
+    },
+    "progress": {
+      "commentary": {
+        "height": 1053.484375,
+        "anchorTop": 658.25
+      },
+      "runningTool": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "completedTool": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "done": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "appendHeight": 32,
+      "statusHeightShift": 0,
+      "statusAnchorShift": 0,
+      "finishHeightShift": 0
+    },
+    "commands": {
+      "frames": 72,
+      "overlap": 0,
+      "replaced": 0,
+      "duplicates": 0,
+      "retainedTitles": true,
+      "count": 12,
+      "visible": 12
+    },
+    "errors": []
+  },
+  {
+    "label": "chromium reduce",
+    "history": {
+      "mounted": 60,
+      "faded": 0
+    },
+    "disclosureShift": 0,
+    "readingShift": 0,
+    "scrollbackShift": 0,
+    "retainedFence": true,
+    "completion": {
+      "initial": 25.796875,
+      "final": 25.796875,
+      "intermediate": 0
+    },
+    "progress": {
+      "commentary": {
+        "height": 1053.484375,
+        "anchorTop": 658.25
+      },
+      "runningTool": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "completedTool": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "done": {
+        "height": 1085.484375,
+        "anchorTop": 626.25
+      },
+      "appendHeight": 32,
+      "statusHeightShift": 0,
+      "statusAnchorShift": 0,
+      "finishHeightShift": 0
+    },
+    "commands": {
+      "frames": 72,
+      "overlap": 0,
+      "replaced": 0,
+      "duplicates": 0,
+      "retainedTitles": true,
+      "count": 12,
+      "visible": 12
+    },
+    "errors": []
+  },
+  {
+    "label": "webkit no-preference",
+    "history": {
+      "mounted": 60,
+      "faded": 0
+    },
+    "disclosureShift": 0,
+    "readingShift": 0,
+    "scrollbackShift": 0,
+    "retainedFence": true,
+    "completion": {
+      "initial": 25.796875,
+      "final": 25.796875,
+      "intermediate": 0
+    },
+    "progress": {
+      "commentary": {
+        "height": 1053.484375,
+        "anchorTop": 659.25
+      },
+      "runningTool": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "completedTool": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "done": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "appendHeight": 31.984375,
+      "statusHeightShift": 0,
+      "statusAnchorShift": 0,
+      "finishHeightShift": 0
+    },
+    "commands": {
+      "frames": 57,
+      "overlap": 0,
+      "replaced": 0,
+      "duplicates": 0,
+      "retainedTitles": true,
+      "count": 12,
+      "visible": 12
+    },
+    "errors": []
+  },
+  {
+    "label": "webkit reduce",
+    "history": {
+      "mounted": 60,
+      "faded": 0
+    },
+    "disclosureShift": 0,
+    "readingShift": 0,
+    "scrollbackShift": 0,
+    "retainedFence": true,
+    "completion": {
+      "initial": 25.796875,
+      "final": 25.796875,
+      "intermediate": 0
+    },
+    "progress": {
+      "commentary": {
+        "height": 1053.484375,
+        "anchorTop": 659.25
+      },
+      "runningTool": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "completedTool": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "done": {
+        "height": 1085.46875,
+        "anchorTop": 627.25
+      },
+      "appendHeight": 31.984375,
+      "statusHeightShift": 0,
+      "statusAnchorShift": 0,
+      "finishHeightShift": 0
+    },
+    "commands": {
+      "frames": 59,
+      "overlap": 0,
+      "replaced": 0,
+      "duplicates": 0,
+      "retainedTitles": true,
+      "count": 12,
+      "visible": 12
+    },
+    "errors": []
+  }
+]

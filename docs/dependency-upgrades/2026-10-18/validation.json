@@ -1,0 +1,807 @@
+{
+  "date": "2026-10-18",
+  "baseline": "5b4a6b26b5b357ff7b7e33ae7aed86551efecac8",
+  "status": "candidate_with_clippy_migration_blockers",
+  "rust": "1.99.1",
+  "node": "24.14.0",
+  "local_pnpm": "11.20.0",
+  "ci_pnpm_lock_install": "10.34.5, isolated install with lifecycle scripts disabled",
+  "source_sha256": {
+    "rust-toolchain.toml": "ca67e66659a82661386e5a08471c913cb8b3f7c7ce37592207d3f513589a41c2",
+    "Cargo.lock": "abe96acf1dfe4c7d628a0d1d4920902ac0114947b240ef172526e8c7be15d30c",
+    "app/package.json": "eba6dc730dbfaf237eb7fa5fd4e671455a85695e6417ae2cc9fa4eb95b2f33f0",
+    "app/pnpm-lock.yaml": "92f276ebb4caab335f2adfbb1892a60bbfb7fe66aeb131488fd28d16b1276181",
+    "src-tauri/Cargo.toml": "37aa11f2c6e528668b96a52dbda9b2506cca29b7780cf5f58f7e4f5daab33dfb",
+    ".github/workflows/ci.yml": "b78b10f1c84a59314f7829d2726a5f39e70cd9e5b4394df360de4e3ad27d1e99",
+    ".github/workflows/sandbox.yml": "a1dd231df38adcb6b7998ac585f096f65d166188bf28401df1a38121118b329e",
+    ".github/workflows/windows-native-containment.yml": "e014b6aaabe04ce9fdc7cd896ad86419987b9bcadaf9feeb53ac7b7ef4363270",
+    "crates/exec-sandbox-protocol/src/lib.rs": "2e5e173b3fdfd6f33a7738cd75b0825707de162532a9b9e0663ae92c6b40a693",
+    "crates/provider-local/src/engine.rs": "0f52c5740882ad2b58e5fa138935c31a97453baf20dcff699b12f7345d01f471",
+    "crates/provider-local/src/llm.rs": "70fc7f0020895bff7b5925f825e5df4ae26427509acf458c1cf32479326b6603",
+    "crates/provider-local/src/llm/retry.rs": "1c0c2aaaaf4145a95901e6f07cee0620fc3416af5faac9b1cc426a208dda1c62",
+    "crates/computer-use/src/simulator.rs": "daa2079e5b48a8f21437748702e60794a50238added5ca99d6dbb774746cea69"
+  },
+  "direct_crates_reviewed": 75,
+  "direct_releases_updated": [
+    {
+      "name": "async-trait",
+      "before": [
+        "0.1.91"
+      ],
+      "after": [
+        "0.1.92"
+      ]
+    },
+    {
+      "name": "base64",
+      "before": [
+        "0.21.7",
+        "0.22.1",
+        "0.23.0"
+      ],
+      "after": [
+        "0.21.7",
+        "0.22.1",
+        "0.23.1"
+      ]
+    },
+    {
+      "name": "cc",
+      "before": [
+        "1.4.0"
+      ],
+      "after": [
+        "1.8.0"
+      ]
+    },
+    {
+      "name": "flate2",
+      "before": [
+        "1.1.9"
+      ],
+      "after": [
+        "1.1.10"
+      ]
+    },
+    {
+      "name": "futures",
+      "before": [
+        "0.3.33"
+      ],
+      "after": [
+        "0.3.34"
+      ]
+    },
+    {
+      "name": "htmd",
+      "before": [
+        "0.5.5"
+      ],
+      "after": [
+        "0.5.6"
+      ]
+    },
+    {
+      "name": "ignore",
+      "before": [
+        "0.4.31"
+      ],
+      "after": [
+        "0.4.33"
+      ]
+    },
+    {
+      "name": "indexmap",
+      "before": [
+        "1.9.3",
+        "2.14.0"
+      ],
+      "after": [
+        "1.9.3",
+        "2.14.2"
+      ]
+    },
+    {
+      "name": "interprocess",
+      "before": [
+        "2.4.3"
+      ],
+      "after": [
+        "2.4.6"
+      ]
+    },
+    {
+      "name": "libc",
+      "before": [
+        "0.2.189"
+      ],
+      "after": [
+        "0.2.191"
+      ]
+    },
+    {
+      "name": "libreoffice-pure",
+      "before": [
+        "0.5.5"
+      ],
+      "after": [
+        "0.5.8"
+      ]
+    },
+    {
+      "name": "objc2",
+      "before": [
+        "0.6.4"
+      ],
+      "after": [
+        "0.6.5"
+      ]
+    },
+    {
+      "name": "pdf-extract",
+      "before": [
+        "0.12.0"
+      ],
+      "after": [
+        "0.12.1"
+      ]
+    },
+    {
+      "name": "reqwest",
+      "before": [
+        "0.13.4"
+      ],
+      "after": [
+        "0.13.5"
+      ]
+    },
+    {
+      "name": "serde_json",
+      "before": [
+        "1.0.151"
+      ],
+      "after": [
+        "1.0.154"
+      ]
+    },
+    {
+      "name": "similar",
+      "before": [
+        "3.1.1"
+      ],
+      "after": [
+        "3.2.0"
+      ]
+    },
+    {
+      "name": "tauri",
+      "before": [
+        "2.11.5"
+      ],
+      "after": [
+        "2.12.4"
+      ]
+    },
+    {
+      "name": "tauri-build",
+      "before": [
+        "2.6.3"
+      ],
+      "after": [
+        "2.7.3"
+      ]
+    },
+    {
+      "name": "tauri-plugin-autostart",
+      "before": [
+        "2.5.1"
+      ],
+      "after": [
+        "2.7.0"
+      ]
+    },
+    {
+      "name": "tauri-plugin-deep-link",
+      "before": [
+        "2.4.9"
+      ],
+      "after": [
+        "2.6.2"
+      ]
+    },
+    {
+      "name": "tauri-plugin-dialog",
+      "before": [
+        "2.7.2"
+      ],
+      "after": [
+        "2.8.3"
+      ]
+    },
+    {
+      "name": "tauri-plugin-notification",
+      "before": [
+        "2.3.3"
+      ],
+      "after": [
+        "2.7.0"
+      ]
+    },
+    {
+      "name": "tauri-plugin-process",
+      "before": [
+        "2.3.1"
+      ],
+      "after": [
+        "2.4.0"
+      ]
+    },
+    {
+      "name": "tauri-plugin-shell",
+      "before": [
+        "2.3.5"
+      ],
+      "after": [
+        "2.5.0"
+      ]
+    },
+    {
+      "name": "tauri-plugin-single-instance",
+      "before": [
+        "2.4.3"
+      ],
+      "after": [
+        "2.5.4"
+      ]
+    },
+    {
+      "name": "tauri-plugin-updater",
+      "before": [
+        "2.10.1"
+      ],
+      "after": [
+        "2.14.0"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "before": [
+        "1.0.69",
+        "2.0.19"
+      ],
+      "after": [
+        "1.0.69",
+        "2.0.21"
+      ]
+    },
+    {
+      "name": "tokio",
+      "before": [
+        "1.53.1"
+      ],
+      "after": [
+        "1.53.3"
+      ]
+    },
+    {
+      "name": "tokio-util",
+      "before": [
+        "0.7.19"
+      ],
+      "after": [
+        "0.7.20"
+      ]
+    },
+    {
+      "name": "toml",
+      "before": [
+        "0.8.2",
+        "0.9.12+spec-1.1.0",
+        "1.1.4+spec-1.1.0"
+      ],
+      "after": [
+        "0.8.2",
+        "1.1.8+spec-1.1.0"
+      ]
+    },
+    {
+      "name": "uuid",
+      "before": [
+        "1.24.0"
+      ],
+      "after": [
+        "1.28.0"
+      ]
+    },
+    {
+      "name": "zeroize",
+      "before": [
+        "1.9.0"
+      ],
+      "after": [
+        "1.9.1"
+      ]
+    }
+  ],
+  "remaining_breaking_or_explicitly_pinned_releases": [
+    {
+      "name": "rusqlite",
+      "locked": [
+        "0.32.1"
+      ],
+      "latest": "0.40.2"
+    },
+    {
+      "name": "screencapturekit",
+      "locked": [
+        "8.0.1"
+      ],
+      "latest": "11.0.0"
+    },
+    {
+      "name": "sha2",
+      "locked": [
+        "0.10.9"
+      ],
+      "latest": "0.11.1"
+    },
+    {
+      "name": "xcap",
+      "locked": [
+        "0.4.0"
+      ],
+      "latest": "0.9.8"
+    },
+    {
+      "name": "zip",
+      "locked": [
+        "4.6.1",
+        "8.6.0"
+      ],
+      "latest": "9.0.5"
+    }
+  ],
+  "checks": {
+    "cargo_fmt": "passed",
+    "strict_clippy": "failed: chunks_exact_to_as_chunks in exec-sandbox-protocol (lines 134, 533) and computer-use/simulator.rs (line 512); migration probe additionally found needless_borrows_for_generic_args and result_large_err in provider-local; no lint suppression committed",
+    "rust_nextest": {
+      "passed": 802,
+      "skipped": 8,
+      "run_id": "c491798f-6ed3-463f-9ad3-7f35d65175ae"
+    },
+    "core_wasm": "passed",
+    "native_macos_all_targets_check": "passed",
+    "cargo_locked_metadata": "passed",
+    "declared_msrv_above_1_94": [],
+    "frontend_frozen_install": "passed",
+    "frontend_typecheck": "passed",
+    "frontend_tests": {
+      "passed": 848,
+      "skipped": 3
+    },
+    "frontend_build": "passed",
+    "composed_frontend_tests": {
+      "passed": 873,
+      "skipped": 3
+    },
+    "composed_frontend_build": "passed",
+    "ci_pnpm_frozen_install": "passed",
+    "public_boundary": {
+      "passed": 13
+    },
+    "element_presence": [
+      {
+        "engine": "chromium",
+        "reducedMotion": "no-preference",
+        "cases": [
+          {
+            "name": "palette",
+            "entryReversals": 0,
+            "exitFrames": 11,
+            "removedAt": 215.69999992847443,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "session",
+            "entryReversals": 0,
+            "exitFrames": 14,
+            "removedAt": 218.89999997615814,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "settings",
+            "entryReversals": 0,
+            "exitFrames": 8,
+            "removedAt": 137.69999992847443,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "mcp",
+            "entryReversals": 0,
+            "exitFrames": 14,
+            "removedAt": 220.09999990463257,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "ssh",
+            "entryReversals": 0,
+            "exitFrames": 13,
+            "removedAt": 219.79999995231628,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          }
+        ],
+        "errors": []
+      },
+      {
+        "engine": "chromium",
+        "reducedMotion": "reduce",
+        "cases": [
+          {
+            "name": "palette",
+            "entryReversals": 0,
+            "exitFrames": 12,
+            "removedAt": 136.39999997615814,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "session",
+            "entryReversals": 0,
+            "exitFrames": 13,
+            "removedAt": 137.89999997615814,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "settings",
+            "entryReversals": 0,
+            "exitFrames": 13,
+            "removedAt": 138.60000002384186,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "mcp",
+            "entryReversals": 0,
+            "exitFrames": 12,
+            "removedAt": 138,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "ssh",
+            "entryReversals": 0,
+            "exitFrames": 13,
+            "removedAt": 135.80000007152557,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          }
+        ],
+        "errors": []
+      },
+      {
+        "engine": "webkit",
+        "reducedMotion": "no-preference",
+        "cases": [
+          {
+            "name": "palette",
+            "entryReversals": 0,
+            "exitFrames": 6,
+            "removedAt": 229,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "session",
+            "entryReversals": 0,
+            "exitFrames": 6,
+            "removedAt": 229,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "settings",
+            "entryReversals": 0,
+            "exitFrames": 3,
+            "removedAt": 147,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "mcp",
+            "entryReversals": 0,
+            "exitFrames": 6,
+            "removedAt": 233,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "ssh",
+            "entryReversals": 0,
+            "exitFrames": 6,
+            "removedAt": 232,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          }
+        ],
+        "errors": []
+      },
+      {
+        "engine": "webkit",
+        "reducedMotion": "reduce",
+        "cases": [
+          {
+            "name": "palette",
+            "entryReversals": 0,
+            "exitFrames": 5,
+            "removedAt": 151,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "session",
+            "entryReversals": 0,
+            "exitFrames": 5,
+            "removedAt": 148,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "settings",
+            "entryReversals": 0,
+            "exitFrames": 5,
+            "removedAt": 148,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "mcp",
+            "entryReversals": 0,
+            "exitFrames": 5,
+            "removedAt": 147,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          },
+          {
+            "name": "ssh",
+            "entryReversals": 0,
+            "exitFrames": 5,
+            "removedAt": 147,
+            "retainedDuringExit": true,
+            "sameNode": true,
+            "settledDisplacement": 0
+          }
+        ],
+        "errors": []
+      }
+    ],
+    "rendering_stability": [
+      {
+        "label": "chromium no-preference",
+        "history": {
+          "mounted": 60,
+          "faded": 0
+        },
+        "disclosureShift": 0,
+        "readingShift": 0,
+        "scrollbackShift": 0,
+        "retainedFence": true,
+        "completion": {
+          "initial": 25.796875,
+          "final": 25.796875,
+          "intermediate": 0
+        },
+        "progress": {
+          "commentary": {
+            "height": 1053.484375,
+            "anchorTop": 658.25
+          },
+          "runningTool": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "completedTool": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "done": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "appendHeight": 32,
+          "statusHeightShift": 0,
+          "statusAnchorShift": 0,
+          "finishHeightShift": 0
+        },
+        "commands": {
+          "frames": 72,
+          "overlap": 0,
+          "replaced": 0,
+          "duplicates": 0,
+          "retainedTitles": true,
+          "count": 12,
+          "visible": 12
+        },
+        "errors": []
+      },
+      {
+        "label": "chromium reduce",
+        "history": {
+          "mounted": 60,
+          "faded": 0
+        },
+        "disclosureShift": 0,
+        "readingShift": 0,
+        "scrollbackShift": 0,
+        "retainedFence": true,
+        "completion": {
+          "initial": 25.796875,
+          "final": 25.796875,
+          "intermediate": 0
+        },
+        "progress": {
+          "commentary": {
+            "height": 1053.484375,
+            "anchorTop": 658.25
+          },
+          "runningTool": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "completedTool": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "done": {
+            "height": 1085.484375,
+            "anchorTop": 626.25
+          },
+          "appendHeight": 32,
+          "statusHeightShift": 0,
+          "statusAnchorShift": 0,
+          "finishHeightShift": 0
+        },
+        "commands": {
+          "frames": 72,
+          "overlap": 0,
+          "replaced": 0,
+          "duplicates": 0,
+          "retainedTitles": true,
+          "count": 12,
+          "visible": 12
+        },
+        "errors": []
+      },
+      {
+        "label": "webkit no-preference",
+        "history": {
+          "mounted": 60,
+          "faded": 0
+        },
+        "disclosureShift": 0,
+        "readingShift": 0,
+        "scrollbackShift": 0,
+        "retainedFence": true,
+        "completion": {
+          "initial": 25.796875,
+          "final": 25.796875,
+          "intermediate": 0
+        },
+        "progress": {
+          "commentary": {
+            "height": 1053.484375,
+            "anchorTop": 659.25
+          },
+          "runningTool": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "completedTool": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "done": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "appendHeight": 31.984375,
+          "statusHeightShift": 0,
+          "statusAnchorShift": 0,
+          "finishHeightShift": 0
+        },
+        "commands": {
+          "frames": 60,
+          "overlap": 0,
+          "replaced": 0,
+          "duplicates": 0,
+          "retainedTitles": true,
+          "count": 12,
+          "visible": 12
+        },
+        "errors": []
+      },
+      {
+        "label": "webkit reduce",
+        "history": {
+          "mounted": 60,
+          "faded": 0
+        },
+        "disclosureShift": 0,
+        "readingShift": 0,
+        "scrollbackShift": 0,
+        "retainedFence": true,
+        "completion": {
+          "initial": 25.796875,
+          "final": 25.796875,
+          "intermediate": 0
+        },
+        "progress": {
+          "commentary": {
+            "height": 1053.484375,
+            "anchorTop": 659.25
+          },
+          "runningTool": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "completedTool": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "done": {
+            "height": 1085.46875,
+            "anchorTop": 627.25
+          },
+          "appendHeight": 31.984375,
+          "statusHeightShift": 0,
+          "statusAnchorShift": 0,
+          "finishHeightShift": 0
+        },
+        "commands": {
+          "frames": 59,
+          "overlap": 0,
+          "replaced": 0,
+          "duplicates": 0,
+          "retainedTitles": true,
+          "count": 12,
+          "visible": 12
+        },
+        "errors": []
+      }
+    ]
+  },
+  "scope": {
+    "local_agent_path_override": true,
+    "paid_provider_tests": false,
+    "production_app_restarted": false,
+    "signed_or_packaged": false,
+    "linux_or_windows_native_check": false,
+    "downstream_product_revision_updated": false,
+    "commit_created": false,
+    "release_published": false
+  }
+}
