@@ -38,6 +38,8 @@ videos/
 # Generated visual QA media; keep compact JSON receipts and written conclusions.
 /docs/element-presence/**/*.png
 /docs/element-presence/**/*.webm
+/docs/element-presence/**/frames.json
+/docs/element-presence/**/transcript-results.json
 
 # Local QA, prototypes, marketing exports, and screen-capture output — never
 # commit generated or machine-specific evidence here.

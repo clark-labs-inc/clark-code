@@ -58,6 +58,11 @@ packaged acceptance, deployment, or release was performed.
 
 ## Rendering flicker follow-up — 2026-10-19
 
+Storage update: October 19–22 raw frame/transcript traces and generated media
+remain local and ignored. The versioned README conclusions and `validation.json`
+receipts retain counts, hashes and limitations; raw traces are not available
+from a fresh checkout and must be regenerated with the named harnesses.
+
 No new flicker was reproduced on the existing rendering fixes with the current
 uncommitted dependency candidate. All 22 prior rendering/harness source hashes
 match. [Fresh frames, recordings, and validation](docs/element-presence/2026-10-19/README.md)

@@ -30,7 +30,7 @@ so no speculative rendering patch was applied.
 
 ## Fresh evidence
 
-- [Frame samples](frames.json): 2,037 samples across 20 cases, testing first
+- Frame samples (local `frames.json`): 2,037 samples across 20 cases, testing first
   mount, settled exit, and close/reopen after 50 ms. Command palette, new
   session, Settings, MCP, and SSH dialogs pass in Chromium and WebKit with both
   motion preferences. There are zero opacity reversals, competing CSS opacity
@@ -42,7 +42,7 @@ so no speculative rendering patch was applied.
   versioned.
   Composer text is preserved across every transition. Duplicate raw recording
   copies were removed after comparing their hashes to the retained files.
-- [Transcript results](transcript-results.json): four engine/motion
+- Transcript results (local `transcript-results.json`): four engine/motion
   configurations, each retaining 12 visible command identities and titles.
   Across 59–72 sampled command frames per configuration there is zero overlap,
   replacement, duplicate rows, or status/finish height shift. History, scroll
@@ -77,3 +77,7 @@ These measurements cover DOM presence, opacity, and geometry. They do not
 establish a frame-rate benchmark, native OS-window creation, a packaged WebView
 journey, or every untested popover. The pending Rust compiler/Clippy migration
 belongs to the separate dependency-upgrade task and remains untouched.
+
+Raw frame/transcript traces are local generated files, ignored by Git. The
+versioned validation receipt and conclusion remain; rerun the listed harnesses
+to reproduce the raw observations on another checkout.

@@ -15,12 +15,12 @@ Those are historical failing frames, not new failures in today's checkout.
 
 ## Current evidence
 
-- [Dialog frame samples](frames.json): 2,041 animation-frame observations
+- Dialog frame samples (local `frames.json`): 2,041 animation-frame observations
   across 20 first-mount, settled-exit, and rapid-reopen cases. Five dialogs pass
   in Chromium/WebKit with normal/reduced motion. There are zero entry reversals,
   competing CSS opacity transitions, replaced nodes, settled displacement, or
   page errors. Every exit includes intermediate frames, with a minimum of three.
-- [Transcript results](transcript-results.json): four engine/motion
+- Transcript results (local `transcript-results.json`): four engine/motion
   configurations, 12 commands each, and 59–72 sampled command frames per
   configuration. No overlap, replacement, duplicate rows, status/finish height
   shift, disrupted scroll ownership, or lost Markdown identity was found.
@@ -39,3 +39,7 @@ No production app or user tab was controlled or restarted. No hosted model
 calls, signing, commit, or release occurred. Native OS-window creation,
 packaged WebView behavior, untested popovers, and frame-rate performance remain
 unverified. The separate Rust upgrade's Clippy migration remains untouched.
+
+Raw frame/transcript traces are local generated files, ignored by Git. The
+versioned validation receipt and conclusion remain; rerun the listed harnesses
+to reproduce the raw observations on another checkout.

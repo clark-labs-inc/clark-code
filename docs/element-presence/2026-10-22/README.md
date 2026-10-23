@@ -8,13 +8,13 @@ were preserved. No app or harness patch was made.
 
 ## Fresh evidence
 
-- [Dialog frames](frames.json): 2,041 animation-frame observations across 20
+- Dialog frames (local `frames.json`): 2,041 animation-frame observations across 20
   first-mount, settled-exit, and 50 ms close/reopen cases. Palette, new session,
   Settings, MCP, and SSH pass in Chromium/WebKit with normal/reduced motion.
   Entry reversals, competing CSS opacity transitions, rapid node replacements,
   settled displacement, and page errors are zero. Every exit has intermediate
   frames; the minimum is three.
-- [Transcript results](transcript-results.json): four engine/motion
+- Transcript results (local `transcript-results.json`): four engine/motion
   configurations with 12 commands each and 57–72 sampled command frames.
   Overlap, duplicates, replacements, status/finish height shifts, and page errors
   are zero. History, scroll ownership, disclosure, short-answer geometry, and
@@ -49,3 +49,7 @@ test, signing, commit, or release occurred. Native OS-window creation,
 installed/packaged WebView behavior, untested popovers, and GPU paint/frame-rate
 performance remain unverified. The separate Rust-upgrade Clippy work is
 unchanged and outside this replay.
+
+Raw frame/transcript traces are local generated files, ignored by Git. The
+versioned validation receipt and conclusion remain; rerun the listed harnesses
+to reproduce the raw observations on another checkout.
