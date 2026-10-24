@@ -199,15 +199,10 @@ impl Provider for LocalAgentProvider {
             ToolRegistry::empty()
         };
         if local.tools_enabled {
-            if let Some(api_key) = local.api_key.clone().filter(|_| {
-                !local
-                    .image_generation_excluded_models
-                    .contains(&local.model)
-            }) {
-                registry.enable_image_generation(crate::tools::image::ImageGenerationConfig {
-                    base_url: local.base_url.clone(),
-                    api_key,
-                });
+            if let Some(image_config) =
+                configuration_runtime::image_generation_config(&local, &local.model)
+            {
+                registry.enable_image_generation(image_config);
             }
             if local.browser_enabled {
                 let browser = local.browser_binary.clone().ok_or_else(|| {

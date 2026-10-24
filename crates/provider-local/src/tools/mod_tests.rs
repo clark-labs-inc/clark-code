@@ -284,6 +284,7 @@ fn mutating_tools_are_flagged() {
     signed_in.enable_image_generation(image::ImageGenerationConfig {
         base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
+        model: "host-selected-model".into(),
     });
     assert!(signed_in.get("generate_image").unwrap().mutating());
 }

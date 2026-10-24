@@ -69,19 +69,7 @@ impl LocalAgentProvider {
         })?;
         let reasoning = capability.reasoning_effort.as_deref();
         let config = self.config()?;
-        let image_config = config
-            .api_key
-            .clone()
-            .filter(|_| {
-                !config
-                    .image_generation_excluded_models
-                    .iter()
-                    .any(|id| id == model)
-            })
-            .map(|api_key| crate::tools::image::ImageGenerationConfig {
-                base_url: config.base_url.clone(),
-                api_key,
-            });
+        let image_config = image_generation_config(config, model);
         if config.tools_enabled {
             let registry = self
                 .registry
@@ -233,6 +221,26 @@ impl LocalAgentProvider {
     }
 }
 
+pub(super) fn image_generation_config(
+    config: &LocalConfig,
+    model: &str,
+) -> Option<crate::tools::image::ImageGenerationConfig> {
+    config
+        .api_key
+        .clone()
+        .filter(|_| {
+            !config
+                .image_generation_excluded_models
+                .iter()
+                .any(|id| id == model)
+        })
+        .map(|api_key| crate::tools::image::ImageGenerationConfig {
+            base_url: config.base_url.clone(),
+            api_key,
+            model: model.to_string(),
+        })
+}
+
 fn replace_memory_section(prompt: &mut String, section: Option<&str>) {
     if let Some(index) = prompt.find(MEMORY_SECTION_MARKER) {
         prompt.truncate(index);
@@ -243,15 +251,5 @@ fn replace_memory_section(prompt: &mut String, section: Option<&str>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn replacing_memory_is_idempotent() {
-        let mut prompt = "base\n# Memory\nold".to_string();
-        replace_memory_section(&mut prompt, Some("\n# Memory\nnew"));
-        assert_eq!(prompt, "base\n# Memory\nnew");
-        replace_memory_section(&mut prompt, None);
-        assert_eq!(prompt, "base");
-    }
-}
+#[path = "configuration_runtime_tests.rs"]
+mod tests;

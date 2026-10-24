@@ -6,22 +6,19 @@
 //! emits a typed artifact instead of relying on a prose convention.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use agent_core::domain::{ArtifactKind, ToolKind};
 use async_trait::async_trait;
 use base64::Engine as _;
-use reqwest::StatusCode;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{arg_str, arg_str_opt, ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome};
 
+mod relay;
+
 const MAX_PROMPT_BYTES: usize = 16_000;
 const MAX_INPUT_IMAGES: usize = 5;
 const MAX_INPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
-const MAX_OUTPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Clark Code Platform relay configuration. The platform key is user-scoped; the
 /// server alone owns the upstream image-provider credential and billing.
@@ -29,6 +26,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 pub struct ImageGenerationConfig {
     pub base_url: String,
     pub api_key: String,
+    /// Host-selected chat model, used by the relay for billing policy.
+    pub model: String,
 }
 
 pub struct ViewImage;
@@ -265,33 +264,6 @@ impl ToolExecutor for GenerateImage {
     }
 }
 
-impl GenerateImage {
-    async fn generate(
-        &self,
-        prompt: &str,
-        input_images: Vec<String>,
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<GeneratedImage, String> {
-        let client = desktop_http::build_client(desktop_http::ClientOptions {
-            request_timeout: Some(REQUEST_TIMEOUT),
-            user_agent: Some("agent-desktop"),
-            ..Default::default()
-        })
-        .map_err(|error| format!("creating image client: {error}"))?;
-        let url = generation_url(&self.config.base_url);
-        let request = client
-            .post(url)
-            .bearer_auth(&self.config.api_key)
-            .header("idempotency-key", uuid::Uuid::new_v4().to_string())
-            .json(&json!({"prompt": prompt, "input_images": input_images}));
-        let response = tokio::select! {
-            _ = cancel.cancelled() => return Err("image generation cancelled".to_string()),
-            response = request.send() => response.map_err(|error| format!("calling Clark Code image generation: {error}"))?,
-        };
-        parse_generation_response(response).await
-    }
-}
-
 struct WorkspaceImage {
     path: PathBuf,
     mime_type: &'static str,
@@ -332,82 +304,6 @@ async fn read_workspace_image(path: &str, ctx: &ToolCtx) -> Result<WorkspaceImag
         mime_type,
         bytes,
     })
-}
-
-#[derive(Deserialize)]
-struct ImageGenerationResponse {
-    #[serde(default)]
-    data: Vec<ImageGenerationData>,
-}
-
-#[derive(Deserialize)]
-struct ImageGenerationData {
-    b64_json: String,
-    #[serde(default, alias = "mime_type")]
-    media_type: Option<String>,
-}
-
-struct GeneratedImage {
-    bytes: Vec<u8>,
-    mime_type: &'static str,
-}
-
-async fn parse_generation_response(response: reqwest::Response) -> Result<GeneratedImage, String> {
-    let status = response.status();
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| format!("reading Clark Code image response: {error}"))?;
-    if status != StatusCode::OK {
-        return Err(format!(
-            "Clark Code image generation returned HTTP {status}: {}",
-            compact_response(&body)
-        ));
-    }
-    let parsed: ImageGenerationResponse = serde_json::from_slice(&body).map_err(|error| {
-        format!(
-            "Clark Code image generation returned an invalid response ({error}): {}",
-            compact_response(&body)
-        )
-    })?;
-    let image = parsed
-        .data
-        .into_iter()
-        .next()
-        .ok_or_else(|| "Clark Code image generation completed without an image".to_string())?;
-    decode_generated_image(image)
-}
-
-fn decode_generated_image(image: ImageGenerationData) -> Result<GeneratedImage, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(image.b64_json.as_bytes())
-        .map_err(|error| format!("decoding generated image: {error}"))?;
-    if bytes.len() > MAX_OUTPUT_IMAGE_BYTES {
-        return Err(format!(
-            "generated image is too large (max {MAX_OUTPUT_IMAGE_BYTES} bytes)"
-        ));
-    }
-    let detected = detect_image_mime(&bytes).ok_or_else(|| {
-        "Clark Code returned bytes that are not a supported raster image".to_string()
-    })?;
-    if let Some(reported) = image.media_type.as_deref() {
-        let reported = normalize_image_mime(reported).ok_or_else(|| {
-            "Clark Code returned an unsupported generated image MIME type".to_string()
-        })?;
-        if reported != detected {
-            return Err(format!(
-                "Clark Code returned inconsistent generated image MIME types ({reported} vs {detected})"
-            ));
-        }
-    }
-    Ok(GeneratedImage {
-        bytes,
-        mime_type: detected,
-    })
-}
-
-fn generation_url(base_url: &str) -> String {
-    format!("{}/images/generations", base_url.trim_end_matches('/'))
 }
 
 fn string_array(args: &Value, key: &str) -> Result<Vec<String>, String> {
@@ -539,199 +435,5 @@ fn normalize_image_mime(value: &str) -> Option<&'static str> {
     }
 }
 
-fn compact_response(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .chars()
-        .take(300)
-        .collect::<String>()
-        .replace('\n', " ")
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sandbox::Sandbox;
-    use crate::tools::ReadTracker;
-    use std::path::Path;
-    use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
-
-    const PNG_1X1: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-
-    fn ctx(dir: &Path) -> ToolCtx {
-        ToolCtx {
-            sandbox: Arc::new(Sandbox::new(dir).unwrap()),
-            executor: Arc::new(crate::exec::LocalExecutor),
-            reads: Arc::new(Mutex::new(ReadTracker::default())),
-            cancel: CancellationToken::new(),
-            background: Arc::new(crate::background::BackgroundTasks::default()),
-            session: Arc::new(tokio::sync::Mutex::new(
-                crate::loop_state::SessionState::default(),
-            )),
-            progress: None,
-            agent_progress: None,
-            call_progress: None,
-            model_override: None,
-        }
-    }
-
-    fn docs_ctx(dir: &Path) -> ToolCtx {
-        let mut context = ctx(dir);
-        context.sandbox = Arc::new(Sandbox::new(dir).unwrap().with_docs(dir.to_path_buf()));
-        context
-    }
-
-    #[tokio::test]
-    async fn view_image_returns_a_typed_image_for_a_contained_png() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("design.png"),
-            base64::engine::general_purpose::STANDARD
-                .decode(PNG_1X1)
-                .unwrap(),
-        )
-        .unwrap();
-
-        let outcome = ViewImage
-            .invoke(json!({"path": "design.png"}), &ctx(dir.path()))
-            .await;
-
-        assert!(!outcome.is_error, "{}", outcome.content);
-        assert_eq!(outcome.images.len(), 1);
-        assert_eq!(outcome.images[0].mime_type, "image/png");
-        assert_eq!(outcome.locations[0].path, "design.png");
-        assert!(outcome.artifacts.is_empty());
-    }
-
-    #[tokio::test]
-    async fn view_image_promotes_managed_workspace_image_to_a_durable_artifact() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("spectro.png");
-        std::fs::write(
-            &path,
-            base64::engine::general_purpose::STANDARD
-                .decode(PNG_1X1)
-                .unwrap(),
-        )
-        .unwrap();
-
-        let outcome = ViewImage
-            .invoke(json!({"path": "spectro.png"}), &docs_ctx(dir.path()))
-            .await;
-
-        assert!(!outcome.is_error, "{}", outcome.content);
-        assert_eq!(outcome.artifacts.len(), 1);
-        let artifact = &outcome.artifacts[0];
-        let canonical = path.canonicalize().unwrap();
-        assert_eq!(artifact.id, format!("shot:{}", canonical.display()));
-        assert_eq!(artifact.title, "spectro.png");
-        assert_eq!(artifact.kind, ArtifactKind::Image);
-        assert_eq!(artifact.mime_type.as_deref(), Some("image/png"));
-        assert_eq!(artifact.uri.as_deref(), canonical.to_str());
-    }
-
-    #[tokio::test]
-    async fn view_image_rejects_non_image_bytes() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("not-an-image.png"), "not image bytes").unwrap();
-
-        let outcome = ViewImage
-            .invoke(json!({"path": "not-an-image.png"}), &ctx(dir.path()))
-            .await;
-
-        assert!(outcome.is_error);
-        assert!(outcome.content.contains("validated from bytes"));
-    }
-
-    #[test]
-    fn image_wire_helpers_validate_mime_and_match_output_extensions() {
-        assert_eq!(
-            detect_image_mime(b"\x89PNG\r\n\x1a\nrest"),
-            Some("image/png")
-        );
-        assert_eq!(
-            normalize_image_mime("image/jpeg; charset=binary"),
-            Some("image/jpeg")
-        );
-        assert_eq!(prompt_slug("A neon fox / city"), "a-neon-fox-city");
-        assert_eq!(
-            requested_output_path(&json!({}), "A neon fox"),
-            "images/a-neon-fox"
-        );
-        assert_eq!(
-            output_path_for_mime("images/a-neon-fox", "image/jpeg"),
-            "images/a-neon-fox.jpg"
-        );
-        assert_eq!(
-            output_path_for_mime("images/a-neon-fox.png", "image/jpeg"),
-            "images/a-neon-fox.jpg"
-        );
-        assert_eq!(
-            output_path_for_mime("images/a-neon-fox.jpeg", "image/jpeg"),
-            "images/a-neon-fox.jpeg"
-        );
-        assert_eq!(
-            output_path_for_mime("images/a-neon-fox.png", "image/png"),
-            "images/a-neon-fox.png"
-        );
-        assert_eq!(preview_prompt("neon fox"), "neon fox");
-        assert!(preview_prompt(&"x".repeat(301)).ends_with('…'));
-        assert_eq!(
-            generation_url("https://product.example/v1/"),
-            "https://product.example/v1/images/generations"
-        );
-    }
-
-    #[test]
-    fn platform_generation_payload_requires_consistent_raster_metadata() {
-        let generated = decode_generated_image(ImageGenerationData {
-            b64_json: PNG_1X1.to_string(),
-            media_type: Some("image/png".to_string()),
-        })
-        .expect("valid platform image response");
-        assert_eq!(generated.mime_type, "image/png");
-        assert!(!generated.bytes.is_empty());
-
-        let error = decode_generated_image(ImageGenerationData {
-            b64_json: PNG_1X1.to_string(),
-            media_type: Some("image/jpeg".to_string()),
-        })
-        .err()
-        .expect("mismatched media type must fail");
-        assert!(error.contains("inconsistent"));
-    }
-
-    #[ignore = "paid live image generation; run only with explicit user authorization"]
-    #[tokio::test]
-    async fn paid_generation_writes_a_filename_matching_the_returned_image_format() {
-        let api_key = std::env::var("IMAGE_GENERATION_E2E_API_KEY")
-            .expect("set IMAGE_GENERATION_E2E_API_KEY for the paid image E2E test");
-        let base_url = std::env::var("IMAGE_GENERATION_E2E_BASE_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:11434/v1".to_string());
-        let dir = tempfile::tempdir().unwrap();
-        let outcome = GenerateImage::new(ImageGenerationConfig { base_url, api_key })
-            .invoke(
-                json!({
-                    "prompt": "A single cobalt-blue circle on an off-white background, no text.",
-                    // Deliberately request the wrong suffix; the relay decides
-                    // the actual output format and the tool must name it truthfully.
-                    "output_path": "paid-e2e/result.png",
-                }),
-                &ctx(dir.path()),
-            )
-            .await;
-
-        assert!(!outcome.is_error, "{}", outcome.content);
-        let mime_type = &outcome.images[0].mime_type;
-        let saved = &outcome.locations[0].path;
-        assert_eq!(
-            saved,
-            &output_path_for_mime("paid-e2e/result.png", mime_type)
-        );
-        assert!(dir.path().join(saved).is_file());
-        assert_eq!(
-            detect_image_mime(&std::fs::read(dir.path().join(saved)).unwrap()),
-            Some(mime_type.as_str())
-        );
-    }
-}
+mod tests;

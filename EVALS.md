@@ -755,3 +755,42 @@ Live private product comparisons and their narrower claim boundaries belong to
 `../clark-desktop-product/crates/clark-desktop-product/EVALS.md`, not this
 foundation's public benchmark lanes. Detailed report in sibling backend:
 `../clark/docs/testing/2026-10-21-clark-code-deepseek-migration-investigation.md`.
+
+
+## Host-selected image relay billing identity — 2026-10-24
+
+`ImageGenerationConfig` now requires the host-selected chat model. Initial
+provider connection and idle model changes use the same configuration
+constructor, and image relay requests send that selection as `source_model`.
+The image-generation tool schema does not expose the billing selection; extra
+model-authored arguments cannot replace it. Generic host-owned model exclusions
+remain supported. The foundation does not select an upstream image provider,
+model, resolution, tier, or billing price.
+
+The deterministic loopback regression
+`image_relay_source_model_tracks_initial_selection_and_model_changes` exercises
+the real registered image tool before and after a model change, verifies both
+HTTP bodies plus authentication/idempotency, writes returned raster bytes to
+the workspace, and checks excluded-model disable/re-enable behavior. A separate
+regression checks key absence and generic exclusions. The existing ignored
+paid-image harness now also requires `IMAGE_GENERATION_E2E_MODEL` for the
+host-selected chat model; it remains opt-in.
+
+Focused Nextest run `0042b47d-b3a1-48ac-8e63-ae5aeb577311`: **9 passed**,
+including the two relay regressions, existing raster/path helpers, mutating-tool
+classification and serialized image schema order. This is offline source-path
+evidence using the current local dependency overrides. No hosted image provider,
+deployed billing boundary, installed application, or release was exercised.
+
+Full provider-local library follow-up: `cargo nextest run -p provider-local
+--lib` passed **672 tests, 7 skipped**, run
+`d5e75406-d0f2-4449-978c-f532319b9688`. `cargo check -p provider-local
+--all-targets` also passed. Strict all-targets Clippy on Rust 1.99.1 is blocked
+by existing `chunks_exact`/`chunks_exact_mut` lints in untouched
+`exec-sandbox-protocol/src/lib.rs:134,533` and
+`computer-use/src/simulator.rs:512`; no unrelated source was changed.
+
+The downstream backend separately verified live 1K generation and reference
+editing with included settlement and zero customer-credit debits. See the
+[backend acceptance evidence](../clark/docs/testing/2026-10-24-free-flux-images.md).
+This does not qualify an installed or packaged Desktop client.

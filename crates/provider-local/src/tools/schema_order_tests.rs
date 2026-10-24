@@ -178,6 +178,7 @@ fn schema_property_order_survives_serialization() {
     image_registry.enable_image_generation(image::ImageGenerationConfig {
         base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
+        model: "host-selected-model".into(),
     });
     wire_order(
         &image_registry,
