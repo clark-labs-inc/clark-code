@@ -59,7 +59,9 @@ async fn image_relay_source_model_tracks_initial_selection_and_model_changes() {
             provider
                 .configure(
                     &session.id,
-                    ProviderConfigurationChange::Model { model: model.into() },
+                    ProviderConfigurationChange::Model {
+                        model: model.into(),
+                    },
                 )
                 .await
                 .unwrap();
@@ -98,7 +100,9 @@ async fn image_relay_source_model_tracks_initial_selection_and_model_changes() {
         provider
             .configure(
                 &session.id,
-                ProviderConfigurationChange::Model { model: model.into() },
+                ProviderConfigurationChange::Model {
+                    model: model.into(),
+                },
             )
             .await
             .unwrap();
